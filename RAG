@@ -1,0 +1,45 @@
+How to Build a Local RAG System with Qwen 3
+
+How to Build a Local RAG System with Qwen 3
+
+Retrieval-Augmented Generation (RAG) is a powerful technique that enhances LLMs by providing them with external knowledge.
+
+Instead of relying solely on its training data, the LLM can retrieve relevant information from a specified document set (like local PDFs) and uses that information to answer questions. This significantly reduces "hallucinations" (incorrect or fabricated information) and allows the LLM to answer questions about specific, private data without needing retraining.
+
+The core RAG process involves:
+
+    Loading and splitting documents into manageable chunks.
+
+    Converting these chunks into numerical representations (embeddings) using an embedding model.
+
+    Storing these embeddings in a vector database for efficient searching.
+
+    When a query comes in, embedding the query and searching the vector database for the most similar document chunks.
+
+    Providing these relevant chunks (context) along with the original query to the LLM to generate an informed answer.
+
+Load Documents in Python
+
+Use LangChain's document loaders to read the PDF content. PyPDFLoader is straightforward for simple PDFs. UnstructuredPDFLoader (requires unstructured[pdf]) can handle more complex layouts but has more dependencies.
+
+Split Documents
+
+Large documents need to be split into smaller chunks suitable for embedding and retrieval. The RecursiveCharacterTextSplitter attempts to split text semantically (at paragraphs, sentences, and so on) before resorting to fixed-size splits. chunk_size determines the maximum size of each chunk (in characters), and chunk_overlap specifies how many characters should overlap between consecutive chunks to maintain context.
+
+Choose and Configure Embedding Model
+
+Embeddings transform text into vectors (lists of numbers) such that semantically similar text chunks have vectors that are close together in multi-dimensional space.
+
+Choose and Configure Embedding Model
+
+Embeddings transform text into vectors (lists of numbers) such that semantically similar text chunks have vectors that are close together in multi-dimensional space.
+
+Option A: Ollama Embeddings
+This approach uses Ollama to serve a dedicated embedding model. nomic-embed-text is a capable open-source model available via Ollama.
+
+
+Option B: Sentence Transformers
+This uses the sentence-transformers library directly within the Python script. It requires installing the library (pip install sentence-transformers) but doesn't need a separate Ollama process for embeddings. Models like all-MiniLM-L6-v2 are fast and lightweight, while all-mpnet-base-v2 offers higher quality.
+
+Set Up Local Vector Store (ChromaDB)
+ChromaDB provides an efficient way to store and search vector embeddings locally. Using a persistent client ensures the indexed data is saved to disk and can be reloaded without re-processing the documents every time.
