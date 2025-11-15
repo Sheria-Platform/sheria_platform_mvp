@@ -1,0 +1,33 @@
+Download Ollama
+
+https://ollama.com/download/
+
+brew install ollama
+brew services start ollama
+
+Model Selection:
+
+Qwen 3 offers two main architectures available through Ollama:
+
+    Dense Models: (like qwen3:0.6b, qwen3:4b, qwen3:8b, qwen3:14b, qwen3:32b) These models activate all their parameters during inference. Their performance is predictable, but resource requirements scale directly with parameter count.
+
+    Mixture-of-Experts (MoE) Models: (like qwen3:30b-a3b) These models contain many "expert" sub-networks but only activate a small fraction for each input token. This allows them to achieve the performance characteristic of their large total parameter count (for example, 30 billion) while having inference costs closer to their smaller active parameter count (for example, 3 billion). They offer a compelling balance of capability and efficiency, especially for reasoning and coding tasks.
+
+Pull and Run Qwen 3 with Ollama
+ollama pull <model_name>
+ollama pull qwen3:30b-a3b
+
+ollama list outside the session to see downloaded models.
+
+Chat with Qwen 3 Terminal:
+Run interactively (optional test): To chat directly with the model from the command line:
+
+ollama run qwen3:8b
+
+Run as a server: For integration with Python scripts (using LangChain), Ollama needs to run as a background server process, exposing an API. Open a separate terminal window and run:
+
+ollama serve
+
+Keep this terminal window open while running the Python scripts. This command starts the server, typically listening on http://localhost:11434, providing an OpenAI-compatible API endpoint.
+
+
