@@ -9,10 +9,11 @@ from langchain_ollama import ChatOllama
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
+import time
 
 load_dotenv()  # Optional: Loads environment variables from .env file
 
-DATA_PATH = "data/"
+DATA_PATH = "data/source"
 CHROMA_PATH = "data/chroma_db"  # Directory to store ChromaDB data
 
 
@@ -66,11 +67,27 @@ def split_documents(documents):
     return all_splits
 
 
-def get_embedding_function(model_name="nomic-embed-text"):
-    """Initializes the Ollama embedding function."""
-    embeddings = OllamaEmbeddings(model=model_name)
-    print(f"Initialized Ollama embeddings with model: {model_name}")
-    return embeddings
+def get_embedding_function(model_name="nomic-embed-text", base_url="http://localhost:11434"):
+    """Initializes the Ollama embedding function with retry logic."""
+    try:
+        embeddings = OllamaEmbeddings(
+            model=model_name,
+            base_url=base_url
+        )
+        
+        # Test the embedding function with a simple query
+        print(f"Testing embedding model '{model_name}'...")
+        test_embedding = embeddings.embed_query("test")
+        print(f"✓ Embedding model working (dimension: {len(test_embedding)})")
+        
+        return embeddings
+    except Exception as e:
+        print(f"✗ Error initializing embeddings: {e}")
+        print(f"\nTroubleshooting:")
+        print(f"1. Make sure Ollama is running: ollama list")
+        print(f"2. Pull the embedding model: ollama pull {model_name}")
+        print(f"3. Try alternative models: nomic-embed-text, mxbai-embed-large")
+        raise
 
 
 def get_vector_store(embedding_function, persist_directory=CHROMA_PATH):
@@ -83,25 +100,46 @@ def get_vector_store(embedding_function, persist_directory=CHROMA_PATH):
     return vectorstore
 
 
-def index_documents(chunks, embedding_function, persist_directory=CHROMA_PATH):
-    """Indexes document chunks into the Chroma vector store."""
+def index_documents(chunks, embedding_function, persist_directory=CHROMA_PATH, batch_size=10):
+    """Indexes document chunks into the Chroma vector store with batching."""
     if not chunks:
         print("No chunks to index!")
         return None
         
-    print(f"Indexing {len(chunks)} chunks...")
+    print(f"Indexing {len(chunks)} chunks in batches of {batch_size}...")
     
-    # Use from_documents for initial creation
-    vectorstore = Chroma.from_documents(
-        documents=chunks,
-        embedding=embedding_function,
-        persist_directory=persist_directory
-    )
-    print(f"Indexing complete. Data saved to: {persist_directory}")
-    return vectorstore
+    try:
+        # Create the vector store first
+        vectorstore = Chroma(
+            persist_directory=persist_directory,
+            embedding_function=embedding_function
+        )
+        
+        # Add documents in batches to avoid overwhelming Ollama
+        for i in range(0, len(chunks), batch_size):
+            batch = chunks[i:i + batch_size]
+            batch_num = (i // batch_size) + 1
+            total_batches = (len(chunks) + batch_size - 1) // batch_size
+            
+            print(f"Processing batch {batch_num}/{total_batches} ({len(batch)} chunks)...")
+            
+            try:
+                vectorstore.add_documents(batch)
+                time.sleep(0.5)  # Small delay between batches
+            except Exception as e:
+                print(f"✗ Error processing batch {batch_num}: {e}")
+                print("Continuing with next batch...")
+                continue
+        
+        print(f"✓ Indexing complete. Data saved to: {persist_directory}")
+        return vectorstore
+        
+    except Exception as e:
+        print(f"✗ Error during indexing: {e}")
+        raise
 
 
-def create_rag_chain(vector_store, llm_model_name="qwen2.5:7b", context_window=8192):
+def create_rag_chain(vector_store, llm_model_name="qwen3:30b-a3b", context_window=8192):
     """Creates the RAG chain."""
     # Initialize the LLM
     llm = ChatOllama(
@@ -157,7 +195,11 @@ def setup_rag_system(force_reindex=False):
     print("=" * 80)
     
     # Initialize embeddings
-    embedding_function = get_embedding_function()
+    try:
+        embedding_function = get_embedding_function()
+    except Exception as e:
+        print(f"\n❌ Failed to initialize embeddings: {e}")
+        return None, None
     
     # Check if we need to index documents
     chroma_path = Path(CHROMA_PATH)
@@ -170,14 +212,18 @@ def setup_rag_system(force_reindex=False):
         docs = load_documents()
         
         if not docs:
-            print("\n⚠️  No documents found. Please add PDF files to the 'data/' directory.")
+            print("\n⚠️  No documents found. Please add PDF files to the 'data/source' directory.")
             return None, None
         
         # Split documents
         chunks = split_documents(docs)
         
         # Index documents
-        vector_store = index_documents(chunks, embedding_function)
+        try:
+            vector_store = index_documents(chunks, embedding_function)
+        except Exception as e:
+            print(f"\n❌ Failed to index documents: {e}")
+            return None, None
     else:
         print("\n📂 Loading existing vector store...")
         vector_store = get_vector_store(embedding_function)
