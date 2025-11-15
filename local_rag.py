@@ -4,7 +4,7 @@ from langchain_community.document_loaders import PyPDFLoader
 from pathlib import Path
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_ollama import OllamaEmbeddings
-from langchain_community.vectorstores import Chroma
+from langchain_chroma import Chroma
 from langchain_ollama import ChatOllama
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnablePassthrough
@@ -505,6 +505,7 @@ if __name__ == "__main__":
         sys.exit(1)
     
     # Check for direct question mode
+    
     if "--question" in sys.argv:
         idx = sys.argv.index("--question")
         if idx + 1 < len(sys.argv):
