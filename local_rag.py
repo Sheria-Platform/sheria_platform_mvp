@@ -306,18 +306,26 @@ def create_rag_chain(vector_store, llm_model_name="qwen3:30b-a3b", context_windo
 
     # Create the retriever
     retriever = vector_store.as_retriever(
-        search_type="similarity",  # Or "mmr"
-        search_kwargs={'k': 3}  # Retrieve top 3 relevant chunks
+        search_type="similarity_score_threshold",  # Or "mmr"
+        search_kwargs={'k': 3, 'score_threshold': 0.5}  # Retrieve top 3 relevant chunks
     )
     print("Retriever initialized.")
 
     # Define the prompt template
-    template = """Answer the question based ONLY on the following context:
-{context}
-
-Question: {question}
-
-Answer: """
+    template ="""
+    You are an AI assistant that answers questions based ONLY on the provided context.
+    
+    Context information:
+    {context}
+    
+    Instruction: 
+    - If the context doesn't contain relevant information to answer the question, say "I cannot answer based on the provided context."
+    - If the question is ambiguous, ask for clarification.
+    - Provide concise, accurate answers with references to the context when possible.
+    
+    Question: {question}
+    
+    Answer: """
     
     prompt = ChatPromptTemplate.from_template(template)
     print("Prompt template created.")
