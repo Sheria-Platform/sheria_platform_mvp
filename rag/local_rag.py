@@ -99,7 +99,7 @@ def split_documents(documents):
     return all_splits
 
 
-def get_embedding_function(model_name="nomic-embed-text", base_url="http://localhost:11434"):
+def get_embedding_function(model_name="bge-m3", base_url="http://localhost:11434"):
     """
     Initializes and returns an Ollama embedding function for text vectorization.
     
