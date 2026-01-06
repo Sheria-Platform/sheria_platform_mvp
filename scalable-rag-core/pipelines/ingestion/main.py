@@ -5,7 +5,7 @@ from pipelines.ingestion.embedding.compute import BatchEmbedder
 from pipelines.ingestion.indexing.qdrant import QdrantIndexer
 from pipelines.ingestion.indexing.neo4j import Neo4jIndexer
 from pipelines.ingestion.graph.extractor import GraphExtractor
-from pipelines.ingestion.parsing.processor import process_batch
+# from pipelines.ingestion.parsing.processor import process_batch
 
 def main(bucket_name: str, prefix: str, materialize_chunks: bool = True):
     """
