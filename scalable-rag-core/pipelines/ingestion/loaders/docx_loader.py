@@ -21,9 +21,9 @@ def parse_docx_bytes(file_bytes: bytes, filename: str):
 
 if __name__ == "__main__":
     # Example usage
-    with open("scalable-rag-core/pipelines/ingestion/tests/sample.docx", "rb") as f:
+    with open("scalable-rag-core/test_data/sample.docx", "rb") as f:
         file_bytes = f.read()
     
-    text, metadata = parse_docx_bytes(file_bytes, "example.docx")
+    text, metadata = parse_docx_bytes(file_bytes, "scalable-rag-core/test_data/sample.docx")
     print("Extracted Text:\n", text)
     print("Metadata:\n", metadata)
