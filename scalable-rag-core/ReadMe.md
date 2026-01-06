@@ -69,3 +69,50 @@ Ingestion of web content.
 ```bash
 pipelines/ingestion/loaders/html.py
 ```
+
+## Chunking and Knowledge Graph
+
+in this section the following operations will take place.
+
+### Splitting
+
+The splitter brakes text into 512 token chunks the standard limit for embedding.
+The token token chunks can be adjusted to fit the embedding requirements.
+
+```bash
+pipelines/ingestion/chunking/splitter.py
+```
+
+### Metadata Enrichment
+
+Its important to avoid duplication in the system. To archive we generate a content hash and add a timestamp.
+
+```bash
+pipelines/ingestion/chunking/metadata.py
+```
+
+### Batch Embedding
+
+We call the RAy Server Endpoint. This allows our ingestion job to simply make HTTP request to a continuously running model service.
+
+```bash
+pipelines/ingestion/embedding/compute.py
+```
+
+### Graph Extractor
+
+To keep our knowledge graph clean we need to define a strict schema this will reduce the LLM hallucinating random relation types.
+
+```bash
+pipelines/ingestion/graph/schema.py
+```
+
+This uses the LLM to understand the structure of the text, not just the semantic similarity.
+
+```bash
+pipelines/ingestion/graph/extractor.py
+```
+
+
+## High-Throughput indexing
+
