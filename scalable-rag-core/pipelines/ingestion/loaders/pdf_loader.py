@@ -18,3 +18,11 @@ def parse_pdf_bytes(file_bytes: bytes, filename: str):
         for el in elements:
             text_content += str(el) + "\n"
     return text_content, {"filename": filename, "type": "pdf"}
+
+if __name__ == "__main__":
+    # Example usage
+    with open("scalable-rag-core/test_data/sample.pdf", "rb") as f:
+        file_bytes = f.read()
+    text, metadata = parse_pdf_bytes(file_bytes, "sample.pdf")
+    print(text)
+    print(metadata)
