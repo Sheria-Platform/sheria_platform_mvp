@@ -1,2 +1,3 @@
 data/*
 .DS_Store
+scalable-rag-core/pipelines/ingestion/loaders/__pycache__/html.cpython-313.pyc
