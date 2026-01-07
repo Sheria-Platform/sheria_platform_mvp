@@ -2,6 +2,7 @@
 Enhanced Kenya Law Scraper
 - Searches multiple dictionary terms
 - Stores clean metadata in PostgreSQL
+- Downloads PDFs immediately after each search page
 - Organizes PDFs in structured folders
 - Handles duplicates and data normalization
 
@@ -21,7 +22,7 @@ import hashlib
 from curl_cffi import requests
 from bs4 import BeautifulSoup
 from rich import print as rprint
-from rich.progress import Progress, SpinnerColumn, TextColumn
+from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
 import psycopg2
 from psycopg2.extras import execute_values
 
@@ -322,29 +323,6 @@ def insert_case(conn, case_data: Dict, search_term_id: int) -> Optional[int]:
     finally:
         cur.close()
 
-def get_pending_pdfs(conn) -> List[Dict]:
-    """Get cases that need PDF downloads"""
-    cur = conn.cursor()
-    cur.execute("""
-        SELECT c.id, c.doc_id, c.title, c.expression_frbr_uri, c.year
-        FROM cases c
-        LEFT JOIN case_pdfs p ON c.id = p.case_id
-        WHERE p.id IS NULL OR p.download_status = 'pending'
-    """)
-    
-    cases = []
-    for row in cur.fetchall():
-        cases.append({
-            'case_id': row[0],
-            'doc_id': row[1],
-            'title': row[2],
-            'expression_frbr_uri': row[3],
-            'year': row[4]
-        })
-    
-    cur.close()
-    return cases
-
 def update_pdf_record(conn, case_id: int, pdf_data: Dict):
     """Update or insert PDF download record"""
     cur = conn.cursor()
@@ -372,21 +350,129 @@ def update_pdf_record(conn, case_id: int, pdf_data: Dict):
     conn.commit()
     cur.close()
 
+def check_pdf_exists(conn, case_id: int) -> bool:
+    """Check if PDF already downloaded for this case"""
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT download_status FROM case_pdfs 
+        WHERE case_id = %s AND download_status = 'success'
+    """, (case_id,))
+    result = cur.fetchone()
+    cur.close()
+    return result is not None
+
+# ==================== PDF DOWNLOAD FUNCTION ====================
+def download_single_pdf(session: requests.Session, conn, case_id: int, 
+                       doc_id: int, title: str, expression_uri: str, 
+                       year: Optional[int]) -> bool:
+    """Download PDF for a single case"""
+    
+    # Check if already downloaded
+    if check_pdf_exists(conn, case_id):
+        rprint(f"[cyan]  ✓ PDF already downloaded for case {doc_id}[/cyan]")
+        return True
+    
+    # Prepare file paths
+    title_clean = title[:80].replace("/", "_").replace("\\", "_")
+    year_folder = str(year) if year else "unknown"
+    pdf_folder = os.path.join(PDF_BASE_FOLDER, year_folder)
+    os.makedirs(pdf_folder, exist_ok=True)
+    
+    pdf_filename = f"{doc_id}_{title_clean}.pdf"
+    pdf_path = os.path.join(pdf_folder, pdf_filename)
+    
+    # Skip if file already exists on disk
+    if os.path.exists(pdf_path):
+        # Update database record
+        pdf_hash = calculate_file_hash(pdf_path)
+        file_size = os.path.getsize(pdf_path)
+        update_pdf_record(conn, case_id, {
+            'pdf_path': pdf_path,
+            'pdf_hash': pdf_hash,
+            'file_size': file_size,
+            'downloaded_at': datetime.now(),
+            'download_status': 'success'
+        })
+        rprint(f"[cyan]  ✓ PDF exists on disk: {pdf_filename}[/cyan]")
+        return True
+    
+    case_url = f"https://new.kenyalaw.org{expression_uri}"
+    
+    try:
+        # Fetch case page
+        rprint(f"[yellow]  ⬇️  Downloading PDF: {title_clean[:50]}...[/yellow]")
+        page_resp = session.get(case_url, timeout=30)
+        page_resp.raise_for_status()
+        
+        # Extract PDF URL
+        pdf_url = extract_pdf_url(page_resp.text, case_url)
+        if not pdf_url:
+            rprint(f"[red]  ✗ No PDF link found for case {doc_id}[/red]")
+            update_pdf_record(conn, case_id, {
+                'download_status': 'failed',
+                'error_message': 'PDF link not found on page'
+            })
+            return False
+        
+        # Download PDF
+        pdf_resp = session.get(pdf_url, timeout=60)
+        pdf_resp.raise_for_status()
+        
+        # Save PDF
+        with open(pdf_path, "wb") as f:
+            f.write(pdf_resp.content)
+        
+        # Calculate hash and file size
+        pdf_hash = calculate_file_hash(pdf_path)
+        file_size = os.path.getsize(pdf_path)
+        
+        # Update database
+        update_pdf_record(conn, case_id, {
+            'pdf_url': pdf_url,
+            'pdf_path': pdf_path,
+            'pdf_hash': pdf_hash,
+            'file_size': file_size,
+            'downloaded_at': datetime.now(),
+            'download_status': 'success'
+        })
+        
+        rprint(f"[bold green]  ✓ Downloaded: {pdf_filename} ({file_size/1024:.1f} KB)[/bold green]")
+        return True
+        
+    except Exception as e:
+        rprint(f"[red]  ✗ Error downloading PDF for case {doc_id}: {e}[/red]")
+        update_pdf_record(conn, case_id, {
+            'download_status': 'failed',
+            'error_message': str(e)[:500]
+        })
+        return False
+
 # ==================== MAIN WORKFLOW ====================
-def scrape_metadata(conn):
-    """Scrape metadata for all search terms"""
+def scrape_and_download(conn):
+    """Scrape metadata and download PDFs page by page"""
     session = requests.Session(impersonate="chrome124")
     
-    total_new_cases = 0
+    overall_stats = {
+        'total_cases': 0,
+        'new_cases': 0,
+        'pdfs_downloaded': 0,
+        'pdfs_failed': 0,
+        'pdfs_skipped': 0
+    }
     
     for search_term in SEARCH_TERMS:
-        rprint(f"\n[bold cyan]Searching for: '{search_term}'[/bold cyan]")
-        search_term_id = insert_search_term(conn, search_term)
+        rprint(f"\n[bold cyan]{'='*60}[/bold cyan]")
+        rprint(f"[bold cyan]Search Term: '{search_term}'[/bold cyan]")
+        rprint(f"[bold cyan]{'='*60}[/bold cyan]")
         
-        term_cases = 0
+        search_term_id = insert_search_term(conn, search_term)
+        term_stats = {'cases': 0, 'pdfs': 0}
+        
         for page in range(1, MAX_PAGES_PER_SEARCH + 1):
             try:
-                rprint(f"[yellow]  Page {page}/{MAX_PAGES_PER_SEARCH}...[/yellow]")
+                rprint(f"\n[bold yellow]📄 Page {page}/{MAX_PAGES_PER_SEARCH}[/bold yellow]")
+                
+                # Fetch search results
                 data = search_cases(session, search_term, page)
                 results = data.get("results", [])
                 
@@ -394,133 +480,96 @@ def scrape_metadata(conn):
                     rprint(f"[yellow]  No more results for '{search_term}'[/yellow]")
                     break
                 
-                for doc in results:
+                rprint(f"[green]  Found {len(results)} cases on this page[/green]")
+                
+                # Process each case on this page
+                for idx, doc in enumerate(results, 1):
+                    rprint(f"\n[bold blue]  Case {idx}/{len(results)}:[/bold blue]")
+                    
+                    # Normalize and insert case metadata
                     case_data = normalize_case_data(doc)
                     case_id = insert_case(conn, case_data, search_term_id)
-                    if case_id:
-                        term_cases += 1
+                    
+                    if not case_id:
+                        rprint(f"[red]  ✗ Failed to insert case metadata[/red]")
+                        continue
+                    
+                    overall_stats['total_cases'] += 1
+                    term_stats['cases'] += 1
+                    
+                    rprint(f"[green]  ✓ Metadata saved: ID={case_data['doc_id']}, Title={case_data['title'][:50]}[/green]")
+                    
+                    # Download PDF immediately
+                    success = download_single_pdf(
+                        session, conn,
+                        case_id=case_id,
+                        doc_id=case_data['doc_id'],
+                        title=case_data['title'],
+                        expression_uri=case_data['expression_frbr_uri'],
+                        year=case_data['year']
+                    )
+                    
+                    if success:
+                        if check_pdf_exists(conn, case_id):
+                            overall_stats['pdfs_downloaded'] += 1
+                            term_stats['pdfs'] += 1
+                        else:
+                            overall_stats['pdfs_skipped'] += 1
+                    else:
+                        overall_stats['pdfs_failed'] += 1
+                    
+                    # Small delay between PDFs
+                    time.sleep(DELAY_BETWEEN_PDFS)
                 
-                rprint(f"[green]  ✓ Processed {len(results)} cases[/green]")
+                rprint(f"\n[bold green]✓ Page {page} complete: {len(results)} cases processed[/bold green]")
+                
+                # Delay before next page
                 time.sleep(DELAY_BETWEEN_PAGES)
                 
             except Exception as e:
-                rprint(f"[red]  Error on page {page}: {e}[/red]")
+                rprint(f"[red]✗ Error on page {page}: {e}[/red]")
                 continue
         
-        total_new_cases += term_cases
-        rprint(f"[bold green]'{search_term}': {term_cases} cases stored[/bold green]")
+        rprint(f"\n[bold magenta]Search term '{search_term}' complete:[/bold magenta]")
+        rprint(f"[magenta]  Cases: {term_stats['cases']}, PDFs: {term_stats['pdfs']}[/magenta]")
     
-    rprint(f"\n[bold magenta]Total cases in database: {total_new_cases}[/bold magenta]")
-
-def download_pdfs(conn):
-    """Download PDFs for all cases"""
-    session = requests.Session(impersonate="chrome124")
-    pending_cases = get_pending_pdfs(conn)
-    
-    rprint(f"\n[bold cyan]Downloading PDFs for {len(pending_cases)} cases...[/bold cyan]")
-    
-    stats = {'success': 0, 'failed': 0, 'skipped': 0}
-    
-    for case in pending_cases:
-        case_id = case['case_id']
-        doc_id = case['doc_id']
-        title = case['title'][:80].replace("/", "_")
-        year = case['year'] or "unknown"
-        expression_uri = case['expression_frbr_uri']
-        
-        # Organize PDFs by year
-        pdf_folder = os.path.join(PDF_BASE_FOLDER, str(year))
-        os.makedirs(pdf_folder, exist_ok=True)
-        
-        pdf_filename = f"{doc_id}_{title}.pdf"
-        pdf_path = os.path.join(pdf_folder, pdf_filename)
-        
-        if os.path.exists(pdf_path):
-            rprint(f"[cyan]Already exists: {pdf_filename}[/cyan]")
-            stats['skipped'] += 1
-            continue
-        
-        case_url = f"https://new.kenyalaw.org{expression_uri}"
-        
-        try:
-            # Fetch case page
-            rprint(f"[yellow]Fetching: {title[:60]}...[/yellow]")
-            page_resp = session.get(case_url, timeout=30)
-            page_resp.raise_for_status()
-            
-            # Extract PDF URL
-            pdf_url = extract_pdf_url(page_resp.text, case_url)
-            if not pdf_url:
-                rprint(f"[red]No PDF link found[/red]")
-                update_pdf_record(conn, case_id, {
-                    'download_status': 'failed',
-                    'error_message': 'PDF link not found'
-                })
-                stats['failed'] += 1
-                time.sleep(DELAY_BETWEEN_PAGES)
-                continue
-            
-            # Download PDF
-            pdf_resp = session.get(pdf_url, timeout=60)
-            pdf_resp.raise_for_status()
-            
-            with open(pdf_path, "wb") as f:
-                f.write(pdf_resp.content)
-            
-            # Calculate hash and file size
-            pdf_hash = calculate_file_hash(pdf_path)
-            file_size = os.path.getsize(pdf_path)
-            
-            update_pdf_record(conn, case_id, {
-                'pdf_url': pdf_url,
-                'pdf_path': pdf_path,
-                'pdf_hash': pdf_hash,
-                'file_size': file_size,
-                'downloaded_at': datetime.now(),
-                'download_status': 'success'
-            })
-            
-            rprint(f"[bold green]✓ Downloaded: {pdf_filename}[/bold green]")
-            stats['success'] += 1
-            
-        except Exception as e:
-            rprint(f"[red]Error: {e}[/red]")
-            update_pdf_record(conn, case_id, {
-                'download_status': 'failed',
-                'error_message': str(e)
-            })
-            stats['failed'] += 1
-        
-        time.sleep(DELAY_BETWEEN_PDFS)
-    
-    rprint(f"\n[bold magenta]PDF Download Summary:[/bold magenta]")
-    rprint(f"[green]✓ Success: {stats['success']}[/green]")
-    rprint(f"[cyan]○ Skipped: {stats['skipped']}[/cyan]")
-    rprint(f"[red]✗ Failed: {stats['failed']}[/red]")
+    # Final summary
+    rprint(f"\n[bold blue]{'='*60}[/bold blue]")
+    rprint(f"[bold blue]SCRAPING COMPLETE - SUMMARY[/bold blue]")
+    rprint(f"[bold blue]{'='*60}[/bold blue]")
+    rprint(f"[cyan]Total cases processed: {overall_stats['total_cases']}[/cyan]")
+    rprint(f"[green]✓ PDFs downloaded: {overall_stats['pdfs_downloaded']}[/green]")
+    rprint(f"[yellow]○ PDFs skipped: {overall_stats['pdfs_skipped']}[/yellow]")
+    rprint(f"[red]✗ PDFs failed: {overall_stats['pdfs_failed']}[/red]")
 
 def main():
     """Main execution flow"""
-    rprint("[bold blue]Kenya Law Scraper - Enhanced Version[/bold blue]\n")
+    rprint("[bold blue]" + "="*60 + "[/bold blue]")
+    rprint("[bold blue]Kenya Law Scraper - Enhanced Version[/bold blue]")
+    rprint("[bold blue]Downloads PDFs immediately after each search page[/bold blue]")
+    rprint("[bold blue]" + "="*60 + "[/bold blue]\n")
     
     # Initialize database
+    rprint("[yellow]Initializing database...[/yellow]")
     init_database()
     
     # Connect to database
     conn = psycopg2.connect(**DB_CONFIG)
     
     try:
-        # Step 1: Scrape metadata
-        rprint("\n[bold]Step 1: Scraping metadata...[/bold]")
-        scrape_metadata(conn)
+        # Scrape and download in one workflow
+        scrape_and_download(conn)
         
-        # Step 2: Download PDFs
-        rprint("\n[bold]Step 2: Downloading PDFs...[/bold]")
-        download_pdfs(conn)
+        rprint("\n[bold green]✓ All operations complete![/bold green]")
         
-        rprint("\n[bold green]✓ Scraping complete![/bold green]")
-        
+    except KeyboardInterrupt:
+        rprint("\n[yellow]⚠️  Scraping interrupted by user[/yellow]")
+        rprint("[cyan]Progress has been saved. You can resume by running the script again.[/cyan]")
+    except Exception as e:
+        rprint(f"\n[red]✗ Fatal error: {e}[/red]")
     finally:
         conn.close()
+        rprint("\n[blue]Database connection closed.[/blue]")
 
 if __name__ == "__main__":
     main()
