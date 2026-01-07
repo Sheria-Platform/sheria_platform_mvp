@@ -1,4 +1,4 @@
-# pipelines/ingestion/graph/schema.py
+# pipelines/ingestion/graph/schema_graph.py
 from typing import Literal
 
 # Restrict the LLM to only these entities/relationships
@@ -10,3 +10,9 @@ class GraphSchema:
     @staticmethod
     def get_system_prompt() -> str:
         return f"Extract nodes/edges. Allowed Labels: {VALID_NODE_LABELS.__args__}..."
+    
+    
+if __name__ == "__main__":
+    # Example usage
+    prompt = GraphSchema.get_system_prompt()
+    print(prompt)
