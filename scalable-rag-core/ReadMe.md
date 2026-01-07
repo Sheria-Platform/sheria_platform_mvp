@@ -116,3 +116,10 @@ pipelines/ingestion/graph/extractor.py
 
 ## High-Throughput indexing
 
+
+## Reading Materials
+
+https://youtu.be/4Rbd_1Kb2qU?si=y2W-nI-3li7LFLLE
+https://pavlokhmel.com/llm_inferencing_on_multiple_servers_and_multiple_gpus_with_ray_and_vllm.html
+
+
