@@ -38,7 +38,7 @@ DB_CONFIG = {
 PDF_BASE_FOLDER = "kenya_law_data"
 MAX_PAGES_PER_SEARCH = 10
 DELAY_BETWEEN_PAGES = 2
-DELAY_BETWEEN_PDFS = 5
+DELAY_BETWEEN_PDFS = 120
 
 # Search terms - you can load this from a file or define here
 SEARCH_TERMS = [
