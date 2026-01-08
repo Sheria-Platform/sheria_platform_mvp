@@ -26,8 +26,6 @@ from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
 import psycopg2
 from psycopg2.extras import execute_values
 
-from english_words import get_english_words_set
-
 # ==================== CONFIGURATION ====================
 DB_CONFIG = {
     "host": "192.168.214.21",
@@ -43,7 +41,22 @@ DELAY_BETWEEN_PAGES = 2
 DELAY_BETWEEN_PDFS = 5
 
 # Search terms - you can load this from a file or define here
-SEARCH_TERMS = get_english_words_set(['web2'], lower=True, alpha=True)
+SEARCH_TERMS = [
+    "family",
+    "marriage",
+    "divorce",
+    "custody",
+    "succession",
+    "inheritance",
+    "adoption",
+    "maintenance",
+    "property",
+    "land",
+    "employment",
+    "criminal",
+    "constitutional",
+    # Add more terms as needed
+]
 
 # ==================== DATABASE SETUP ====================
 def init_database():
@@ -111,7 +124,7 @@ def init_database():
     cur.execute("""
     CREATE TABLE IF NOT EXISTS case_pdfs (
         id SERIAL PRIMARY KEY,
-        case_id INTEGER REFERENCES cases(id) ON DELETE CASCADE,
+        case_id INTEGER UNIQUE REFERENCES cases(id) ON DELETE CASCADE,
         pdf_url TEXT,
         pdf_path TEXT,
         pdf_hash TEXT,
@@ -135,12 +148,26 @@ def init_database():
     rprint("[bold green]✓ Database initialized successfully[/bold green]")
 
 # ==================== DATA CLEANING ====================
-def clean_text(text: Optional[str]) -> Optional[str]:
+def clean_text(text) -> Optional[str]:
     """Clean and normalize text data"""
     if not text:
         return None
+    
+    # Handle lists - join them or take first element
+    if isinstance(text, list):
+        if len(text) == 0:
+            return None
+        # Join list items with semicolon
+        text = '; '.join(str(item) for item in text if item)
+        if not text:
+            return None
+    
+    # Convert to string if not already
+    text = str(text)
+    
+    # Clean whitespace
     text = re.sub(r'\s+', ' ', text)
-    return text.strip()
+    return text.strip() if text.strip() else None
 
 def parse_date(date_str: Optional[str]) -> Optional[datetime]:
     """Parse date from various formats"""
@@ -180,9 +207,22 @@ def extract_year(date_str: Optional[str], expression_uri: Optional[str]) -> Opti
 
 def normalize_case_data(doc: Dict) -> Dict:
     """Clean and normalize case metadata"""
+    # Get judges list safely
+    judges_raw = doc.get('judges', [])
+    if judges_raw is None:
+        judges_raw = []
+    elif not isinstance(judges_raw, list):
+        judges_raw = [judges_raw]
+    
+    judges_clean = []
+    for j in judges_raw:
+        cleaned = clean_text(j)
+        if cleaned:
+            judges_clean.append(cleaned)
+    
     return {
         'doc_id': doc.get('id'),
-        'title': clean_text(doc.get('title')),
+        'title': clean_text(doc.get('title')) or 'Untitled Case',
         'expression_frbr_uri': doc.get('expression_frbr_uri'),
         'date': parse_date(doc.get('date')),
         'year': extract_year(doc.get('date'), doc.get('expression_frbr_uri')),
@@ -194,7 +234,7 @@ def normalize_case_data(doc: Dict) -> Dict:
         'language': clean_text(doc.get('language')),
         'matter_type': clean_text(doc.get('matter_type')),
         'citation': clean_text(doc.get('citation')),
-        'judges': [clean_text(j) for j in doc.get('judges', []) if j],
+        'judges': judges_clean,
     }
 
 # ==================== SCRAPING FUNCTIONS ====================
@@ -261,6 +301,15 @@ def insert_case(conn, case_data: Dict, search_term_id: int) -> Optional[int]:
     cur = conn.cursor()
     
     try:
+        # Validate required fields
+        if not case_data.get('expression_frbr_uri'):
+            rprint(f"[red]  Missing expression_frbr_uri for doc_id {case_data.get('doc_id')}[/red]")
+            return None
+        
+        if not case_data.get('doc_id'):
+            rprint(f"[red]  Missing doc_id for case[/red]")
+            return None
+            
         case_url = f"https://new.kenyalaw.org{case_data['expression_frbr_uri']}"
         
         cur.execute("""
@@ -292,33 +341,34 @@ def insert_case(conn, case_data: Dict, search_term_id: int) -> Optional[int]:
         """, (case_id, search_term_id))
         
         # Insert judges
-        for judge_name in case_data['judges']:
+        for judge_name in case_data.get('judges', []):
             if judge_name:
-                cur.execute("""
-                    INSERT INTO judges (name) VALUES (%s)
-                    ON CONFLICT (name) DO NOTHING
-                    RETURNING id
-                """, (judge_name,))
-                
-                result = cur.fetchone()
-                if result:
-                    judge_id = result[0]
-                else:
+                try:
+                    cur.execute("""
+                        INSERT INTO judges (name) VALUES (%s)
+                        ON CONFLICT (name) DO NOTHING
+                    """, (judge_name,))
+                    
                     cur.execute("SELECT id FROM judges WHERE name = %s", (judge_name,))
-                    judge_id = cur.fetchone()[0]
-                
-                cur.execute("""
-                    INSERT INTO case_judges (case_id, judge_id)
-                    VALUES (%s, %s)
-                    ON CONFLICT DO NOTHING
-                """, (case_id, judge_id))
+                    result = cur.fetchone()
+                    if result:
+                        judge_id = result[0]
+                        
+                        cur.execute("""
+                            INSERT INTO case_judges (case_id, judge_id)
+                            VALUES (%s, %s)
+                            ON CONFLICT DO NOTHING
+                        """, (case_id, judge_id))
+                except Exception as judge_error:
+                    rprint(f"[yellow]  Warning: Could not insert judge '{judge_name}': {judge_error}[/yellow]")
+                    continue
         
         conn.commit()
         return case_id
         
     except Exception as e:
         conn.rollback()
-        rprint(f"[red]Error inserting case: {e}[/red]")
+        rprint(f"[red]  Error inserting case: {e}[/red]")
         return None
     finally:
         cur.close()
@@ -327,39 +377,49 @@ def update_pdf_record(conn, case_id: int, pdf_data: Dict):
     """Update or insert PDF download record"""
     cur = conn.cursor()
     
-    cur.execute("""
-        INSERT INTO case_pdfs (
-            case_id, pdf_url, pdf_path, pdf_hash, file_size, 
-            downloaded_at, download_status, error_message
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-        ON CONFLICT (case_id) DO UPDATE SET
-            pdf_url = EXCLUDED.pdf_url,
-            pdf_path = EXCLUDED.pdf_path,
-            pdf_hash = EXCLUDED.pdf_hash,
-            file_size = EXCLUDED.file_size,
-            downloaded_at = EXCLUDED.downloaded_at,
-            download_status = EXCLUDED.download_status,
-            error_message = EXCLUDED.error_message
-    """, (
-        case_id, pdf_data.get('pdf_url'), pdf_data.get('pdf_path'),
-        pdf_data.get('pdf_hash'), pdf_data.get('file_size'),
-        pdf_data.get('downloaded_at'), pdf_data['download_status'],
-        pdf_data.get('error_message')
-    ))
-    
-    conn.commit()
-    cur.close()
+    try:
+        cur.execute("""
+            INSERT INTO case_pdfs (
+                case_id, pdf_url, pdf_path, pdf_hash, file_size, 
+                downloaded_at, download_status, error_message
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (case_id) DO UPDATE SET
+                pdf_url = EXCLUDED.pdf_url,
+                pdf_path = EXCLUDED.pdf_path,
+                pdf_hash = EXCLUDED.pdf_hash,
+                file_size = EXCLUDED.file_size,
+                downloaded_at = EXCLUDED.downloaded_at,
+                download_status = EXCLUDED.download_status,
+                error_message = EXCLUDED.error_message
+        """, (
+            case_id, pdf_data.get('pdf_url'), pdf_data.get('pdf_path'),
+            pdf_data.get('pdf_hash'), pdf_data.get('file_size'),
+            pdf_data.get('downloaded_at'), pdf_data['download_status'],
+            pdf_data.get('error_message')
+        ))
+        
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        rprint(f"[red]  Error updating PDF record: {e}[/red]")
+    finally:
+        cur.close()
 
 def check_pdf_exists(conn, case_id: int) -> bool:
     """Check if PDF already downloaded for this case"""
     cur = conn.cursor()
-    cur.execute("""
-        SELECT download_status FROM case_pdfs 
-        WHERE case_id = %s AND download_status = 'success'
-    """, (case_id,))
-    result = cur.fetchone()
-    cur.close()
-    return result is not None
+    try:
+        cur.execute("""
+            SELECT download_status FROM case_pdfs 
+            WHERE case_id = %s AND download_status = 'success'
+        """, (case_id,))
+        result = cur.fetchone()
+        return result is not None
+    except Exception as e:
+        rprint(f"[yellow]  Warning: Error checking PDF existence: {e}[/yellow]")
+        return False
+    finally:
+        cur.close()
 
 # ==================== PDF DOWNLOAD FUNCTION ====================
 def download_single_pdf(session: requests.Session, conn, case_id: int, 
@@ -484,42 +544,53 @@ def scrape_and_download(conn):
                 
                 # Process each case on this page
                 for idx, doc in enumerate(results, 1):
-                    rprint(f"\n[bold blue]  Case {idx}/{len(results)}:[/bold blue]")
-                    
-                    # Normalize and insert case metadata
-                    case_data = normalize_case_data(doc)
-                    case_id = insert_case(conn, case_data, search_term_id)
-                    
-                    if not case_id:
-                        rprint(f"[red]  ✗ Failed to insert case metadata[/red]")
-                        continue
-                    
-                    overall_stats['total_cases'] += 1
-                    term_stats['cases'] += 1
-                    
-                    rprint(f"[green]  ✓ Metadata saved: ID={case_data['doc_id']}, Title={case_data['title'][:50]}[/green]")
-                    
-                    # Download PDF immediately
-                    success = download_single_pdf(
-                        session, conn,
-                        case_id=case_id,
-                        doc_id=case_data['doc_id'],
-                        title=case_data['title'],
-                        expression_uri=case_data['expression_frbr_uri'],
-                        year=case_data['year']
-                    )
-                    
-                    if success:
-                        if check_pdf_exists(conn, case_id):
-                            overall_stats['pdfs_downloaded'] += 1
-                            term_stats['pdfs'] += 1
+                    try:
+                        rprint(f"\n[bold blue]  Case {idx}/{len(results)}:[/bold blue]")
+                        
+                        # Normalize and insert case metadata
+                        case_data = normalize_case_data(doc)
+                        
+                        if not case_data.get('doc_id'):
+                            rprint(f"[red]  ✗ Skipping case with missing doc_id[/red]")
+                            continue
+                        
+                        case_id = insert_case(conn, case_data, search_term_id)
+                        
+                        if not case_id:
+                            rprint(f"[red]  ✗ Failed to insert case metadata[/red]")
+                            continue
+                        
+                        overall_stats['total_cases'] += 1
+                        term_stats['cases'] += 1
+                        
+                        rprint(f"[green]  ✓ Metadata saved: ID={case_data['doc_id']}, Title={case_data['title'][:50]}[/green]")
+                        
+                        # Download PDF immediately
+                        success = download_single_pdf(
+                            session, conn,
+                            case_id=case_id,
+                            doc_id=case_data['doc_id'],
+                            title=case_data['title'],
+                            expression_uri=case_data['expression_frbr_uri'],
+                            year=case_data['year']
+                        )
+                        
+                        if success:
+                            if check_pdf_exists(conn, case_id):
+                                overall_stats['pdfs_downloaded'] += 1
+                                term_stats['pdfs'] += 1
+                            else:
+                                overall_stats['pdfs_skipped'] += 1
                         else:
-                            overall_stats['pdfs_skipped'] += 1
-                    else:
-                        overall_stats['pdfs_failed'] += 1
+                            overall_stats['pdfs_failed'] += 1
+                        
+                        # Small delay between PDFs
+                        time.sleep(DELAY_BETWEEN_PDFS)
                     
-                    # Small delay between PDFs
-                    time.sleep(DELAY_BETWEEN_PDFS)
+                    except Exception as case_error:
+                        rprint(f"[red]  ✗ Error processing case {idx}: {case_error}[/red]")
+                        # Continue to next case instead of failing entire page
+                        continue
                 
                 rprint(f"\n[bold green]✓ Page {page} complete: {len(results)} cases processed[/bold green]")
                 

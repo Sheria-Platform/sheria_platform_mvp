@@ -1,0 +1,4 @@
+curl_cffi
+bs4
+psycopg2-binary
+rich

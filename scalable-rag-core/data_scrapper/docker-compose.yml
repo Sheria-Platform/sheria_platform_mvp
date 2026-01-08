@@ -1,0 +1,30 @@
+version: "3.5"
+services:
+  admin_app_gateway:
+    # env_file:
+    #   - .env
+    # build: .
+    image: data_scrapper:latest
+    command: bash -c "python3 data_scrapper.py"
+    ports:
+      - "5701:5701"
+    deploy:
+      update_config:
+        parallelism: 1
+        max_failure_ratio: 0
+        delay: 3s
+        failure_action: rollback
+      restart_policy:
+        max_attempts: 3
+        condition: on-failure
+      replicas: 1
+      placement:
+        constraints: [node.role == manager]
+    volumes:
+      - .:/src
+      - .:/kenya_law_data
+    networks:
+      - data_scrapper_network
+networks:
+  data_scrapper_network:
+    external: true

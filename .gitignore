@@ -180,3 +180,4 @@ pyrightconfig.json
 # End of https://www.toptal.com/developers/gitignore/api/python
 scalable-rag-core/pipelines/ingestion/tests/sample.docx
 scalable-rag-core/test_data/*
+kenya_law_data/*
