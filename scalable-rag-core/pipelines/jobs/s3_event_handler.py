@@ -7,4 +7,8 @@ def handle_s3_event(event, context):
     client.submit_job(
         entrypoint=f"python pipelines/ingestion/main.py {bucket} {key}",
         runtime_env={"working_dir": "./"}
+        
     )
+
+#TODO: Make adjustment for minio s3 server
+# https://chat.deepseek.com/a/chat/s/8546beb6-9502-49a6-9e81-637ed49a939f
