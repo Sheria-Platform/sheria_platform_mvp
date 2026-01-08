@@ -56,5 +56,6 @@ if __name__ == "__main__":
     test_batch = [
         {"vector": [0.1, 0.2, 0.3], "metadata": {"text": "Sample text 1"}},
         {"vector": [0.4, 0.5, 0.6], "metadata": {"text": "Sample text 2"}},
+        {"vector": [0.45, 0.23, 0.67], "metadata": {"text": "Sample text 4"}},
     ]
     indexer.write(test_batch)
