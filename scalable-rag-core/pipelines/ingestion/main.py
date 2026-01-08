@@ -1,11 +1,11 @@
 # pipelines/ingestion/main.py
 import ray
 from typing import Dict, List
-from pipelines.ingestion.embedding.compute import BatchEmbedder
-from pipelines.ingestion.indexing.qdrant import QdrantIndexer
-from pipelines.ingestion.indexing.neo4j import Neo4jIndexer
-from pipelines.ingestion.graph.extractor import GraphExtractor
-# from pipelines.ingestion.parsing.processor import process_batch
+from pipelines.ingestion.embedding.embedding_compute import BatchEmbedder
+from pipelines.ingestion.indexing.qdrant_indexing import QdrantIndexer
+from pipelines.ingestion.indexing.neo4j_indexing import Neo4jIndexer
+from pipelines.ingestion.graph.extractor_graph import GraphExtractor
+
 
 def main(bucket_name: str, prefix: str, materialize_chunks: bool = True):
     """
