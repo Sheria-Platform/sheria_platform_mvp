@@ -1,74 +1,64 @@
 # pipelines/ingestion/indexing/neo4j.py
 from neo4j import GraphDatabase
+from typing import Dict, Any, List
+import os
 
 class Neo4jIndexer:
-    """Writes graph data using idempotent MERGE queries."""
+    """
+    Writes data to Neo4j Graph Database.
+    Implements efficient Batch Writes.
+    """
     def __init__(self):
-        self.driver = GraphDatabase.driver("bolt://192.168.214.21:7687", auth=("neo4j", "password"))
-    
-    def write(self, batch):
-        with self.driver.session() as session:
-            # Flattens batch and executes a single transaction for high performance
-            session.execute_write(self._merge_graph_data, batch)
-    
-    def _merge_graph_data(self, tx, batch):
-        """Merge nodes and edges into Neo4j graph database."""
-        for item in batch:
-            # Merge nodes
-            for node in item.get("nodes", []):
-                label = node["label"]
-                node_id = node["id"]
-                properties = node.get("properties", {})
-                
-                # Build property string for Cypher query
-                props_str = ", ".join([f"n.{key} = ${key}" for key in properties.keys()])
-                
-                # MERGE node by id and set properties
-                query = f"""
-                MERGE (n:{label} {{id: $id}})
-                SET {props_str if props_str else ''}
-                """
-                tx.run(query, id=node_id, **properties)
-            
-            # Merge edges
-            for edge in item.get("edges", []):
-                from_id = edge["from"]
-                to_id = edge["to"]
-                rel_type = edge["type"]
-                properties = edge.get("properties", {})
-                
-                # Build property string for relationship
-                props_str = ", ".join([f"r.{key} = ${key}" for key in properties.keys()])
-                
-                # MERGE relationship between nodes
-                query = f"""
-                MATCH (a {{id: $from_id}})
-                MATCH (b {{id: $to_id}})
-                MERGE (a)-[r:{rel_type}]->(b)
-                {f'SET {props_str}' if props_str else ''}
-                """
-                tx.run(query, from_id=from_id, to_id=to_id, **properties)
-    
-    def close(self):
-        """Close the Neo4j driver connection."""
-        self.driver.close()
+        # Read from Env Vars (injected by Ray Cluster environment)
+        uri = os.getenv("NEO4J_URI", "bolt://neo4j-cluster:7687")
+        user = os.getenv("NEO4J_USER", "neo4j")
+        password = os.getenv("NEO4J_PASSWORD", "changeme")
+        
+        self.driver = GraphDatabase.driver(uri, auth=(user, password))
 
-                
-if __name__ == "__main__":
-    indexer = Neo4jIndexer()
-    try:
-        sample_batch = [
-            {
-                "nodes": [
-                    {"id": "1", "label": "Person", "properties": {"name": "Alice"}},
-                    {"id": "2", "label": "Person", "properties": {"name": "Bob"}}
-                ],
-                "edges": [
-                    {"from": "1", "to": "2", "type": "KNOWS", "properties": {"since": 2020}}
-                ]
-            }
-        ]
-        indexer.write(sample_batch)
-        print("✓ Data successfully written to Neo4j")
-    finally:
-        indexer.close()
+    def write(self, batch: List[Dict[str, Any]]):
+        """
+        Called by Ray Data `write_datasource`.
+        Receives a list of rows (dicts).
+        """
+        # 1. Flatten the batch into lists of all nodes and edges
+        all_nodes = []
+        all_edges = []
+        
+        for row in batch:
+            # Each row corresponds to a text chunk
+            if "graph_nodes" in row:
+                all_nodes.extend(row["graph_nodes"])
+            if "graph_edges" in row:
+                all_edges.extend(row["graph_edges"])
+        
+        if not all_nodes and not all_edges:
+            return
+
+        # 2. Execute Batch Write Transaction
+        with self.driver.session() as session:
+            session.execute_write(self._merge_graph_data, all_nodes, all_edges)
+
+    @staticmethod
+    def _merge_graph_data(tx, nodes, edges):
+        """
+        Cypher query to idempotent MERGE (Upsert) data.
+        """
+        # 1. Merge Nodes
+        # UNWIND expands the list $nodes into individual rows
+        cypher_nodes = """
+        UNWIND $nodes AS n
+        MERGE (node:Entity {name: n.id})
+        SET node.type = n.type
+        """
+        tx.run(cypher_nodes, nodes=nodes)
+        
+        # 2. Merge Edges
+        # Matches existing source/target and creates relationship if missing
+        cypher_edges = """
+        UNWIND $edges AS e
+        MATCH (source:Entity {name: e.source})
+        MATCH (target:Entity {name: e.target})
+        MERGE (source)-[r:RELATED {type: e.type}]->(target)
+        """
+        tx.run(cypher_edges, edges=edges)
