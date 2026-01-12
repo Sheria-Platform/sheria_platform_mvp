@@ -1,0 +1,11 @@
+// eval/datasets/golden.json
+[
+  {
+    "question": "Explain the difference between the Horizontal Pod Autoscaler (HPA) and the Cluster Autoscaler.",
+    "ground_truth": "The HPA scales the number of Pods based on CPU/metrics. The Cluster Autoscaler scales the number of Nodes when pods are unschedulable.",
+    "contexts": [
+      "The Horizontal Pod Autoscaler is a Kubernetes component that adjusts the number of replicas...",
+      "The Cluster Autoscaler is a tool that automatically adjusts the size of the Kubernetes cluster..."
+    ]
+  }
+]
