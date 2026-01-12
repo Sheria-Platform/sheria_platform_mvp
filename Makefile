@@ -13,6 +13,7 @@ help:
 
 install:
 	pip install -r services/api/requirements.txt
+	pip install -r models/requirements.txt
 	pip install -r pipelines/ingestion/requirements.txt # (Hypothetical separate deps)
 
 # Run Local Development Environment
