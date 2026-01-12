@@ -1,0 +1,16 @@
+# infra/karpenter/provisioner-gpu.yaml
+apiVersion: karpenter.sh/v1beta1
+kind: Provisioner
+metadata:
+  name: gpu-provisioner
+spec:
+  requirements:
+    - key: "karpenter.k8s.aws/instance-category"
+      operator: In
+      values: ["g"] # g5 instances (Nvidia A10G)
+    - key: "karpenter.sh/capacity-type"
+      operator: In
+      values: ["on-demand", "spot"]
+  
+  # Kill the node if it's empty for 30 seconds
+  ttlSecondsAfterEmpty: 30
