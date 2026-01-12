@@ -1,8 +1,7 @@
-# pipelines/ingestion/graph/extractor.py
-import httpx
-from typing import Dict, Any
+# pipelines/ingestion/graph/extractor_graph.py
 import json
-
+import httpx
+from typing import Dict, Any, List
 from pipelines.ingestion.graph.schema_graph import GraphSchema
 
 class GraphExtractor:
@@ -13,7 +12,7 @@ class GraphExtractor:
     def __init__(self):
         # Point to the internal Ray Serve LLM endpoint
         # We use the internal K8s DNS name
-        self.llm_endpoint = "http://192.168.214.21:8000/v1/chat/completions"
+        self.llm_endpoint = "http://ray-serve-llm:8000/llm/chat"
         self.client = httpx.Client(timeout=60.0) # Long timeout for reasoning
 
     def __call__(self, batch: Dict[str, Any]) -> Dict[str, Any]:
@@ -64,14 +63,3 @@ class GraphExtractor:
         batch["graph_nodes"] = nodes_list
         batch["graph_edges"] = edges_list
         return batch
-
-if __name__ == "__main__":
-    # Simple test
-    extractor = GraphExtractor()
-    test_batch = {
-        "text": [
-            "Hello world Ray is great for scaling"
-        ]
-    }
-    result = extractor(test_batch)
-    print(result)

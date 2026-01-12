@@ -1,18 +1,46 @@
 # pipelines/ingestion/graph/schema_graph.py
-from typing import Literal
+from typing import List, Literal
 
-# Restrict the LLM to only these entities/relationships
-VALID_NODE_LABELS = Literal["Person", "Organization", "Location", "Concept", "Product"]
+# Allowed Node Labels (Entities)
+# We restrict the LLM to only find these types of entities to keep the graph clean.
+VALID_NODE_LABELS = Literal[
+    "Person", 
+    "Organization", 
+    "Location", 
+    "Concept", 
+    "Document", 
+    "Event", 
+    "Product"
+]
 
-VALID_RELATION_TYPES = Literal["WORKS_FOR", "LOCATED_IN", "RELATES_TO", "PART_OF"]
+# Allowed Edge Types (Relationships)
+VALID_RELATION_TYPES = Literal[
+    "WORKS_FOR",
+    "LOCATED_IN",
+    "RELATES_TO",
+    "MENTIONS",
+    "PART_OF",
+    "CREATED_BY",
+    "HAS_FEATURE"
+]
 
 class GraphSchema:
+    """
+    Central source of truth for the Knowledge Graph structure.
+    Used by the Extractor prompt to ensure consistency.
+    """
     @staticmethod
     def get_system_prompt() -> str:
-        return f"Extract nodes/edges. Allowed Labels: {VALID_NODE_LABELS.__args__}..."
-    
-    
-if __name__ == "__main__":
-    # Example usage
-    prompt = GraphSchema.get_system_prompt()
-    print(prompt)
+        return f"""
+        You are a Knowledge Graph extraction engine. 
+        Extract nodes and relationships from the text.
+        
+        Allowed Node Labels: {VALID_NODE_LABELS.__args__}
+        Allowed Relationship Types: {VALID_RELATION_TYPES.__args__}
+        
+        Return JSON format only:
+        {{
+            "nodes": [{{"id": "Name", "type": "Label"}}],
+            "edges": [{{"source": "Name", "target": "Name", "type": "RELATION"}}]
+        }}
+        """
