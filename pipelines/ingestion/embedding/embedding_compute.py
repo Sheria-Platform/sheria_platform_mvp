@@ -1,26 +1,36 @@
 # pipelines/ingestion/embedding/compute.py
 import httpx
+from typing import Dict, Any
 
 class BatchEmbedder:
-    """Ray Actor that batches text chunks and calls the Embedding Service."""
+    """
+    Callable Class for Ray Data.
+    Maintains a session for efficiency.
+    """
     def __init__(self):
-        # We point to the internal K8s service DNS
-        self.endpoint = "http://192.168.214.21:11434/api/embeddings"
+        # We hardcode internal DNS for Ray Service
+        self.endpoint = "http://ray-serve-embed:8000/embed"
         self.client = httpx.Client(timeout=30.0)
-    def __call__(self, batch):
-        """Sends a batch of text to the GPU service."""
-        response = self.client.post(
-            self.endpoint, 
-            json={"prompt": batch["text"], "task_type": "document", "model": "nomic-embed-text"}
-        )
-        print(response.json())
-        batch["vector"] = response.json()["embedding"]
-        return batch
-    
-if __name__ == "__main__":
-    # Example usage
-    embedder = BatchEmbedder()
-    sample_batch = {"text": "Hello world Ray is great for scaling"}
-    result = embedder(sample_batch)
-    print(result)
-    
+
+    def __call__(self, batch: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Receives a batch of text chunks.
+        Returns the batch with 'embedding' field added.
+        """
+        texts = batch["text"]
+        
+        try:
+            response = self.client.post(
+                self.endpoint,
+                json={"text": texts, "task_type": "document"}
+            )
+            response.raise_for_status()
+            embeddings = response.json()["embeddings"]
+            
+            # Add embeddings to the batch dictionary
+            batch["vector"] = embeddings
+            return batch
+            
+        except Exception as e:
+            # In Ray, raising exception triggers retry logic automatically
+            raise e
