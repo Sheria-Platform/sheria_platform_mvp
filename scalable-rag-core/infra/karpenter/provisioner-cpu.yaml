@@ -1,0 +1,18 @@
+# infra/karpenter/provisioner-cpu.yaml
+apiVersion: karpenter.sh/v1beta1
+kind: Provisioner
+metadata:
+  name: cpu-provisioner
+spec:
+  requirements:
+    - key: "karpenter.k8s.aws/instance-family"
+      operator: In
+      values: ["m6i", "c6i"]
+    - key: "karpenter.sh/capacity-type"
+      operator: In
+      values: ["spot"] # Cost optimization
+  limits:
+    resources:
+      cpu: 1000
+  consolidation:
+    enabled: true # Repacks pods to kill empty nodes
