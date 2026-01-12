@@ -9,6 +9,7 @@ async def run_python_code(code: str) -> str:
     """
     Tool: Python Code Interpreter.
     Executes Python code in a secure, isolated sandbox.
+    Use this for math, data analysis, or complex logic.
     """
     try:
         async with httpx.AsyncClient() as client:
