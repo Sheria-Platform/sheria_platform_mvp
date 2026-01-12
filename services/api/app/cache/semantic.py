@@ -40,6 +40,7 @@ class SemanticCache:
             logger.warning(f"Semantic cache lookup failed: {e}")
             
         return None
+
     async def set_cached_response(self, query: str, answer: str):
         """
         Save a Q&A pair to the cache.
