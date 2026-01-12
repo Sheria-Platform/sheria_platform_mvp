@@ -1,0 +1,24 @@
+# deploy/ray/ray-serve-llm.yaml
+apiVersion: ray.io/v1
+
+kind: RayService
+
+metadata:
+  name: llm-service
+
+spec:
+  serveConfigV2: |
+    applications:
+      - name: llama3
+        import_path: services.api.app.models.vllm_engine:app
+        runtime_env:
+          pip: ["vllm==0.3.0"]
+          env_vars:
+            MODEL_ID: "meta-llama/Meta-Llama-3-70B-Instruct"
+        deployments:
+          - name: VLLMDeployment
+            autoscaling_config:
+              min_replicas: 1
+              max_replicas: 10
+            ray_actor_options:
+              num_gpus: 1
