@@ -3,7 +3,7 @@ import logging
 from services.api.app.agents.state import AgentState
 from services.api.app.tools.calculator import calculate
 from services.api.app.tools.graph_search import search_graph_tool
-from services.api.app.tools.web_search import web_search
+# from services.api.app.tools.web_search import web_search (Future)
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +18,7 @@ async def tool_node(state: AgentState) -> dict:
     plan_data = state.get("plan", [])
     if not plan_data:
         return {"messages": [{"role": "system", "content": "No tool selected."}]}
+
     # Assume Planner passed specific instruction in state (simplified)
     # Real implementations use OpenAI function calling API or JSON parsing
     tool_name = state.get("tool_choice", "calculator") 
@@ -35,6 +36,7 @@ async def tool_node(state: AgentState) -> dict:
         
     else:
         result = "Unknown tool requested."
+
     # Return the observation
     return {
         "messages": [

@@ -9,10 +9,12 @@ logger = logging.getLogger(__name__)
 SYSTEM_PROMPT = """
 You are a RAG Planning Agent.
 Analyze the User Query and Conversation History.
+
 Decide the next step:
 1. If the user greets (Hello/Hi), output "direct_answer".
 2. If the user asks a specific question requiring data, output "retrieve".
 3. If the user asks for math/code, output "tool_use".
+
 Output JSON format ONLY:
 {
     "action": "retrieve" | "direct_answer" | "tool_use",
