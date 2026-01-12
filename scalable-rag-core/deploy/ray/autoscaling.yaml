@@ -1,0 +1,11 @@
+# deploy/ray/autoscaling.yaml
+autoscaling:
+  enabled: true
+  upscaling_speed: 1.0 # Aggressive upscaling
+  idle_timeout_minutes: 5 # Kill worker if idle for 5 mins
+  
+  worker_nodes:
+    gpu_worker_group:
+      min_workers: 0
+      max_workers: 20
+      resources: {"CPU": 4, "memory": 32Gi, "GPU": 1}
