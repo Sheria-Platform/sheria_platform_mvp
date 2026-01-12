@@ -1,3 +1,11 @@
+# libs/retry/backoff.py
+import asyncio
+import logging
+import random
+from functools import wraps
+
+logger = logging.getLogger(__name__)
+
 def exponential_backoff(max_retries: int = 3, base_delay: float = 1.0, max_delay: float = 10.0):
     """
     Decorator for Exponential Backoff with Jitter.
