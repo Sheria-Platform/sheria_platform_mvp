@@ -1,6 +1,13 @@
 # scripts/migrate_db.py
-import subprocess
+# This is a wrapper around the Alembic CLI.
+# Setup:
+# 1. pip install alembic
+# 2. alembic init migrations
+# 3. Edit alembic.ini to point to your DB URL
+# 4. Edit migrations/env.py to import your models
+
 import os
+import subprocess
 from services.api.app.config import settings
 
 def run_migrations():
