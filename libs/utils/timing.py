@@ -1,4 +1,10 @@
 # libs/utils/timing.py
+import time
+import functools
+import logging
+
+logger = logging.getLogger("performance")
+
 def measure_time(func):
     """
     Decorator to log execution time of synchronous functions.
