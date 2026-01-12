@@ -8,7 +8,6 @@ import torch
     num_replicas=1,
     ray_actor_options={"num_gpus": 0.5} # Share GPU
 )
-
 class EmbedDeployment:
     def __init__(self):
         # Load model onto GPU
@@ -17,6 +16,7 @@ class EmbedDeployment:
         
         # Compile for speed (Optional, requires PyTorch 2.0+)
         self.model = torch.compile(self.model)
+
     async def __call__(self, request):
         body = await request.json()
         texts = body.get("text")

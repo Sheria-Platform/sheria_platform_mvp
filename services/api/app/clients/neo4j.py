@@ -10,7 +10,6 @@ class Neo4jClient:
     Singleton wrapper for the Neo4j Driver.
     Supports Async execution for high-concurrency API handling.
     """
-
     def __init__(self):
         self._driver = None
 

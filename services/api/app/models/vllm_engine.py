@@ -19,6 +19,7 @@ class VLLMDeployment:
             max_model_len=8192
         )
         self.engine = AsyncLLMEngine.from_engine_args(args)
+
     async def __call__(self, request):
         body = await request.json()
         messages = body.get("messages", [])

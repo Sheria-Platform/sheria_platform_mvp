@@ -10,9 +10,10 @@ class VectorDBClient:
         self.client = AsyncQdrantClient(
             host=settings.QDRANT_HOST,
             port=settings.QDRANT_PORT,
-            # In prod, we enable gRPC for slightly faster performance
+            # In prod, we might enable gRPC for slightly faster performance
             prefer_grpc=True 
         )
+
     async def search(self, vector: list[float], limit: int = 5):
         """
         Performs Semantic Search.

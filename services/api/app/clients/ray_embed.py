@@ -15,6 +15,7 @@ class RayEmbedClient:
             )
             response.raise_for_status()
             return response.json()["embedding"]
+
     async def embed_documents(self, texts: list[str]) -> list[list[float]]:
         """Used during ingestion"""
         async with httpx.AsyncClient(timeout=60.0) as client:

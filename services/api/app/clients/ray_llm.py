@@ -15,6 +15,7 @@ class RayLLMClient:
         self.endpoint = settings.RAY_LLM_ENDPOINT 
         # Client is initialized in startup_event
         self.client: Optional[httpx.AsyncClient] = None
+
     async def start(self):
         """Called during App Startup"""
         # Limits: prevent opening too many connections to Ray
@@ -24,14 +25,17 @@ class RayLLMClient:
             limits=limits
         )
         logger.info("Ray LLM Client initialized.")
+
     async def close(self):
         """Called during App Shutdown"""
         if self.client:
             await self.client.aclose()
+
     @backoff.on_exception(backoff.expo, httpx.HTTPError, max_tries=3)
     async def chat_completion(self, messages: List[Dict], temperature: float = 0.7, json_mode: bool = False) -> str:
         if not self.client:
             raise RuntimeError("Client not initialized. Call start() first.")
+
         payload = {
             "messages": messages,
             "temperature": temperature,
