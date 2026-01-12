@@ -1,4 +1,18 @@
 # services/api/app/routes/feedback.py
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
+from sqlalchemy import text
+from services.api.app.memory.postgres import AsyncSessionLocal
+from services.api.app.auth.jwt import get_current_user
+
+router = APIRouter()
+
+class FeedbackRequest(BaseModel):
+    session_id: str
+    message_id: int # ID of the assistant message from chat_history
+    score: int # 1 (Like) or -1 (Dislike)
+    comment: str = None
+
 @router.post("/")
 async def submit_feedback(
     req: FeedbackRequest,

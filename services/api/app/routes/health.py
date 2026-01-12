@@ -1,4 +1,18 @@
 # services/api/app/routes/health.py
+from fastapi import APIRouter, Response, status
+from services.api.app.cache.redis import redis_client
+from services.api.app.clients.neo4j import neo4j_client
+
+router = APIRouter()
+
+@router.get("/liveness")
+async def liveness():
+    """
+    K8s Liveness Probe.
+    Returns 200 if the server process is running.
+    """
+    return {"status": "ok"}
+
 @router.get("/readiness")
 async def readiness(response: Response):
     """
