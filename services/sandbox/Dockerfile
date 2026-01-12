@@ -19,6 +19,10 @@ RUN pip install flask
 # We limit the user process capabilities
 USER sandbox_user
 
+# 6. Network Policy
+# Note: In K8s, we will apply a NetworkPolicy to deny all Egress traffic
+# except returning the HTTP response to the API.
+
 # 7. Entrypoint
 EXPOSE 8080
 CMD ["python", "runner.py"]

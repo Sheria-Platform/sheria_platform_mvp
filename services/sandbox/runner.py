@@ -16,6 +16,7 @@ def execute_code_safe(code: str, queue):
     buffer = io.StringIO()
     try:
         with contextlib.redirect_stdout(buffer):
+            # Dangerous! Only run this in isolated container.
             # Restricted globals can add slight safety layer.
             exec(code, {"__builtins__": __builtins__}, {})
         queue.put({"status": "success", "output": buffer.getvalue()})
@@ -27,6 +28,7 @@ def run_code():
     data = request.json
     code = data.get("code", "")
     timeout = data.get("timeout", 5) # 5 seconds max
+
     queue = multiprocessing.Queue()
     p = multiprocessing.Process(target=execute_code_safe, args=(code, queue))
     p.start()
