@@ -1,5 +1,7 @@
 # eval/judges/llm_judge.py
+import asyncio
 from pydantic import BaseModel
+from typing import List
 from services.api.app.clients.ray_llm import llm_client
 
 class Grade(BaseModel):
@@ -9,11 +11,14 @@ class Grade(BaseModel):
 JUDGE_PROMPT = """
 You are an impartial judge evaluating a RAG system.
 You will be given a Question, a Ground Truth Answer, and the System's Answer.
+
 Rate the System's Answer on a scale of 1 to 5:
 1: Completely wrong or hallucinated.
 3: Partially correct but missing key details.
 5: Perfect, comprehensive, and matches Ground Truth logic.
+
 Output JSON only: {{"score": int, "reasoning": "string"}}
+
 Question: {question}
 Ground Truth: {ground_truth}
 System Answer: {system_answer}
