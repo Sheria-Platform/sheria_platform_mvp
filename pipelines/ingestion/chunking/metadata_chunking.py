@@ -1,18 +1,23 @@
 # pipelines/ingestion/chunking/metadata.py
-import hashlib
 import datetime
+import hashlib
 
 def enrich_metadata(base_metadata: dict, content: str) -> dict:
-    """Adds hash and timestamp for deduplication and freshness tracking."""
-    return {
-        **base_metadata,
-        "chunk_hash": hashlib.md5(content.encode('utf-8')).hexdigest(),
-        "ingested_at": datetime.datetime.now(datetime.UTC).isoformat()
-    }
+    """
+    Adds calculated fields to the chunk metadata.
+    """
+    # 1. Compute Hash (For deduplication)
+    content_hash = hashlib.md5(content.encode('utf-8')).hexdigest()
     
-if __name__ == "__main__":
-    # Example usage
-    base_metadata = {"filename": "sample.txt", "type": "text"}
-    content = "This is a sample content for metadata enrichment."
-    enriched = enrich_metadata(base_metadata, content)
-    print(enriched)
+    # 2. Timestamp
+    ingest_time = datetime.datetime.utcnow().isoformat()
+    
+    # 3. Merge
+    enriched = base_metadata.copy()
+    enriched.update({
+        "chunk_hash": content_hash,
+        "ingested_at": ingest_time,
+        "length": len(content)
+    })
+    
+    return enriched
