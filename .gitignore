@@ -1,7 +1,7 @@
 data/*
 .DS_Store
-scalable-rag-core/pipelines/ingestion/loaders/__pycache__/html.cpython-313.pyc
-scalable-rag-core/resources/
+pipelines/ingestion/loaders/__pycache__/html.cpython-313.pyc
+resources/
 # Created by https://www.toptal.com/developers/gitignore/api/python
 # Edit at https://www.toptal.com/developers/gitignore?templates=python
 
@@ -178,6 +178,6 @@ poetry.toml
 pyrightconfig.json
 
 # End of https://www.toptal.com/developers/gitignore/api/python
-scalable-rag-core/pipelines/ingestion/tests/sample.docx
-scalable-rag-core/test_data/*
+pipelines/ingestion/tests/sample.docx
+test_data/*
 kenya_law_data/*
