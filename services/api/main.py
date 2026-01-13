@@ -1,12 +1,15 @@
 # services/api/main.py
 from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
+
+from services.api.app.cache.redis import redis_client
 from services.api.app.clients.neo4j import neo4j_client
 from services.api.app.clients.qdrant import qdrant_client
-from services.api.app.clients.ray_llm import llm_client
 from services.api.app.clients.ray_embed import embed_client
-from services.api.app.cache.redis import redis_client
-from services.api.app.routes import chat, upload, health
+from services.api.app.clients.ray_llm import llm_client
+from services.api.app.routes import chat, health, upload
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -19,29 +22,30 @@ async def lifespan(app: FastAPI):
     neo4j_client.connect()
     await redis_client.connect()
     await qdrant_client.connect()
-    
+
     # Only call start/close if methods exist (Ray clients might not need them)
-    if hasattr(llm_client, 'start') and callable(getattr(llm_client, 'start')):
+    if hasattr(llm_client, "start") and callable(getattr(llm_client, "start")):
         await llm_client.start()
-    if hasattr(embed_client, 'start') and callable(getattr(embed_client, 'start')):
+    if hasattr(embed_client, "start") and callable(getattr(embed_client, "start")):
         await embed_client.start()
-    
+
     print("All clients initialized successfully!")
-    
+
     yield
-    
+
     # 2. Shutdown
     print("Closing clients...")
     await neo4j_client.close()
     await redis_client.close()
     await qdrant_client.disconnect()
-    
-    if hasattr(llm_client, 'close') and callable(getattr(llm_client, 'close')):
+
+    if hasattr(llm_client, "close") and callable(getattr(llm_client, "close")):
         await llm_client.close()
-    if hasattr(embed_client, 'close') and callable(getattr(embed_client, 'close')):
+    if hasattr(embed_client, "close") and callable(getattr(embed_client, "close")):
         await embed_client.close()
-    
+
     print("All clients closed successfully!")
+
 
 # FastAPI Application
 app = FastAPI(title="Enterprise RAG Platform", version="1.0.0", lifespan=lifespan)
@@ -53,5 +57,6 @@ app.include_router(health.router, prefix="/health", tags=["Health"])
 
 if __name__ == "__main__":
     import uvicorn
+
     # In production, this is run via Gunicorn/Uvicorn in Docker
     uvicorn.run(app, host="0.0.0.0", port=8000)

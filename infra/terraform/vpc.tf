@@ -23,7 +23,7 @@ module "vpc" {
   # Enable NAT Gateway so private pods can download Docker images/Models from internet
   enable_nat_gateway = true
   single_nat_gateway = false # High Budget: Use one NAT per AZ for redundancy
-  
+
   # Enable DNS hostnames (required for EKS)
   enable_dns_hostnames = true
   enable_dns_support   = true

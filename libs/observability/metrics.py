@@ -3,23 +3,20 @@ from prometheus_client import Counter, Histogram
 
 # 1. Counter: Only goes up (e.g., Total Requests)
 REQUEST_COUNT = Counter(
-    "rag_api_requests_total", 
+    "rag_api_requests_total",
     "Total number of requests",
-    ["method", "endpoint", "status"]
+    ["method", "endpoint", "status"],
 )
 
 # 2. Histogram: Tracks distribution (e.g., Latency, Token Count)
-REQUEST_LATENCY = Histogram(
-    "rag_api_latency_seconds",
-    "Request latency",
-    ["endpoint"]
-)
+REQUEST_LATENCY = Histogram("rag_api_latency_seconds", "Request latency", ["endpoint"])
 
 TOKEN_USAGE = Counter(
     "rag_llm_tokens_total",
     "Total LLM tokens consumed",
-    ["model", "type"] # type=prompt vs completion
+    ["model", "type"],  # type=prompt vs completion
 )
+
 
 def track_request(method: str, endpoint: str, status: int):
     """Helper to increment request counter"""

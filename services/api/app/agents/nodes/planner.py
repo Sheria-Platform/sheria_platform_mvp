@@ -1,6 +1,7 @@
 # services/api/app/agents/nodes/planner.py
 import json
 import logging
+
 from services.api.app.agents.state import AgentState
 from services.api.app.clients.ray_llm import llm_client
 
@@ -23,42 +24,47 @@ Output JSON format ONLY:
 }
 """
 
+
 async def planner_node(state: AgentState) -> dict:
     """
     Decides the path through the LangGraph.
     """
     logger.info("Planner Node: Analyzing query...")
-    
+
     # Extract latest user message
     # state['messages'] is a list of dicts or objects
     last_message = state["messages"][-1]
-    user_query = last_message.content if hasattr(last_message, 'content') else last_message['content']
+    user_query = (
+        last_message.content
+        if hasattr(last_message, "content")
+        else last_message["content"]
+    )
 
     # Call LLM to plan
     try:
         response_text = await llm_client.chat_completion(
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_query}
+                {"role": "user", "content": user_query},
             ],
-            temperature=0.0 # Deterministic planning
+            temperature=0.0,  # Deterministic planning
         )
-        
+
         # Parse JSON
         plan = json.loads(response_text)
-        
+
         logger.info(f"Plan derived: {plan['action']}")
-        
+
         # Update State
         return {
             "current_query": plan.get("refined_query", user_query),
-            "plan": [plan["reasoning"]]
+            "plan": [plan["reasoning"]],
         }
-        
+
     except Exception as e:
         logger.error(f"Planning failed: {e}")
         # Fallback: Assume we need to search
         return {
             "current_query": user_query,
-            "plan": ["Error in planning, defaulting to retrieval."]
+            "plan": ["Error in planning, defaulting to retrieval."],
         }

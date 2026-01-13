@@ -1,7 +1,9 @@
 # services/api/app/observability.py
 from fastapi import FastAPI
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+
 from libs.observability.tracing import configure_tracing
+
 
 def setup_observability(app: FastAPI):
     """

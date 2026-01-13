@@ -4,7 +4,7 @@ resource "aws_s3_bucket" "documents" {
   bucket = "rag-platform-documents-prod" # Must be globally unique
 
   # Force Destroy is FALSE for production data safety
-  force_destroy = false 
+  force_destroy = false
 
   tags = {
     Name = "Documents Bucket"

@@ -1,11 +1,14 @@
 # services/api/app/clients/qdrant.py
-from qdrant_client import QdrantClient, AsyncQdrantClient
+from qdrant_client import AsyncQdrantClient
+
 from services.api.app.config import settings
+
 
 class VectorDBClient:
     """
     Async Client for Qdrant.
     """
+
     def __init__(self):
         self.client = AsyncQdrantClient(
             host=settings.QDRANT_HOST,
@@ -13,7 +16,7 @@ class VectorDBClient:
             # In prod, we might enable gRPC for slightly faster performance
             prefer_grpc=True,
             # Skip version compatibility check to avoid warnings
-            check_compatibility=False
+            check_compatibility=False,
         )
 
     async def connect(self):
@@ -22,7 +25,9 @@ class VectorDBClient:
         """
         try:
             collections = await self.client.get_collections()
-            print(f"✓ Qdrant connected successfully. Collections: {len(collections.collections)}")
+            print(
+                f"✓ Qdrant connected successfully. Collections: {len(collections.collections)}"
+            )
         except Exception as e:
             print(f"✗ Qdrant connection failed: {e}")
             raise
@@ -45,8 +50,9 @@ class VectorDBClient:
             collection_name=settings.QDRANT_COLLECTION,
             query_vector=vector,
             limit=limit,
-            with_payload=True
+            with_payload=True,
         )
+
 
 # Global instance
 qdrant_client = VectorDBClient()

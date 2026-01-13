@@ -34,5 +34,5 @@ resource "aws_security_group" "neo4j_sg" {
 # That Helm chart will request a Persistent Volume (PVC).
 # AWS EKS default StorageClass (gp2) is okay, but for High Budget, we want gp3 or io2.
 
-# We will define a Storage Class in Kubernetes manifests later, 
+# We will define a Storage Class in Kubernetes manifests later,
 # relying on the EBS CSI driver installed on EKS.

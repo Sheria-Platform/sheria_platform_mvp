@@ -25,7 +25,7 @@ module "eks" {
       min_size       = 2
       max_size       = 5
       desired_size   = 2
-      
+
       # Taints prevent App pods from scheduling here accidentally
       taints = [
         {

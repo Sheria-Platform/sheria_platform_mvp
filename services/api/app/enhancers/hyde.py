@@ -2,13 +2,14 @@
 from services.api.app.clients.ray_llm import llm_client
 
 SYSTEM_PROMPT = """
-You are a helpful assistant. 
-Write a hypothetical paragraph that answers the user's question. 
-It does not need to be factually correct, but it must use the correct vocabulary and structure 
+You are a helpful assistant.
+Write a hypothetical paragraph that answers the user's question.
+It does not need to be factually correct, but it must use the correct vocabulary and structure
 that a relevant document would have.
 
 Question: {question}
 """
+
 
 async def generate_hypothetical_document(question: str) -> str:
     """
@@ -19,8 +20,8 @@ async def generate_hypothetical_document(question: str) -> str:
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT.format(question=question)},
             ],
-            temperature=0.7 # Higher temp to generate diverse vocabulary
+            temperature=0.7,  # Higher temp to generate diverse vocabulary
         )
         return hypothetical_doc
     except Exception:
-        return question # Fallback
+        return question  # Fallback

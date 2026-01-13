@@ -30,7 +30,7 @@ module "ingestion_irsa_role" {
   version = "~> 5.0"
 
   role_name = "rag-ingestion-role"
-  
+
   # Trust relationship: Only the 'ray-worker' service account in 'default' ns can use this
   oidc_providers = {
     main = {

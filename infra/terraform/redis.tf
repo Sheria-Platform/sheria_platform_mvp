@@ -23,10 +23,10 @@ resource "aws_elasticache_replication_group" "redis" {
   node_type            = "cache.t4g.medium" # Cost effective Graviton
   num_cache_clusters   = 2 # Primary + Replica for HA
   port                 = 6379
-  
+
   subnet_group_name    = aws_elasticache_subnet_group.redis_subnet.name
   security_group_ids   = [aws_security_group.redis_sg.id]
-  
+
   at_rest_encryption_enabled = true
   transit_encryption_enabled = true # Requires SSL/TLS (supported by our python client)
 }

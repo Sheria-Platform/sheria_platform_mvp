@@ -1,4 +1,4 @@
-version: "3.5"
+version: '3.5'
 services:
   admin_app_gateway:
     # env_file:
@@ -7,7 +7,7 @@ services:
     image: data_scrapper:latest
     command: bash -c "python3 data_scrapper.py"
     ports:
-      - "5701:5701"
+    - 5701:5701
     deploy:
       update_config:
         parallelism: 1
@@ -21,10 +21,10 @@ services:
       placement:
         constraints: [node.role == manager]
     volumes:
-      - .:/src
-      - .:/kenya_law_data
+    - .:/src
+    - .:/kenya_law_data
     networks:
-      - data_scrapper_network
+    - data_scrapper_network
 networks:
   data_scrapper_network:
     external: true

@@ -1,15 +1,19 @@
 # services/api/app/clients/neo4j.py
-from neo4j import GraphDatabase, AsyncGraphDatabase
-from services.api.app.config import settings
 import logging
 
+from neo4j import AsyncGraphDatabase
+
+from services.api.app.config import settings
+
 logger = logging.getLogger(__name__)
+
 
 class Neo4jClient:
     """
     Singleton wrapper for the Neo4j Driver.
     Supports Async execution for high-concurrency API handling.
     """
+
     def __init__(self):
         self._driver = None
 
@@ -20,7 +24,7 @@ class Neo4jClient:
                 # Create driver with authentication
                 self._driver = AsyncGraphDatabase.driver(
                     settings.NEO4J_URI,
-                    auth=(settings.NEO4J_USER, settings.NEO4J_PASSWORD)
+                    auth=(settings.NEO4J_USER, settings.NEO4J_PASSWORD),
                 )
                 logger.info("Connected to Neo4j successfully.")
             except Exception as e:
@@ -38,10 +42,11 @@ class Neo4jClient:
         """
         if not self._driver:
             await self.connect()
-            
+
         async with self._driver.session() as session:
             result = await session.run(cypher_query, parameters or {})
             return [record.data() async for record in result]
+
 
 # Global instance
 neo4j_client = Neo4jClient()

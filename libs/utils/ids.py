@@ -1,10 +1,12 @@
 # libs/utils/ids.py
-import uuid
 import hashlib
+import uuid
+
 
 def generate_session_id() -> str:
     """Generate a standard UUID for chat sessions"""
     return str(uuid.uuid4())
+
 
 def generate_file_id(content: bytes) -> str:
     """
@@ -12,6 +14,7 @@ def generate_file_id(content: bytes) -> str:
     Prevents uploading the exact same file twice.
     """
     return hashlib.md5(content).hexdigest()
+
 
 def generate_trace_id() -> str:
     """Generate ID for OpenTelemetry traces"""

@@ -55,7 +55,7 @@ services:
       MINIO_ROOT_PASSWORD: minioadmin
     volumes:
       - minio-data:/data
-    
+
 volumes:
   pg_data:
   qdrant_data:

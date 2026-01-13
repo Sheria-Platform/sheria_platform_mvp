@@ -1,26 +1,26 @@
 model_config:
   # "Qwen/Qwen2-2B-Instruct"
-  model_id: "Qwen/Qwen2.5-2B-Instruct"  
-  
+  model_id: Qwen/Qwen2.5-2B-Instruct
+
   # Qwen-2B can often run without quantization on single GPU
-  quantization: null  
-  
+  quantization:
+
   # Context window: Qwen2.5 supports 32K, Qwen2 supports 32K
-  max_model_len: 4028  
-  
+  max_model_len: 4028
+
   # Batching: Adjust based on your GPU memory
   max_num_seqs: 128
-  
+
   # Hardware requirements: Qwen-2B fits on single GPU
-  gpu_memory_utilization: 0.85  
+  gpu_memory_utilization: 0.85
 
   tensor_parallel_size: 1  # Single GPU is sufficient!
-  
+
   # Stop tokens for Qwen
   stop_token_ids: [151643, 151644, 151645]  # <|endoftext|>, <|im_start|>, <|im_end|>
 
   # Or use stop token strings instead:
-  stop: ["<|endoftext|>", "<|im_end|>"]
-  
+  stop: [<|endoftext|>, <|im_end|>]
+
   # Additional Qwen-specific settings you might need:
-  trust_remote_code: true  
+  trust_remote_code: true

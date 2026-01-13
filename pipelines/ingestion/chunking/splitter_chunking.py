@@ -1,6 +1,7 @@
 # pipelines/ingestion/chunking/splitter.py
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 
+
 def split_text(text: str, chunk_size: int = 512, overlap: int = 50):
     """
     Splits text into overlapping chunks.
@@ -9,17 +10,12 @@ def split_text(text: str, chunk_size: int = 512, overlap: int = 50):
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=chunk_size,
         chunk_overlap=overlap,
-        separators=["\n\n", "\n", ".", " ", ""]
+        separators=["\n\n", "\n", ".", " ", ""],
     )
-    
+
     chunks = splitter.create_documents([text])
-    
+
     return [
-        {
-            "text": chunk.page_content,
-            "metadata": {
-                "chunk_index": i
-            }
-        }
+        {"text": chunk.page_content, "metadata": {"chunk_index": i}}
         for i, chunk in enumerate(chunks)
     ]

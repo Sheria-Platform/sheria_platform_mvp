@@ -7,10 +7,10 @@ module "aurora" {
   name           = "${var.cluster_name}-postgres"
   engine         = "aurora-postgresql"
   engine_version = "15.3"
-  
+
   # SERVERLESS V2: Scales Compute (ACU) up/down based on load
-  instance_class = "db.serverless" 
-  
+  instance_class = "db.serverless"
+
   instances = {
     one = {}
     two = {} # High Availability (2 instances)
@@ -32,6 +32,6 @@ module "aurora" {
 
   master_username = "ragadmin"
   master_password = var.db_password
-  
+
   skip_final_snapshot = false # Always snapshot before deleting
 }

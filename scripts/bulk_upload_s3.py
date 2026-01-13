@@ -1,22 +1,23 @@
 # scripts/bulk_upload_s3.py
-import boto3
 import os
 import sys
-import threading
+
+import boto3
 from boto3.s3.transfer import TransferConfig
+
 
 def upload_directory(dir_path, bucket_name):
     """
     High-performance S3 uploader.
     """
-    s3 = boto3.client('s3')
-    
+    s3 = boto3.client("s3")
+
     # Configure multipart upload
     config = TransferConfig(
-        multipart_threshold=1024 * 25, # 25MB
-        max_concurrency=20, # 20 threads
+        multipart_threshold=1024 * 25,  # 25MB
+        max_concurrency=20,  # 20 threads
         multipart_chunksize=1024 * 25,
-        use_threads=True
+        use_threads=True,
     )
 
     files_to_upload = []
@@ -39,14 +40,16 @@ def upload_directory(dir_path, bucket_name):
 
     # Use ThreadPool to blast files
     from concurrent.futures import ThreadPoolExecutor
+
     with ThreadPoolExecutor(max_workers=10) as executor:
         executor.map(upload_file, files_to_upload)
 
     print("✅ Bulk upload finished.")
 
+
 if __name__ == "__main__":
     if len(sys.argv) < 3:
         print("Usage: python bulk_upload_s3.py <local_dir> <bucket_name>")
         sys.exit(1)
-    
+
     upload_directory(sys.argv[1], sys.argv[2])

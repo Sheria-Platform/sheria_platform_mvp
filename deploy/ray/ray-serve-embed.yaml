@@ -4,7 +4,7 @@ kind: RayService
 metadata:
   name: embed-service
 spec:
-  serveConfigV2: |
+  serveConfigV2: |-
     applications:
       - name: bge-m3
         import_path: services.api.app.models.embedding_engine:app

@@ -1,3 +1,4 @@
+---
 # deploy/ingress/kong.yaml
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -5,12 +6,12 @@ metadata:
   name: rag-kong-ingress
   annotations:
     kubernetes.io/ingress.class: kong
-    
+
     # Enable Rate Limiting Plugin
     konghq.com/plugins: global-rate-limit
-    
+
     # Strip the path prefix when forwarding to service
-    konghq.com/strip-path: "true"
+    konghq.com/strip-path: 'true'
 spec:
   rules:
   - host: api.your-rag-platform.com
@@ -30,6 +31,6 @@ apiVersion: configuration.konghq.com/v1
 kind: KongPlugin
 metadata:
   name: global-rate-limit
-config: 
+config:
   minute: 100
   policy: local
