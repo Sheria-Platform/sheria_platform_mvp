@@ -26,7 +26,8 @@ services:
   qdrant:
     image: qdrant/qdrant:v1.7.3
     ports:
-      - "6333:6333"
+      - "6333:6333"  # REST API
+      - "6334:6334"  # gRPC
     volumes:
       - qdrant_data:/qdrant/storage
 
@@ -61,3 +62,11 @@ volumes:
   neo4j_data:
   minio-data:
   redis-data:
+
+curl -X POST http://192.168.215.84:8000/api/v1/chat/stream \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YM8z9VRuJyNjHhYAcfkjSaAbFYhvKET4PcBhZw8xfeES" \
+  -d '{
+    "message": "Analyze the financial risks mentioned in the Q3 report.",
+    "session_id": "test-session-1"
+  }'
