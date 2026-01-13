@@ -38,9 +38,13 @@ class Settings(BaseSettings):
     # Security
     JWT_SECRET_KEY: str
     JWT_ALGORITHM: str = "HS256"
+    
+    # OpenTelemetry (Optional - for observability)
+    OTEL_EXPORTER_OTLP_ENDPOINT: Optional[str] = None
 
     class Config:
         env_file = ".env"
+        extra = 'ignore'  # This allows extra env vars without errors
 
 # Instantiate singleton
 settings = Settings()
