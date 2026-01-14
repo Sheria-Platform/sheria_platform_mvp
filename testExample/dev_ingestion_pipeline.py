@@ -197,7 +197,7 @@ class VectorIndexer:
         self.embedder = None
         if ENV == "dev":
             try:
-                from langchain_community.embeddings import OllamaEmbeddings
+                from langchain_ollama import OllamaEmbeddings
                 self.embedder = OllamaEmbeddings(model="nomic-embed-text")
                 print("✓ Using Ollama embeddings for DEV")
             except ImportError:
