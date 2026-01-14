@@ -52,8 +52,8 @@ services:
       - "9001:9001"
     environment:
       # Production security settings
-      MINIO_BROWSER_REDIRECT_URL: ${MINIO_BROWSER_REDIRECT_URL:-http://localhost:9001}
-      MINIO_SERVER_URL: ${MINIO_SERVER_URL:-http://localhost:9000}
+      MINIO_BROWSER_REDIRECT_URL: ${MINIO_BROWSER_REDIRECT_URL:-http://0.0.0.0:9001}
+      MINIO_SERVER_URL: ${MINIO_SERVER_URL:-http://0.0.0.0:9000}
       
       # Performance and reliability settings
       MINIO_CACHE: "on"
@@ -62,7 +62,7 @@ services:
       MINIO_CACHE_QUOTA: "80"
       
       # Health check settings
-      MINIO_NOTIFY_WEBHOOK_ENABLE_PRIMARY: "on"
+      #MINIO_NOTIFY_WEBHOOK_ENABLE_PRIMARY: "on"
       
       # Additional security headers
       MINIO_API_CORS_ALLOW_ORIGIN: "*"
