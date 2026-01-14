@@ -60,10 +60,7 @@ services:
       MINIO_CACHE_DRIVES: "/data/cache"
       MINIO_CACHE_EXCLUDE: "*.pdf"
       MINIO_CACHE_QUOTA: "80"
-      
-      # Health check settings
-      MINIO_NOTIFY_WEBHOOK_ENABLE_PRIMARY: "on"
-      
+            
       # Additional security headers
       MINIO_API_CORS_ALLOW_ORIGIN: "*"
       
