@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 def check_services():
     """Check if required services are running"""
     print("=" * 70)
+    
     print("CHECKING SERVICES")
     print("=" * 70)
     

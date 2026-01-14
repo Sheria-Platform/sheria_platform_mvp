@@ -19,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from minio import Minio
 from minio.error import S3Error
 
+ENV = os.getenv("ENV", "dev")
 
 class DevConfig:
     """Development environment configuration"""
@@ -190,6 +191,20 @@ class VectorIndexer:
         )
         self.models = models
         print(f"✓ Connected to Qdrant at {config.QDRANT_HOST}:{config.QDRANT_PORT}")
+
+        # DEV embeddings setup
+        if ENV == "dev":
+            try:
+                from langchain_community.embeddings import OllamaEmbeddings
+                self.embedder = OllamaEmbeddings(model="nomic-embed-text")
+                print("✓ Using Ollama embeddings for DEV")
+            except ImportError:
+                print("⚠ langchain_community not installed. Using mock embeddings for DEV.")
+                self.embedder = None
+        else:
+            import httpx
+            self.client_http = httpx.Client(timeout=30.0)
+            self.endpoint = config.EMBED_ENDPOINT
     
     def ensure_collection(self):
         """Create collection if it doesn't exist"""
@@ -209,22 +224,21 @@ class VectorIndexer:
             print(f"✓ Collection exists: {self.config.QDRANT_COLLECTION}")
     
     def embed_texts(self, texts: list[str]) -> list[list[float]]:
-        """Generate embeddings for texts (placeholder - connect to your model)"""
-        import httpx
-        
-        try:
-            # Try to use local embedding endpoint
-            response = httpx.post(
-                self.config.EMBED_ENDPOINT,
-                json={"text": texts, "task_type": "document"},
-                timeout=30.0
+        """Generate embeddings for texts"""
+        if ENV == "dev" and self.embedder:
+            # Use Ollama embeddings in DEV
+            return [self.embedder.embed_query(t) for t in texts]
+        elif ENV != "dev":
+            # Use HTTP endpoint in prod
+            response = self.client_http.post(
+                self.endpoint,
+                json={"text": texts, "task_type": "document"}
             )
             response.raise_for_status()
             return response.json()["embeddings"]
-        except Exception as e:
-            print(f"⚠ Embedding service unavailable: {e}")
+        else:
+            # Fallback to mock embeddings
             print("⚠ Using mock embeddings (replace with real embeddings in production)")
-            # Return mock embeddings for development
             import random
             return [[random.random() for _ in range(1024)] for _ in texts]
     
