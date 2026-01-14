@@ -343,8 +343,7 @@ class GraphIndexer:
             count += 1
 
      return count
-    
-    
+
     def close(self):
         """Close Neo4j connection"""
         self.driver.close()
@@ -514,4 +513,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+<<<<<<< HEAD
 
+=======
+>>>>>>> d0e3349a618ef161ed64903e6f6e70f87b1d667e
