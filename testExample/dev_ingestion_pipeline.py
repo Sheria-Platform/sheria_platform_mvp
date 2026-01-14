@@ -217,7 +217,7 @@ class VectorIndexer:
             self.client.create_collection(
                 collection_name=self.config.QDRANT_COLLECTION,
                 vectors_config=self.models.VectorParams(
-                    size=1024,  # BGE-M3 embedding size
+                    size=768,  # BGE-M3 embedding size
                     distance=self.models.Distance.COSINE
                 )
             )
@@ -237,7 +237,7 @@ class VectorIndexer:
                 except Exception as e:
                     print(f"⚠ Ollama embedding failed: {e}")
             print("⚠ Using mock embeddings for DEV")
-            return [[self.random.random() for _ in range(1024)] for _ in texts]
+            return [[self.random.random() for _ in range(768)] for _ in texts]
 
         # PROD: HTTP endpoint
         try:
@@ -251,7 +251,7 @@ class VectorIndexer:
         except Exception as e:
             print(f"⚠ Production embedding service unavailable: {e}")
             print("⚠ Using mock embeddings as fallback")
-            return [[self.random.random() for _ in range(1024)] for _ in texts]
+            return [[self.random.random() for _ in range(768)] for _ in texts]
 
     def index_chunks(self, chunks: list[dict]) -> int:
         """Index chunks with embeddings into Qdrant"""
