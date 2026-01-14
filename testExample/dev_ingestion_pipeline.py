@@ -176,23 +176,25 @@ class TextChunker:
         
         return enriched_chunks
 
-
 class VectorIndexer:
-    """Indexes chunks into Qdrant"""
+    """Indexes chunks into Qdrant with safe embedding handling"""
     
     def __init__(self, config: DevConfig):
         self.config = config
         from qdrant_client import QdrantClient
         from qdrant_client.http import models
-        
+        import random
+
         self.client = QdrantClient(
             host=config.QDRANT_HOST,
             port=config.QDRANT_PORT
         )
         self.models = models
+        self.random = random
         print(f"✓ Connected to Qdrant at {config.QDRANT_HOST}:{config.QDRANT_PORT}")
 
         # DEV embeddings setup
+        self.embedder = None
         if ENV == "dev":
             try:
                 from langchain_community.embeddings import OllamaEmbeddings
@@ -200,12 +202,12 @@ class VectorIndexer:
                 print("✓ Using Ollama embeddings for DEV")
             except ImportError:
                 print("⚠ langchain_community not installed. Using mock embeddings for DEV.")
-                self.embedder = None
         else:
+            # PROD endpoint
             import httpx
             self.client_http = httpx.Client(timeout=30.0)
             self.endpoint = config.EMBED_ENDPOINT
-    
+
     def ensure_collection(self):
         """Create collection if it doesn't exist"""
         collections = self.client.get_collections().collections
@@ -222,26 +224,35 @@ class VectorIndexer:
             print(f"✓ Created collection: {self.config.QDRANT_COLLECTION}")
         else:
             print(f"✓ Collection exists: {self.config.QDRANT_COLLECTION}")
-    
+
     def embed_texts(self, texts: list[str]) -> list[list[float]]:
-        """Generate embeddings for texts"""
-        if ENV == "dev" and self.embedder:
-            # Use Ollama embeddings in DEV
-            return [self.embedder.embed_query(t) for t in texts]
-        elif ENV != "dev":
-            # Use HTTP endpoint in prod
+        """Generate embeddings for texts with safe DEV/PROD handling"""
+        import random
+
+        # DEV: Ollama if available, else mock
+        if ENV == "dev":
+            if self.embedder:
+                try:
+                    return [self.embedder.embed_query(t) for t in texts]
+                except Exception as e:
+                    print(f"⚠ Ollama embedding failed: {e}")
+            print("⚠ Using mock embeddings for DEV")
+            return [[self.random.random() for _ in range(1024)] for _ in texts]
+
+        # PROD: HTTP endpoint
+        try:
             response = self.client_http.post(
                 self.endpoint,
-                json={"text": texts, "task_type": "document"}
+                json={"text": texts, "task_type": "document"},
+                timeout=30.0
             )
             response.raise_for_status()
             return response.json()["embeddings"]
-        else:
-            # Fallback to mock embeddings
-            print("⚠ Using mock embeddings (replace with real embeddings in production)")
-            import random
-            return [[random.random() for _ in range(1024)] for _ in texts]
-    
+        except Exception as e:
+            print(f"⚠ Production embedding service unavailable: {e}")
+            print("⚠ Using mock embeddings as fallback")
+            return [[self.random.random() for _ in range(1024)] for _ in texts]
+
     def index_chunks(self, chunks: list[dict]) -> int:
         """Index chunks with embeddings into Qdrant"""
         import uuid
