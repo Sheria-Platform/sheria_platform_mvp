@@ -1,38 +1,41 @@
-# pipelines/ingestion/embedding/compute.py
 from typing import Any
+import os
 
-import httpx
+ENV = os.getenv("ENV", "dev")  
 
+if ENV == "dev":
+    from langchain_community.embeddings import OllamaEmbeddings
+else:
+    import httpx
 
 class BatchEmbedder:
     """
-    Callable Class for Ray Data.
-    Maintains a session for efficiency.
+    Handles embeddings for both dev (local) and prod (Ray Serve)
     """
 
-    def __init__(self):
-        # We hardcode internal DNS for Ray Service
-        self.endpoint = "http://ray-serve-embed:8000/embed"
-        self.client = httpx.Client(timeout=30.0)
+    def __init__(self, endpoint: str = None):
+        self.env = ENV
+
+        if self.env == "dev":
+            # Use Ollama embeddings locally
+            self.embedder = OllamaEmbeddings(model="nomic-embed-text")
+        else:
+            # Use Ray Serve in prod
+            self.endpoint = endpoint or "http://ray-serve-embed:8000/embed"
+            self.client = httpx.Client(timeout=30.0)
 
     def __call__(self, batch: dict[str, Any]) -> dict[str, Any]:
-        """
-        Receives a batch of text chunks.
-        Returns the batch with 'embedding' field added.
-        """
         texts = batch["text"]
 
-        try:
+        if self.env == "dev":
+            embeddings = [self.embedder.embed_query(t) for t in texts]
+        else:
             response = self.client.post(
-                self.endpoint, json={"text": texts, "task_type": "document"}
+                self.endpoint,
+                json={"text": texts, "task_type": "document"}
             )
             response.raise_for_status()
             embeddings = response.json()["embeddings"]
 
-            # Add embeddings to the batch dictionary
-            batch["vector"] = embeddings
-            return batch
-
-        except Exception as e:
-            # In Ray, raising exception triggers retry logic automatically
-            raise e
+        batch["vector"] = embeddings
+        return batch

@@ -11,9 +11,10 @@ chunking:
   separators: ["\n\n", "\n", ' ', '']
 
 embedding:
-  # The Ray Serve endpoint to use
-  endpoint: http://ray-serve-embed:8000/embed
+  endpoint: http://localhost:8000/embed  
   batch_size: 100
+  mode: dev  
+
 
 graph:
   # Controls the LLM extraction speed vs cost
