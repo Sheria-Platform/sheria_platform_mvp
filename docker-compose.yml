@@ -51,8 +51,22 @@ services:
       - "9000:9000"
       - "9001:9001"
     environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
+      # Production security settings
+      MINIO_BROWSER_REDIRECT_URL: ${MINIO_BROWSER_REDIRECT_URL:-http://localhost:9001}
+      MINIO_SERVER_URL: ${MINIO_SERVER_URL:-http://localhost:9000}
+      
+      # Performance and reliability settings
+      MINIO_CACHE: "on"
+      MINIO_CACHE_DRIVES: "/data/cache"
+      MINIO_CACHE_EXCLUDE: "*.pdf"
+      MINIO_CACHE_QUOTA: "80"
+      
+      # Health check settings
+      MINIO_NOTIFY_WEBHOOK_ENABLE_PRIMARY: "on"
+      
+      # Additional security headers
+      MINIO_API_CORS_ALLOW_ORIGIN: "*"
+      
     volumes:
       - minio-data:/data
 
@@ -63,10 +77,3 @@ volumes:
   minio-data:
   redis-data:
 
-curl -X POST http://192.168.215.84:8000/api/v1/chat/stream \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer YM8z9VRuJyNjHhYAcfkjSaAbFYhvKET4PcBhZw8xfeES" \
-  -d '{
-    "message": "Analyze the financial risks mentioned in the Q3 report.",
-    "session_id": "test-session-1"
-  }'
