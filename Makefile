@@ -12,9 +12,9 @@ help:
 	@echo "  make infra      - Apply Terraform"
 
 install:
-	pip install -r services/api/requirements.txt
-	pip install -r models/requirements.txt
-	pip install -r pipelines/ingestion/requirements.txt # (Hypothetical separate deps)
+	pip3 install -r services/api/requirements.txt
+	pip3 install -r models/requirements.txt
+	pip3 install -r pipelines/ingestion/requirements.txt # (Hypothetical separate deps)
 
 # Run Local Development Environment
 up:
@@ -41,3 +41,14 @@ deploy:
 
 test:
 	pytest tests/
+
+pre-commit:
+	pre-commit run --all-files
+
+format:
+	black .
+	isort .
+
+lint:
+	flake8 .
+	mypy services/ pipelines/ models/ libs/
