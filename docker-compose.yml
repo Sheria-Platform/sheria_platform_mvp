@@ -63,10 +63,26 @@ services:
       # Health check settings
       #MINIO_NOTIFY_WEBHOOK_ENABLE_PRIMARY: "on"
       # Additional security headers
-      MINIO_API_CORS_ALLOW_ORIGIN: "*"
-      
+      MINIO_API_CORS_ALLOW_ORIGIN: "*"  
     volumes:
       - minio-data:/data
+
+  # 6. Ollama (Local LLMs) server GPU support
+  ollama:
+    image: ollama/ollama
+    container_name: ollama
+    ports:
+      - "11434:11434" # Exposes the Ollama API port
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    volumes:
+      # This volume is where Ollama stores its models and data
+      - ollama:/root/.ollama
 
 volumes:
   pg_data:
@@ -74,4 +90,5 @@ volumes:
   neo4j_data:
   minio-data:
   redis-data:
+  ollama:
 
