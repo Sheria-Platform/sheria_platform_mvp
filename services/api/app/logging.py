@@ -1,57 +1,76 @@
-# services/api/app/logging.py
-import json
 import logging
-import sys
-from datetime import datetime
+import re
+from logging.config import dictConfig
+
+ansi_escape = re.compile(r'\x1B[@-_][0-?]*[ -/]*[@-~]')
 
 
-class JSONFormatter(logging.Formatter):
-    """
-    Formats log records as a JSON object.
-    Includes timestamp, level, and message.
-    """
+class CustomAnsiFilter(logging.Filter):
+    def filter(self, record):
+        cleaned_message = ansi_escape.sub('', record.getMessage())
 
-    def format(self, record):
-        log_record = {
-            "timestamp": datetime.utcnow().isoformat(),
-            "level": record.levelname,
-            "logger": record.name,
-            "message": record.getMessage(),
-            "module": record.module,
-            "line": record.lineno,
+        def get_message_override():
+            return cleaned_message
+
+        record.getMessage = get_message_override
+
+        return True
+
+
+BASE_LOGGERS_LOGGING_CONFIG = {
+    'level': logging.INFO,
+    'propagate': False,
+}
+
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'filters': {
+        'ansi_filter': {
+            '()': CustomAnsiFilter,
+        },
+    },
+    'formatters': {
+        'detailed': {
+            'format': '{[%(asctime)s] [%(levelname)s] [%(name)s] - '
+                      '[%(module)s] - [%(funcName)s] - line: [%(lineno)d] - [%(message)s]}'
+        },
+    },
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+            'formatter': 'detailed',
+            'stream': 'ext://sys.stdout',
         }
-
-        # Add exception info if present
-        if record.exc_info:
-            log_record["exception"] = self.formatException(record.exc_info)
-
-        # Add extra fields (e.g., user_id, trace_id) passed via 'extra' dict
-        if hasattr(record, "request_id"):
-            log_record["request_id"] = record.request_id
-
-        return json.dumps(log_record)
+    },
+    'loggers': {
+        'root': {
+            **BASE_LOGGERS_LOGGING_CONFIG,
+            'handlers': ['console']
+        },
+        "gunicorn.access": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False
+        },
+        "gunicorn.error": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False
+        },
+        "uvicorn.access": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False
+        },
+        "uvicorn.error": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False
+        },
+    },
+}
 
 
 def setup_logging():
-    """
-    Configures the root logger to output JSON to stdout.
-    """
-    handler = logging.StreamHandler(sys.stdout)
-    handler.setFormatter(JSONFormatter())
-
-    root_logger = logging.getLogger()
-    root_logger.setLevel(logging.INFO)
-
-    # Remove default handlers to avoid duplicate logs
-    if root_logger.handlers:
-        root_logger.handlers = []
-
-    root_logger.addHandler(handler)
-
-    # Silence noisy libraries
-    logging.getLogger("uvicorn.access").disabled = True
-    logging.getLogger("httpx").setLevel(logging.WARNING)
-
-
-# Initialize on import
-setup_logging()
+    dictConfig(LOGGING)

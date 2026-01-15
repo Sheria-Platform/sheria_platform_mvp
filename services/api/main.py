@@ -3,11 +3,13 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from services.api import custom_openapi
 from services.api.app.cache.redis import redis_client
 from services.api.app.clients.neo4j import neo4j_client
 from services.api.app.clients.qdrant import qdrant_client
 from services.api.app.clients.ray_embed import embed_client
 from services.api.app.clients.ray_llm import llm_client
+from services.api.app.logging import setup_logging, LOGGING
 from services.api.app.routes import chat, health, upload
 
 
@@ -48,6 +50,8 @@ async def lifespan(app: FastAPI):
 
 
 # FastAPI Application
+setup_logging()
+
 app = FastAPI(title="Enterprise RAG Platform", version="1.0.0", lifespan=lifespan)
 
 # Include Routes
@@ -55,8 +59,16 @@ app.include_router(chat.router, prefix="/api/v1/chat", tags=["Chat"])
 app.include_router(upload.router, prefix="/api/v1/upload", tags=["Upload"])
 app.include_router(health.router, prefix="/health", tags=["Health"])
 
+app.openapi_schema = custom_openapi(app)
+
 if __name__ == "__main__":
     import uvicorn
 
     # In production, this is run via Gunicorn/Uvicorn in Docker
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app,
+                host="0.0.0.0",
+                port=8000,
+                reload=True,
+                reload_includes=["*.py"],
+                log_level="info",
+                log_config=LOGGING)

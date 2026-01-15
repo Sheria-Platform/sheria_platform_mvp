@@ -24,6 +24,7 @@ aiofiles==25.1.0
 aiosignal==1.4.0
 aiohappyeyeballs==2.6.1
 anyio==4.11.0
+greenlet==3.3.0
 
 # Database & Cache
 sqlalchemy==2.0.44

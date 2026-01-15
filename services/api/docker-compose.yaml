@@ -1,0 +1,27 @@
+name: SheriaPlatform
+
+x-common-config: &common-config
+  env_file:
+    - .env
+  networks:
+    - sheria_network
+x-common-fastapi-config: &common-fastapi-config
+  <<: *common-config
+  image: sheria_platform_rag_backend:latest
+  build:
+    context: .
+    dockerfile: Dockerfile
+  volumes:
+    - .:/usr/src/app
+
+services:
+  rag_fastapi_backend:
+    <<: *common-fastapi-config
+    container_name: rag_fastapi_backend
+    command: python main.py
+    restart: always
+    ports:
+      - "8000:8000"
+
+networks:
+  sheria_network:

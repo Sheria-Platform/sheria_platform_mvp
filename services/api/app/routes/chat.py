@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 
 from services.api.app.agents.graph import agent_app
 from services.api.app.agents.state import AgentState
-from services.api.app.auth.jwt import get_current_user
+from services.api.app.auth import get_current_user
 
 # Import classes for type hinting
 from services.api.app.cache.semantic import SemanticCache
