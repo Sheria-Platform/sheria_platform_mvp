@@ -69,12 +69,11 @@ async def chat_stream(
     session_id = req.session_id or str(uuid.uuid4())
     user_id = user["id"]
 
-    logger.info(f"Chat request for session {session_id} from user {user_id}")
-
     # 2. Semantic Cache Check (Fast Path)
     # Check if we have answered a semantically identical question recently.
     cached_ans = await cache.get_cached_response(req.message)
 
+    logger.info(f'Cache for session {session_id}: {cached_ans}')
     if cached_ans:
         logger.info(f"Cache hit for session {session_id}")
 
@@ -92,6 +91,8 @@ async def chat_stream(
             memory.add_message, session_id, "assistant", cached_ans, user_id
         )
 
+        logger.info(f"Sent cached response for session {session_id}")
+
         return StreamingResponse(stream_cache(), media_type="application/x-ndjson")
 
     # 3. Load Conversation History (Context Window)
@@ -100,6 +101,8 @@ async def chat_stream(
     history_dicts = [{"role": msg.role, "content": msg.content} for msg in history_objs]
     # Append current user message
     history_dicts.append({"role": "user", "content": req.message})
+
+    logger.info(f"Loaded history: {history_dicts} for session {session_id}")
 
     # 4. Initialize Agent State (LangGraph)
     initial_state = AgentState(
@@ -161,7 +164,7 @@ async def chat_stream(
         except Exception as e:
             logger.error(f"Error in chat stream: {e}", exc_info=True)
             yield json.dumps(
-                {"type": "error", "content": "An internal error occurred."}
+                {"type": "error", "content": "An internal error occurred.", "error": str(e)}
             ) + "\n"
 
     return StreamingResponse(event_generator(), media_type="application/x-ndjson")

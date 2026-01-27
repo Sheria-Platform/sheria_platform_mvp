@@ -46,12 +46,14 @@ class VectorDBClient:
         """
         Performs Semantic Search.
         """
-        return await self.client.search(
+        response = await self.client.query_points(
             collection_name=settings.QDRANT_COLLECTION,
-            query_vector=vector,
+            query=vector,
             limit=limit,
             with_payload=True,
         )
+
+        return response.points
 
 
 # Global instance

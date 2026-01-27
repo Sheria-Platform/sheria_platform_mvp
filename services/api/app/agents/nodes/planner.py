@@ -4,6 +4,7 @@ import logging
 
 from services.api.app.agents.state import AgentState
 from services.api.app.clients.ray_llm import llm_client
+from services.api.app.config import settings
 
 logger = logging.getLogger(__name__)
 

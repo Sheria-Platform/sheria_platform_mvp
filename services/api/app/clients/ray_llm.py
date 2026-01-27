@@ -38,7 +38,13 @@ class RayLLMClient:
         if not self.client:
             raise RuntimeError("Client not initialized. Call start() first.")
 
-        payload = {"messages": messages, "temperature": temperature, "max_tokens": 1024}
+        payload = {
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": 1024,
+            "model": settings.RAY_CHAT_MODEL,
+            "stream": True,
+        }
 
         response = await self.client.post(self.endpoint, json=payload)
         response.raise_for_status()

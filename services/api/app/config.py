@@ -37,6 +37,9 @@ class Settings(BaseSettings):
     RAY_LLM_ENDPOINT: str = "http://llm-service:8000/llm"
     RAY_EMBED_ENDPOINT: str = "http://embed-service:8000/embed"
 
+    RAY_CHAT_MODEL: str
+    RAY_EMBED_MODEL: str
+
     # Security
     JWT_SECRET_KEY: str
     JWT_ALGORITHM: str = "HS256"
