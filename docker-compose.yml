@@ -51,10 +51,96 @@ services:
       - "9000:9000"
       - "9001:9001"
     environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
+      # Production security settings
+      MINIO_BROWSER_REDIRECT_URL: ${MINIO_BROWSER_REDIRECT_URL:-http://0.0.0.0:9001}
+      MINIO_SERVER_URL: ${MINIO_SERVER_URL:-http://0.0.0.0:9000}
+      
+      # Performance and reliability settings
+      MINIO_CACHE: "on"
+      MINIO_CACHE_DRIVES: "/data/cache"
+      MINIO_CACHE_EXCLUDE: "*.pdf"
+      MINIO_CACHE_QUOTA: "80"
+      # Health check settings
+      #MINIO_NOTIFY_WEBHOOK_ENABLE_PRIMARY: "on"
+      # Additional security headers
+      MINIO_API_CORS_ALLOW_ORIGIN: "*"  
     volumes:
       - minio-data:/data
+
+  # 6. Ollama (Local LLMs) server GPU support
+  ollama:
+    image: ollama/ollama
+    container_name: ollama
+    ports:
+      - "11433:11434"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    volumes:
+      - ollama:/root/.ollama
+      - ./entrypoint.sh:/entrypoint.sh:ro   # mount your script read-only
+    entrypoint: ["/bin/bash", "/entrypoint.sh"]
+    #TODO: Configure health checks
+    # override to run our script
+    # healthcheck:
+    #   test: ["CMD-SHELL", "timeout 5 bash -c 'echo > /dev/tcp/127.0.0.1/11434' || exit 1"]
+    #   interval: 10s
+    #   timeout: 5s
+    #   retries: 6
+    #   start_period: 30s
+
+  # 7. Open WebUI (Web interface for Ollama)
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: open-webui
+    ports:
+      - "3000:8080"
+    environment:
+      # Ollama connection
+      OLLAMA_BASE_URL: http://ollama:11434
+
+      # Security
+      WEBUI_SECRET_KEY: ${WEBUI_SECRET_KEY:-change-me-to-random-string}
+
+      # Database (optional - uses SQLite by default, can use your Postgres)
+      # DATABASE_URL: postgresql://ragadmin:changeme@postgres:5432/rag_db
+
+      # Redis cache (optional - can leverage your existing Redis)
+      # REDIS_URL: redis://redis:6379/1
+
+      # Authentication
+      ENABLE_SIGNUP: ${ENABLE_SIGNUP:-true}
+      DEFAULT_USER_ROLE: ${DEFAULT_USER_ROLE:-user}
+
+      # RAG Configuration
+      ENABLE_RAG: ${ENABLE_RAG:-true}
+      RAG_EMBEDDING_ENGINE: ollama
+      RAG_EMBEDDING_MODEL: ${RAG_EMBEDDING_MODEL:-nomic-embed-text}
+
+      # Vector DB - Can integrate with your Qdrant if needed
+      # VECTOR_DB: qdrant
+      # QDRANT_URL: http://qdrant:6333
+
+      # Web Search (optional)
+      ENABLE_WEB_SEARCH: ${ENABLE_WEB_SEARCH:-false}
+
+      # UI Customization
+      WEBUI_NAME: ${WEBUI_NAME:-Sheria Platform Chat}
+
+      # CORS (for local dev)
+      CORS_ALLOW_ORIGIN: "*"
+
+    volumes:
+      - open-webui:/app/backend/data
+    depends_on:
+      - ollama
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    restart: unless-stopped
 
 volumes:
   pg_data:
@@ -62,11 +148,5 @@ volumes:
   neo4j_data:
   minio-data:
   redis-data:
-
-curl -X POST http://192.168.215.84:8000/api/v1/chat/stream \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer YM8z9VRuJyNjHhYAcfkjSaAbFYhvKET4PcBhZw8xfeES" \
-  -d '{
-    "message": "Analyze the financial risks mentioned in the Q3 report.",
-    "session_id": "test-session-1"
-  }'
+  ollama:
+  open-webui:
