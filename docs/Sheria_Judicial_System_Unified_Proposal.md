@@ -1,11 +1,6 @@
 # **Sheria Platform for Kenya's Judicial System**
 ## **Intelligent AI Ecosystem for Court Data Management, Case Law Research & Judicial Decision Support**
 
-### Unified Proposal v1.0
-
-**Target Users:** Judges, Magistrates, Court Registrars, Judicial Clerks, Legal Researchers
-**Date:** February 2026
-
 ---
 
 ## **EXECUTIVE SUMMARY**
