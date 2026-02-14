@@ -76,7 +76,7 @@ def test_neo4j():
     """Test Neo4j connection."""
     uri = os.getenv("NEO4J_URI", "bolt://192.168.214.21:7687")
     user = os.getenv("NEO4J_USER", "neo4j")
-    password = os.getenv("NEO4J_PASSWORD", "changeme")
+    password = os.getenv("NEO4J_PASSWORD", "password")
     print(f"\n[4/4] Testing Neo4j: {uri}")
 
     try:

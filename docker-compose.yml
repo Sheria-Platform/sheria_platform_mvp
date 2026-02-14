@@ -127,6 +127,25 @@ services:
       timeout: 10s
       retries: 3
 
+  # 6b. Ollama Nginx Proxy (Load Balancer for Remote Ollama Cluster)
+  ollama-proxy:
+    image: nginx:alpine
+    container_name: sheria-ollama-proxy
+    restart: unless-stopped
+    ports:
+      - "11435:11435"  # LLM endpoint
+      - "11436:11436"  # Embedding endpoint
+      - "11437:11437"  # Reranker endpoint
+      - "8080:8080"    # Status/health endpoint
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    network_mode: host  # Required to reach remote hosts
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
   # 7. Open WebUI (Web Interface for Ollama - Development)
   open-webui:
     image: ghcr.io/open-webui/open-webui:main
