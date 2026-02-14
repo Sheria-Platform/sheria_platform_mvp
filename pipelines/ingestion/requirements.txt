@@ -91,3 +91,5 @@ threadpoolctl==3.6.0
 wrapt==2.0.1
 xxhash==3.6.0
 zstandard==0.25.0
+
+locust==2.43.3

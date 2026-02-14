@@ -184,3 +184,4 @@ kenya_law_data/case_law/*
 kenya_law_data/regulations/*
 kenya_law_data/statutes/*
 .idea
+*.json

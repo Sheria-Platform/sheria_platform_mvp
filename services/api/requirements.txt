@@ -40,6 +40,7 @@ python-jose[cryptography]
 passlib[bcrypt]
 rsa==4.9.1
 pyasn1==0.6.1
+pyjwt==2.10.1
 pyasn1_modules==0.4.2
 oauthlib==3.3.1
 requests-oauthlib==2.0.0
