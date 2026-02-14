@@ -76,47 +76,47 @@ if is_secure:
 
         return response
 
-    app.add_middleware(
-        CORSMiddleware,
-        allow_credentials=True,
-        allow_origins=settings.cors_origins,
-        allow_methods=[
-            "GET",
-            "POST",
-            "PUT",
-            "DELETE",
-            "OPTIONS",
-            "HEAD",
-            "PATCH"
-        ],
-        allow_headers=[
-            "Authorization",
-            "Content-Type",
-            "If-Match",
-            "If-None-Match",
-            "If-Modified-Since",
-            "If-Unmodified-Since",
-            "X-Requested-With",
-            "X-CSRF-Token",
-            "X-Forwarded-For",
-            "X-Forwarded-Proto",
-            "X-Forwarded-Host",
-            "X-Real-IP",
-            "CF-RAY",
-            "CF-Visitor",
-            "Client-IP",
-            "X-Client-IP",
-            "X-Requested-With",
-            "CF-Connecting-IP",
-            "CF-IPCountry",
-            "Upgrade",
-            "Connection"
-        ],
-        expose_headers=[
-            "Content-Disposition",
-            "X-Conversation-Id"
-        ]
-    )
+app.add_middleware(
+    CORSMiddleware,
+    allow_credentials=True,
+    allow_origins=settings.cors_origins,
+    allow_methods=[
+        "GET",
+        "POST",
+        "PUT",
+        "DELETE",
+        "OPTIONS",
+        "HEAD",
+        "PATCH"
+    ],
+    allow_headers=[
+        "Authorization",
+        "Content-Type",
+        "If-Match",
+        "If-None-Match",
+        "If-Modified-Since",
+        "If-Unmodified-Since",
+        "X-Requested-With",
+        "X-CSRF-Token",
+        "X-Forwarded-For",
+        "X-Forwarded-Proto",
+        "X-Forwarded-Host",
+        "X-Real-IP",
+        "CF-RAY",
+        "CF-Visitor",
+        "Client-IP",
+        "X-Client-IP",
+        "X-Requested-With",
+        "CF-Connecting-IP",
+        "CF-IPCountry",
+        "Upgrade",
+        "Connection"
+    ],
+    expose_headers=[
+        "Content-Disposition",
+        "X-Conversation-Id"
+    ]
+)
 
 app.openapi_schema = custom_openapi(app)
 
@@ -128,6 +128,6 @@ if __name__ == "__main__":
                 host="0.0.0.0",
                 port=8000,
                 reload=True,
-                reload_includes=["*.py"],
+                reload_includes=["*.py", '.env'],
                 log_level="info",
                 log_config=LOGGING)
