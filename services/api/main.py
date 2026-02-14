@@ -1,7 +1,10 @@
 # services/api/main.py
+import logging
+import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 
 from services.api import custom_openapi
 from services.api.app.cache.redis import redis_client
@@ -9,8 +12,14 @@ from services.api.app.clients.neo4j import neo4j_client
 from services.api.app.clients.qdrant import qdrant_client
 from services.api.app.clients.ray_embed import embed_client
 from services.api.app.clients.ray_llm import llm_client
+from services.api.app.config import settings
 from services.api.app.logging import setup_logging, LOGGING
 from services.api.app.routes import chat, health, upload
+
+# FastAPI Application
+setup_logging()
+
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -20,7 +29,7 @@ async def lifespan(app: FastAPI):
     Initialize all connection pools here.
     """
     # 1. Startup
-    print("Initializing clients...")
+    logger.info("Initializing clients...")
     neo4j_client.connect()
     await redis_client.connect()
     await qdrant_client.connect()
@@ -31,12 +40,12 @@ async def lifespan(app: FastAPI):
     if hasattr(embed_client, "start") and callable(getattr(embed_client, "start")):
         await embed_client.start()
 
-    print("All clients initialized successfully!")
+    logger.info("All clients initialized successfully!")
 
     yield
 
     # 2. Shutdown
-    print("Closing clients...")
+    logger.info("Closing clients...")
     await neo4j_client.close()
     await redis_client.close()
     await qdrant_client.disconnect()
@@ -46,11 +55,10 @@ async def lifespan(app: FastAPI):
     if hasattr(embed_client, "close") and callable(getattr(embed_client, "close")):
         await embed_client.close()
 
-    print("All clients closed successfully!")
+    logger.info("All clients closed successfully!")
 
+is_secure = os.environ.get('environment') == 'secure'
 
-# FastAPI Application
-setup_logging()
 
 app = FastAPI(title="Enterprise RAG Platform", version="1.0.0", lifespan=lifespan)
 
@@ -58,6 +66,57 @@ app = FastAPI(title="Enterprise RAG Platform", version="1.0.0", lifespan=lifespa
 app.include_router(chat.router, prefix="/api/v1/chat", tags=["Chat"])
 app.include_router(upload.router, prefix="/api/v1/upload", tags=["Upload"])
 app.include_router(health.router, prefix="/health", tags=["Health"])
+
+if is_secure:
+    @app.middleware("http")
+    async def set_secure_scheme(request: Request, call_next):
+        request.scope["scheme"] = "https"
+
+        response = await call_next(request)
+
+        return response
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_credentials=True,
+        allow_origins=settings.cors_origins,
+        allow_methods=[
+            "GET",
+            "POST",
+            "PUT",
+            "DELETE",
+            "OPTIONS",
+            "HEAD",
+            "PATCH"
+        ],
+        allow_headers=[
+            "Authorization",
+            "Content-Type",
+            "If-Match",
+            "If-None-Match",
+            "If-Modified-Since",
+            "If-Unmodified-Since",
+            "X-Requested-With",
+            "X-CSRF-Token",
+            "X-Forwarded-For",
+            "X-Forwarded-Proto",
+            "X-Forwarded-Host",
+            "X-Real-IP",
+            "CF-RAY",
+            "CF-Visitor",
+            "Client-IP",
+            "X-Client-IP",
+            "X-Requested-With",
+            "CF-Connecting-IP",
+            "CF-IPCountry",
+            "Upgrade",
+            "Connection"
+        ],
+        expose_headers=[
+            "Content-Disposition",
+            "X-Conversation-Id"
+        ]
+    )
 
 app.openapi_schema = custom_openapi(app)
 

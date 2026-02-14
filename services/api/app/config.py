@@ -1,4 +1,5 @@
 # services/api/app/config.py
+from typing import List
 
 from pydantic_settings import BaseSettings
 
@@ -12,6 +13,8 @@ class Settings(BaseSettings):
     # General
     ENV: str = "prod"
     LOG_LEVEL: str = "INFO"
+
+    ALLOWED_ORIGINS: str
 
     # Database (Aurora Postgres)
     DATABASE_URL: str  # e.g., postgresql+asyncpg://user:pass@host:5432/db
@@ -52,7 +55,21 @@ class Settings(BaseSettings):
 
     class Config:
         env_file = ".env"
-        extra = "ignore"  # This allows extra env vars without errors
+        case_sensitive = True
+        extra = "ignore"
+
+    @property
+    def cors_origins(self) -> List[str]:
+        """
+        Parse and return the list of allowed CORS origins.
+
+        This property converts the comma-separated ALLOWED_ORIGINS string into a list
+        of individual origin URLs, with whitespace stripped from each entry.
+
+        Returns:
+            List[str]: A list of allowed CORS origin URLs.
+        """
+        return [origin.strip() for origin in self.ALLOWED_ORIGINS.split(",")]
 
 
 # Instantiate singleton
