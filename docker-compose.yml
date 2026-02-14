@@ -92,6 +92,18 @@ services:
       interval: 30s
       timeout: 20s
       retries: 3
+  
+  openmaxio-browser:
+    image: ghcr.io/astrateam-net/minio-browser:1.7.6
+    container_name: openmaxio-browser
+    restart: unless-stopped
+    ports:
+      - "8080:9090"
+    command: ./console server
+    environment:
+      CONSOLE_MINIO_SERVER: http://localhost:9000
+    depends_on:
+      - minio_server
 
   # 6. Ollama (Local LLM for Embeddings & Graph Extraction)
   ollama:
@@ -120,7 +132,7 @@ services:
     image: ghcr.io/open-webui/open-webui:main
     container_name: sheria-open-webui
     ports:
-      - "${OPEN_WEBUI_PORT:-3000}:8080"
+      - "${OPEN_WEBUI_PORT:-3030}:8080"
     environment:
       # Ollama connection
       OLLAMA_BASE_URL: ${OLLAMA_HOST:-http://ollama:11434}
@@ -129,10 +141,10 @@ services:
       WEBUI_SECRET_KEY: ${WEBUI_SECRET_KEY:-change-me-to-random-string}
 
       # Database (optional - uses SQLite by default)
-      # DATABASE_URL: postgresql://${POSTGRES_USER:-ragadmin}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-rag_db}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-ragadmin}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-rag_db}
 
       # Redis cache (optional)
-      # REDIS_URL: redis://redis:6379/1
+      REDIS_URL: redis://redis:6379/1
 
       # Authentication
       ENABLE_SIGNUP: ${ENABLE_SIGNUP:-true}
@@ -145,8 +157,8 @@ services:
       RAG_EMBEDDING_MODEL: ${RAG_EMBEDDING_MODEL:-nomic-embed-text}
 
       # Vector DB - Can integrate with Qdrant if needed
-      # VECTOR_DB: qdrant
-      # QDRANT_URL: http://qdrant:6333
+      VECTOR_DB: qdrant
+      QDRANT_URL: http://qdrant:6333
 
       # Web Search (optional)
       ENABLE_WEB_SEARCH: ${ENABLE_WEB_SEARCH:-false}
