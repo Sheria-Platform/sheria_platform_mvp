@@ -337,15 +337,30 @@ set +a
 ### Step 3: Direct Python Execution
 
 ```bash
-# Run ingestion for a specific MinIO bucket and prefix
-python main.py <bucket_name> <prefix>
+# Basic usage (embeddings only, fast)
+python main.py <bucket_name> <prefix> [max_workers]
 
-# Example: Ingest Kenya Law Reports
-python main.py kenya-law-reports supreme-court/
+# With graph extraction enabled (slow, optional)
+python main.py <bucket_name> <prefix> [max_workers] --enable-graph
 
-# Example: Ingest case files
-python main.py court-records-dev nairobi-high-court/
+# Examples:
+python main.py srtmanager kenya_law_data/case 4              # Fast (embeddings only)
+python main.py srtmanager kenya_law_data/case 4 --enable-graph  # Full (with graph)
 ```
+
+**Configuration Options:**
+
+| Option | Description | Default | Set via |
+|--------|-------------|---------|---------|
+| `max_workers` | Parallel workers for file processing | 4 | CLI arg or `MAX_WORKERS` env var |
+| `--enable-graph` | Enable graph extraction (slow) | false | CLI flag or `ENABLE_GRAPH=true` env var |
+
+**Graph Extraction:**
+- **Disabled by default** (much faster, embeddings only)
+- Enable with `--enable-graph` flag or `ENABLE_GRAPH=true` in `.env`
+- Takes ~1-2 hours for 1000 chunks (vs ~5 minutes for embeddings only)
+- Extracts entities and relationships for Neo4j knowledge graph
+- Recommended to disable for initial testing, enable for production
 
 ### Step 4: Using Test Scripts
 

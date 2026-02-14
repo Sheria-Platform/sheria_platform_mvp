@@ -102,7 +102,7 @@ def batch_embed(chunks: List[dict], batch_size: int = 50) -> List[dict]:
     return results
 
 
-def batch_extract_graph(chunks: List[dict], batch_size: int = 10) -> List[dict]:
+def batch_extract_graph(chunks: List[dict], batch_size: int = 1) -> List[dict]:
     """
     Extract graph data from chunks in batches.
 
@@ -143,7 +143,7 @@ def batch_extract_graph(chunks: List[dict], batch_size: int = 10) -> List[dict]:
     return results
 
 
-def main(bucket_name: str, prefix: str, max_workers: int = 4):
+def main(bucket_name: str, prefix: str, max_workers: int = 4, enable_graph: bool = False):
     """
     Main ingestion workflow.
 
@@ -151,8 +151,9 @@ def main(bucket_name: str, prefix: str, max_workers: int = 4):
         bucket_name: MinIO bucket name
         prefix: Prefix path for files to ingest
         max_workers: Number of parallel workers for file processing
+        enable_graph: Whether to extract graph data (slow, optional)
     """
-    logger.info(f"Starting ingestion: bucket={bucket_name}, prefix={prefix}")
+    logger.info(f"Starting ingestion: bucket={bucket_name}, prefix={prefix}, graph={enable_graph}")
 
     # 1. Connect to MinIO
     minio_endpoint = os.getenv("MINIO_ENDPOINT", "192.168.214.21:9000")
@@ -215,10 +216,14 @@ def main(bucket_name: str, prefix: str, max_workers: int = 4):
     chunks_with_vectors = batch_embed(all_chunks, batch_size=50)
     logger.info(f"Generated {len(chunks_with_vectors)} embeddings")
 
-    # 5. Extract graph data (for Neo4j)
-    logger.info("Extracting graph data...")
-    chunks_with_graph = batch_extract_graph(all_chunks, batch_size=10)
-    logger.info(f"Extracted graph data for {len(chunks_with_graph)} chunks")
+    # 5. Extract graph data (for Neo4j) - OPTIONAL
+    chunks_with_graph = []
+    if enable_graph:
+        logger.info("Extracting graph data...")
+        chunks_with_graph = batch_extract_graph(all_chunks, batch_size=10)
+        logger.info(f"Extracted graph data for {len(chunks_with_graph)} chunks")
+    else:
+        logger.info("Skipping graph extraction (disabled)")
 
     # 6. Write vectors to Qdrant
     logger.info("Writing vectors to Qdrant...")
@@ -227,39 +232,35 @@ def main(bucket_name: str, prefix: str, max_workers: int = 4):
 
     for i in range(0, len(chunks_with_vectors), 100):
         batch = chunks_with_vectors[i:i + 100]
-        batch_dict = {
-            "text": [c["text"] for c in batch],
-            "metadata": [c["metadata"] for c in batch],
-            "vector": [c["vector"] for c in batch]
-        }
 
         try:
-            qdrant_indexer.write(batch_dict)
+            qdrant_indexer.write(batch)  # Pass list directly, not dict
             vector_count += len(batch)
             logger.info(f"Indexed {vector_count}/{len(chunks_with_vectors)} vectors to Qdrant")
         except Exception as e:
             logger.error(f"Failed to write batch to Qdrant: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
 
-    # 7. Write graph to Neo4j
-    logger.info("Writing graph to Neo4j...")
-    neo4j_indexer = Neo4jIndexer()
+    # 7. Write graph to Neo4j (if enabled)
     graph_count = 0
+    if enable_graph and chunks_with_graph:
+        logger.info("Writing graph to Neo4j...")
+        neo4j_indexer = Neo4jIndexer()
 
-    for i in range(0, len(chunks_with_graph), 100):
-        batch = chunks_with_graph[i:i + 100]
-        batch_dict = {
-            "text": [c["text"] for c in batch],
-            "metadata": [c["metadata"] for c in batch],
-            "graph_nodes": [c["graph_nodes"] for c in batch],
-            "graph_edges": [c["graph_edges"] for c in batch]
-        }
+        for i in range(0, len(chunks_with_graph), 100):
+            batch = chunks_with_graph[i:i + 100]
 
-        try:
-            neo4j_indexer.write(batch_dict)
-            graph_count += len(batch)
-            logger.info(f"Indexed {graph_count}/{len(chunks_with_graph)} graph entries to Neo4j")
-        except Exception as e:
-            logger.error(f"Failed to write batch to Neo4j: {e}")
+            try:
+                neo4j_indexer.write(batch)  # Pass list directly, not dict
+                graph_count += len(batch)
+                logger.info(f"Indexed {graph_count}/{len(chunks_with_graph)} graph entries to Neo4j")
+            except Exception as e:
+                logger.error(f"Failed to write batch to Neo4j: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
+    else:
+        logger.info("Skipping Neo4j indexing (graph extraction disabled)")
 
     # 8. Summary
     print(f"\n{'='*60}")
@@ -276,12 +277,23 @@ if __name__ == "__main__":
     import sys
 
     if len(sys.argv) < 3:
-        print("Usage: python main.py <bucket_name> <prefix> [max_workers]")
+        print("Usage: python main.py <bucket_name> <prefix> [max_workers] [--enable-graph]")
         print("Example: python main.py srtmanager kenya_law_data/case 4")
+        print("Example with graph: python main.py srtmanager kenya_law_data/case 4 --enable-graph")
         sys.exit(1)
 
     bucket = sys.argv[1]
     prefix = sys.argv[2]
-    workers = int(sys.argv[3]) if len(sys.argv) > 3 else 4
 
-    main(bucket, prefix, max_workers=workers)
+    # Parse optional arguments
+    workers = int(os.getenv("MAX_WORKERS", "4"))
+    enable_graph = os.getenv("ENABLE_GRAPH", "false").lower() == "true"
+
+    for i in range(3, len(sys.argv)):
+        arg = sys.argv[i]
+        if arg == "--enable-graph":
+            enable_graph = True
+        elif arg.isdigit():
+            workers = int(arg)
+
+    main(bucket, prefix, max_workers=workers, enable_graph=enable_graph)

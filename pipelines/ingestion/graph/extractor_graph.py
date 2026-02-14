@@ -69,7 +69,15 @@ class GraphExtractor:
 
                 # 3. Parse JSON Output
                 # Extract content from Ollama response
-                content = response.json()["message"]["content"]
+                response_data = response.json()
+                content = response_data.get("message", {}).get("content", "")
+
+                # Check if content is empty
+                if not content or not content.strip():
+                    print(f"Warning: Empty response from LLM, skipping chunk")
+                    nodes_list.append([])
+                    edges_list.append([])
+                    continue
 
                 # Try to parse as JSON
                 try:
@@ -83,6 +91,8 @@ class GraphExtractor:
                         content = content.split("```")[1].split("```")[0].strip()
                         graph_data = json.loads(content)
                     else:
+                        # Log the problematic content for debugging
+                        print(f"Warning: Failed to parse JSON. Content preview: {content[:200]}")
                         raise
 
                 # 4. Append to results
