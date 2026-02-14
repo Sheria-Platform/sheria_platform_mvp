@@ -15,10 +15,13 @@ class BatchEmbedder:
         # Use full endpoint URL or construct from host
         self.endpoint = os.getenv(
             "OLLAMA_EMBED_ENDPOINT",
-            "http://localhost:11436/api/embeddings"
+            "http://192.168.214.22:11436/api/embeddings"  # Updated default
         )
         self.model = os.getenv("OLLAMA_EMBED_MODEL", "nomic-embed-text")
         self.client = httpx.Client(timeout=120.0)
+
+        # Debug: Print endpoint being used
+        print(f"BatchEmbedder initialized with endpoint: {self.endpoint}")
 
     def __call__(self, batch: dict[str, Any]) -> dict[str, Any]:
         """

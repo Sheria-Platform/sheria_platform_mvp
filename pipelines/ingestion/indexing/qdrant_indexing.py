@@ -36,7 +36,7 @@ class QdrantIndexer:
             # Construct Payload (Metadata)
             payload = {
                 "text": row["text"],
-                "filename": row["metadata"]["filename"],
+                "filename": row["metadata"].get("filename", row["metadata"].get("filepath", "unknown")),
                 "page": row["metadata"].get("page_number", 0),
             }
 
