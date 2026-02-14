@@ -1,9 +1,10 @@
 # pipelines/ingestion/main.py
 import logging
 import os
-from typing import Any
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Any, List, Tuple
 
-import ray
+from minio import Minio
 
 from pipelines.ingestion.chunking.splitter_chunking import split_text
 from pipelines.ingestion.embedding.embedding_compute import BatchEmbedder
@@ -20,137 +21,267 @@ except ImportError:
     pass
 
 # Setup logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
-# Initialize Ray
-ray_address = os.getenv("RAY_ADDRESS", "local")
-if not ray.is_initialized():
+
+def process_single_file(file_info: Tuple[str, bytes]) -> List[dict]:
+    """
+    Process a single file: parse PDF and chunk text.
+
+    Args:
+        file_info: (filename, file_bytes)
+
+    Returns:
+        List of chunks with metadata
+    """
+    filename, file_bytes = file_info
+
     try:
-        # Try to connect to existing cluster if address is specified
-        if ray_address != "local":
-            ray.init(address=ray_address)
-        else:
-            # Start local Ray instance for testing with more CPUs
-            ray.init(num_cpus=8, ignore_reinit_error=True)
-            logger.info("Started local Ray instance with 8 CPUs")
-    except ConnectionError:
-        # Fallback to local if cluster connection fails
-        ray.init(num_cpus=8, ignore_reinit_error=True)
-        logger.info("Could not connect to Ray cluster, started local instance with 8 CPUs")
+        logger.info(f"Processing: {filename}")
 
+        # 1. Parse PDF
+        text, metadata = parse_pdf_bytes(file_bytes, filename)
+        logger.info(f"  Parsed {filename}: {len(text)} chars")
 
-def process_batch(batch: dict[str, Any]) -> dict[str, Any]:
-    """
-    Ray Data transformation function.
-    Receives a batch of file contents (S3 bytes).
-    """
-    results = []
-
-    # Ray's read_binary_files returns "bytes" and "path" keys
-    for i, content in enumerate(batch["bytes"]):
-        filepath = batch["path"][i] if "path" in batch else f"file_{i}"
-
-        # 1. Parsing (CPU Intensive)
-        # We use a helper function to handle PDF/DOCX/HTML logic
-        raw_text, metadata = parse_pdf_bytes(content, filepath)
-
-        # 2. Chunking (CPU)
-        chunks = split_text(raw_text, chunk_size=512, overlap=50)
+        # 2. Chunk text
+        chunks = split_text(text, chunk_size=512, overlap=50)
+        logger.info(f"  Chunked {filename}: {len(chunks)} chunks")
 
         # Add metadata to each chunk
         for chunk in chunks:
             chunk["metadata"].update(metadata)
-            results.append(chunk)
 
-    return {
-        "text": [r["text"] for r in results],
-        "metadata": [r["metadata"] for r in results],
-    }
+        return chunks
+
+    except Exception as e:
+        logger.error(f"Failed to process {filename}: {e}")
+        return []
 
 
-def main(bucket_name: str, prefix: str):
+def batch_embed(chunks: List[dict], batch_size: int = 50) -> List[dict]:
     """
-    Main Orchestration Flow.
-    """
-    # Configure MinIO/S3 connection
-    import pyarrow.fs as fs
+    Generate embeddings for chunks in batches.
 
+    Args:
+        chunks: List of chunks with text and metadata
+        batch_size: Number of chunks to embed at once
+
+    Returns:
+        List of chunks with embeddings added
+    """
+    embedder = BatchEmbedder()
+    results = []
+    total_batches = (len(chunks) - 1) // batch_size + 1
+
+    for i in range(0, len(chunks), batch_size):
+        batch = chunks[i:i + batch_size]
+        batch_num = i // batch_size + 1
+        logger.info(f"Embedding batch {batch_num}/{total_batches} ({len(batch)} chunks)")
+
+        try:
+            batch_dict = {
+                "text": [c["text"] for c in batch],
+                "metadata": [c["metadata"] for c in batch]
+            }
+
+            result = embedder(batch_dict)
+
+            # Add embeddings to chunks
+            for j, chunk in enumerate(batch):
+                chunk["vector"] = result["vector"][j]
+                results.append(chunk)
+
+        except Exception as e:
+            logger.error(f"Failed to embed batch {batch_num}: {e}")
+            continue
+
+    return results
+
+
+def batch_extract_graph(chunks: List[dict], batch_size: int = 10) -> List[dict]:
+    """
+    Extract graph data from chunks in batches.
+
+    Args:
+        chunks: List of chunks with text and metadata
+        batch_size: Number of chunks to process at once
+
+    Returns:
+        List of chunks with graph data added
+    """
+    extractor = GraphExtractor()
+    results = []
+    total_batches = (len(chunks) - 1) // batch_size + 1
+
+    for i in range(0, len(chunks), batch_size):
+        batch = chunks[i:i + batch_size]
+        batch_num = i // batch_size + 1
+        logger.info(f"Extracting graph batch {batch_num}/{total_batches} ({len(batch)} chunks)")
+
+        try:
+            batch_dict = {
+                "text": [c["text"] for c in batch],
+                "metadata": [c["metadata"] for c in batch]
+            }
+
+            result = extractor(batch_dict)
+
+            # Add graph data to chunks
+            for j, chunk in enumerate(batch):
+                chunk["graph_nodes"] = result["graph_nodes"][j]
+                chunk["graph_edges"] = result["graph_edges"][j]
+                results.append(chunk)
+
+        except Exception as e:
+            logger.error(f"Failed to extract graph for batch {batch_num}: {e}")
+            continue
+
+    return results
+
+
+def main(bucket_name: str, prefix: str, max_workers: int = 4):
+    """
+    Main ingestion workflow.
+
+    Args:
+        bucket_name: MinIO bucket name
+        prefix: Prefix path for files to ingest
+        max_workers: Number of parallel workers for file processing
+    """
+    logger.info(f"Starting ingestion: bucket={bucket_name}, prefix={prefix}")
+
+    # 1. Connect to MinIO
     minio_endpoint = os.getenv("MINIO_ENDPOINT", "192.168.214.21:9000")
     minio_access_key = os.getenv("MINIO_ACCESS_KEY", "minioadmin")
     minio_secret_key = os.getenv("MINIO_SECRET_KEY", "minioadmin")
-    minio_secure = os.getenv("MINIO_SECURE", "false").lower() == "true"
 
-    # Create S3 filesystem for MinIO
-    s3_fs = fs.S3FileSystem(
-        endpoint_override=minio_endpoint,
+    client = Minio(
+        minio_endpoint,
         access_key=minio_access_key,
         secret_key=minio_secret_key,
-        scheme="http" if not minio_secure else "https"
+        secure=False
     )
 
-    # 1. Read from MinIO using Ray Data (Lazy Loading)
-    # This automatically distributes reading across workers
-    ds = ray.data.read_binary_files(
-        paths=f"s3://{bucket_name}/{prefix}",
-        filesystem=s3_fs,
-        include_paths=True
-    )
+    # 2. List and download files
+    logger.info("Listing files from MinIO...")
+    objects = list(client.list_objects(bucket_name, prefix=prefix, recursive=True))
+    logger.info(f"Found {len(objects)} files")
 
-    # 2. Parse & Chunk (Map Phase)
-    # num_cpus=1 tells Ray to reserve 1 CPU core per parsing task
-    chunked_ds = ds.map_batches(
-        process_batch,
-        batch_size=10,  # Process 10 files at a time per worker
-        num_cpus=1,
-    )
+    if not objects:
+        logger.warning("No files found!")
+        return
 
-    # 3. FORK: Branch A - Vector Embeddings (via remote Ollama)
-    # We use a Class Actor (BatchEmbedder) to call remote Ollama
-    # Set runtime environment for Ray actors to ensure they have access to env vars
-    vector_ds = chunked_ds.map_batches(
-        BatchEmbedder,
-        concurrency=3,  # Run 3 concurrent embedders
-        batch_size=100,  # Batch 100 chunks for vectorization
-        fn_constructor_kwargs={},  # Ensure class is instantiated with current env
-    )
+    logger.info("Downloading files...")
+    files_to_process = []
+    for obj in objects:
+        try:
+            response = client.get_object(bucket_name, obj.object_name)
+            file_bytes = response.read()
+            response.close()
+            files_to_process.append((obj.object_name, file_bytes))
+            logger.debug(f"Downloaded {obj.object_name}: {len(file_bytes)} bytes")
+        except Exception as e:
+            logger.error(f"Failed to download {obj.object_name}: {e}")
 
-    # 4. FORK: Branch B - Graph Extraction (via remote Ollama)
-    # This is slower, so we might set higher concurrency
-    graph_ds = chunked_ds.map_batches(
-        GraphExtractor,
-        concurrency=3,  # Reduced concurrency for LLM calls
-        batch_size=5,
-    )
+    logger.info(f"Downloaded {len(files_to_process)} files")
 
-    # 5. Indexing (Write to DBs)
-    # Trigger execution - consume the datasets and write to databases
-    qdrant_indexer = QdrantIndexer()
-    neo4j_indexer = Neo4jIndexer()
+    # 3. Process files in parallel (parse + chunk)
+    logger.info(f"Processing files with {max_workers} workers...")
+    all_chunks = []
 
-    # Write vectors to Qdrant
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [executor.submit(process_single_file, file_info)
+                   for file_info in files_to_process]
+
+        for future in as_completed(futures):
+            try:
+                chunks = future.result()
+                all_chunks.extend(chunks)
+            except Exception as e:
+                logger.error(f"File processing failed: {e}")
+
+    logger.info(f"Total chunks created: {len(all_chunks)}")
+
+    if not all_chunks:
+        logger.warning("No chunks to process!")
+        return
+
+    # 4. Generate embeddings (for vector search in Qdrant)
+    logger.info("Generating embeddings...")
+    chunks_with_vectors = batch_embed(all_chunks, batch_size=50)
+    logger.info(f"Generated {len(chunks_with_vectors)} embeddings")
+
+    # 5. Extract graph data (for Neo4j)
+    logger.info("Extracting graph data...")
+    chunks_with_graph = batch_extract_graph(all_chunks, batch_size=10)
+    logger.info(f"Extracted graph data for {len(chunks_with_graph)} chunks")
+
+    # 6. Write vectors to Qdrant
     logger.info("Writing vectors to Qdrant...")
+    qdrant_indexer = QdrantIndexer()
     vector_count = 0
-    for batch in vector_ds.iter_batches(batch_size=100):
-        qdrant_indexer.write(batch)
-        vector_count += len(batch)
-        logger.info(f"Indexed {vector_count} vectors to Qdrant")
 
-    # Write graph to Neo4j
+    for i in range(0, len(chunks_with_vectors), 100):
+        batch = chunks_with_vectors[i:i + 100]
+        batch_dict = {
+            "text": [c["text"] for c in batch],
+            "metadata": [c["metadata"] for c in batch],
+            "vector": [c["vector"] for c in batch]
+        }
+
+        try:
+            qdrant_indexer.write(batch_dict)
+            vector_count += len(batch)
+            logger.info(f"Indexed {vector_count}/{len(chunks_with_vectors)} vectors to Qdrant")
+        except Exception as e:
+            logger.error(f"Failed to write batch to Qdrant: {e}")
+
+    # 7. Write graph to Neo4j
     logger.info("Writing graph to Neo4j...")
+    neo4j_indexer = Neo4jIndexer()
     graph_count = 0
-    for batch in graph_ds.iter_batches(batch_size=100):
-        neo4j_indexer.write(batch)
-        graph_count += len(batch)
-        logger.info(f"Indexed {graph_count} graph entries to Neo4j")
 
-    print(f"\n✓ Ingestion Job Completed Successfully!")
-    print(f"  - Vectors indexed: {vector_count}")
-    print(f"  - Graph entries indexed: {graph_count}")
+    for i in range(0, len(chunks_with_graph), 100):
+        batch = chunks_with_graph[i:i + 100]
+        batch_dict = {
+            "text": [c["text"] for c in batch],
+            "metadata": [c["metadata"] for c in batch],
+            "graph_nodes": [c["graph_nodes"] for c in batch],
+            "graph_edges": [c["graph_edges"] for c in batch]
+        }
+
+        try:
+            neo4j_indexer.write(batch_dict)
+            graph_count += len(batch)
+            logger.info(f"Indexed {graph_count}/{len(chunks_with_graph)} graph entries to Neo4j")
+        except Exception as e:
+            logger.error(f"Failed to write batch to Neo4j: {e}")
+
+    # 8. Summary
+    print(f"\n{'='*60}")
+    print(f"✓ Ingestion Completed Successfully!")
+    print(f"{'='*60}")
+    print(f"  Files processed:  {len(files_to_process)}")
+    print(f"  Total chunks:     {len(all_chunks)}")
+    print(f"  Vectors indexed:  {vector_count}")
+    print(f"  Graph entries:    {graph_count}")
+    print(f"{'='*60}\n")
 
 
 if __name__ == "__main__":
-    # In a real run, these args come from the job submission
     import sys
 
-    main(sys.argv[1], sys.argv[2])
+    if len(sys.argv) < 3:
+        print("Usage: python main.py <bucket_name> <prefix> [max_workers]")
+        print("Example: python main.py srtmanager kenya_law_data/case 4")
+        sys.exit(1)
+
+    bucket = sys.argv[1]
+    prefix = sys.argv[2]
+    workers = int(sys.argv[3]) if len(sys.argv) > 3 else 4
+
+    main(bucket, prefix, max_workers=workers)

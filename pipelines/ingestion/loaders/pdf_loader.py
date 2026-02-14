@@ -1,9 +1,15 @@
 # pipelines/ingestion/loaders/pdf_loader.py
+import io
 import logging
 import tempfile
 from typing import Any
 
-from unstructured.partition.pdf import partition_pdf
+try:
+    import pypdf
+    USE_PYPDF = True
+except ImportError:
+    from unstructured.partition.pdf import partition_pdf
+    USE_PYPDF = False
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +26,31 @@ def parse_pdf_bytes(file_bytes: bytes, filename: str) -> tuple[str, dict[str, An
     Returns:
         Tuple containing (extracted_text_content, metadata_dict)
     """
+    # Use fast PyPDF parser if available (much faster than unstructured)
+    if USE_PYPDF:
+        try:
+            pdf_reader = pypdf.PdfReader(io.BytesIO(file_bytes))
+            text_content = ""
+
+            for page_num, page in enumerate(pdf_reader.pages):
+                text_content += page.extract_text() + "\n"
+
+            metadata = {
+                "filename": filename,
+                "type": "pdf",
+                "pages": len(pdf_reader.pages),
+                "has_tables": False,  # PyPDF doesn't detect tables
+                "table_count": 0,
+            }
+
+            logger.info(f"Parsed {filename} with PyPDF: {len(text_content)} chars, {len(pdf_reader.pages)} pages")
+            return text_content, metadata
+
+        except Exception as e:
+            logger.warning(f"PyPDF failed for {filename}, falling back to unstructured: {e}")
+            # Fall through to unstructured parsing
+
+    # Fallback to unstructured (slower but more robust)
     text_content = ""
     tables = []
 
@@ -33,13 +64,14 @@ def parse_pdf_bytes(file_bytes: bytes, filename: str) -> tuple[str, dict[str, An
             tmp_file.flush()  # Ensure data is written before reading
 
             # 2. Partition PDF
-            # strategy="hi_res" uses OCR (Tesseract) and Layout Analysis (Detectron2)
+            # strategy="fast" uses simple text extraction without loading models
+            # This avoids loading Detectron2 model weights locally
             # 'filename' arg allows unstructured to lazy-load chunks from disk.
             elements = partition_pdf(
                 filename=tmp_file.name,
-                strategy="hi_res",
+                strategy="fast",
                 include_page_breaks=True,
-                infer_table_structure=True,
+                infer_table_structure=False,  # Fast strategy doesn't support table inference
             )
 
             # 3. Process Elements

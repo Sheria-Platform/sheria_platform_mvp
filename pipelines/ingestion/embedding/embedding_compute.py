@@ -41,11 +41,13 @@ class BatchEmbedder:
                     self.endpoint,
                     json={
                         "model": self.model,
-                        "prompt": text
+                        "input": text  # Changed from "prompt" to "input"
                     }
                 )
                 response.raise_for_status()
-                embedding = response.json()["embedding"]
+                response_data = response.json()
+                # The /api/embed endpoint returns "embeddings" as an array
+                embedding = response_data["embeddings"][0]
                 embeddings.append(embedding)
 
             # Add embeddings to the batch dictionary
