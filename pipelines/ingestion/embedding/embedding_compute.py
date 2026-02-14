@@ -1,6 +1,6 @@
 # pipelines/ingestion/embedding/embedding_compute.py
-from typing import Any
 import os
+from typing import Any
 
 import httpx
 
@@ -8,15 +8,17 @@ import httpx
 class BatchEmbedder:
     """
     Callable Class for Ray Data.
-    Uses Ollama for generating embeddings locally.
+    Uses Ollama for generating embeddings.
     """
 
     def __init__(self):
-        # Use Ollama endpoint (configurable via environment)
-        ollama_host = os.getenv("OLLAMA_HOST", "http://localhost:11434")
-        self.endpoint = f"{ollama_host}/api/embeddings"
+        # Use full endpoint URL or construct from host
+        self.endpoint = os.getenv(
+            "OLLAMA_EMBED_ENDPOINT",
+            "http://localhost:11436/api/embeddings"
+        )
         self.model = os.getenv("OLLAMA_EMBED_MODEL", "nomic-embed-text")
-        self.client = httpx.Client(timeout=60.0)
+        self.client = httpx.Client(timeout=120.0)
 
     def __call__(self, batch: dict[str, Any]) -> dict[str, Any]:
         """

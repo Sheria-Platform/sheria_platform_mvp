@@ -15,11 +15,13 @@ class GraphExtractor:
     """
 
     def __init__(self):
-        # Use Ollama endpoint (configurable via environment)
-        ollama_host = os.getenv("OLLAMA_HOST", "http://localhost:11434")
-        self.llm_endpoint = f"{ollama_host}/api/chat"
+        # Use full endpoint URL or construct from host
+        self.llm_endpoint = os.getenv(
+            "OLLAMA_LLM_ENDPOINT",
+            "http://localhost:11435/api/chat"
+        )
         self.model = os.getenv("OLLAMA_LLM_MODEL", "llama3")
-        self.client = httpx.Client(timeout=120.0)  # Long timeout for reasoning
+        self.client = httpx.Client(timeout=180.0)
 
     def __call__(self, batch: dict[str, Any]) -> dict[str, Any]:
         """

@@ -13,9 +13,12 @@ class QdrantIndexer:
     """
 
     def __init__(self):
-        host = os.getenv("QDRANT_HOST", "qdrant-service")
+        host = os.getenv("QDRANT_HOST", "localhost")
         port = int(os.getenv("QDRANT_PORT", 6333))
-        self.collection_name = os.getenv("QDRANT_COLLECTION", "rag_collection")
+        self.collection_name = os.getenv(
+            "QDRANT_COLLECTION",
+            "kenya_law_reports"
+        )
 
         self.client = QdrantClient(host=host, port=port)
 

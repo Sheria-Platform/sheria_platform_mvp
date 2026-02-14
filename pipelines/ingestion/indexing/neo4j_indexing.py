@@ -12,8 +12,8 @@ class Neo4jIndexer:
     """
 
     def __init__(self):
-        # Read from Env Vars (injected by Ray Cluster environment)
-        uri = os.getenv("NEO4J_URI", "bolt://neo4j-cluster:7687")
+        # Read from environment variables
+        uri = os.getenv("NEO4J_URI", "bolt://localhost:7687")
         user = os.getenv("NEO4J_USER", "neo4j")
         password = os.getenv("NEO4J_PASSWORD", "changeme")
 

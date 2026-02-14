@@ -1,5 +1,6 @@
 # pipelines/ingestion/main.py
 import logging
+import os
 from typing import Any
 
 import ray
@@ -11,10 +12,20 @@ from pipelines.ingestion.indexing.neo4j_indexing import Neo4jIndexer
 from pipelines.ingestion.indexing.qdrant_indexing import QdrantIndexer
 from pipelines.ingestion.loaders.pdf_loader import parse_pdf_bytes
 
-# Initialize Ray (Connect to the existing cluster)
-ray.init(address="auto")
+# Load environment variables from .env file if present
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
+# Initialize Ray
+ray_address = os.getenv("RAY_ADDRESS", "auto")
+if not ray.is_initialized():
+    ray.init(address=ray_address)
 
 logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
 
 
 def process_batch(batch: dict[str, Any]) -> dict[str, Any]:

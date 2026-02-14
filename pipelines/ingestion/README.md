@@ -2,12 +2,26 @@
 
 ## Overview
 
-The Sheria Platform ingestion pipeline is responsible for transforming raw legal documents (court judgments, case law, statutes) into structured, searchable knowledge. This is a **fundamental data acquisition step** that converts unstructured text into:
+The Sheria Platform ingestion pipeline transforms raw legal documents (court judgments, case law, statutes) into structured, searchable knowledge. It converts unstructured text into:
 
 1. **Vector embeddings** for semantic search (stored in Qdrant)
 2. **Knowledge graphs** for relationship mapping (stored in Neo4j)
 
-The pipeline has been **migrated from Ray-hosted models to Ollama** for easier local development and deployment.
+The pipeline uses **remote Ollama servers** for embeddings and LLM inference, with Ray Data for distributed document processing.
+
+## Quick Start
+
+```bash
+# 1. Configure environment
+cp .env.example .env
+nano .env  # Update with your values
+
+# 2. Test connectivity
+python test_connection.py
+
+# 3. Run ingestion
+python main.py <bucket_name> <prefix>
+```
 
 ## Architecture
 
@@ -243,83 +257,114 @@ pip install -r requirements.txt
 - `python-docx` - DOCX parsing
 - `beautifulsoup4` - HTML parsing
 
-### 2. Install & Start Ollama
+### 2. Configure Remote Infrastructure
 
-**macOS / Linux:**
+This pipeline uses remote Ollama and database servers. Copy the example environment file:
+
 ```bash
-# Install Ollama
-curl -fsSL https://ollama.com/install.sh | sh
+# Copy environment template
+cp .env.example .env
 
-# Start Ollama service (runs on http://localhost:11434)
-ollama serve
+# Edit with your actual values
+nano .env
 ```
 
-**Pull Required Models:**
+**Infrastructure Endpoints:**
+
+| Service | Port(s) | Access URL | Status |
+|---------|---------|------------|--------|
+| Ollama LLM | 11435 | http://192.168.214.22:11435 | Required |
+| Ollama Embed | 11436 | http://192.168.214.22:11436 | Required |
+| Qdrant API | 6333 | http://192.168.214.21:6333 | Required |
+| Neo4j Bolt | 7687 | bolt://192.168.214.21:7687 | Required |
+| MinIO API | 9000 | http://192.168.214.21:9000 | Required |
+| Redis | 6379 | redis://192.168.214.21:6379 | Optional |
+| PostgreSQL | 5432 | postgresql://192.168.214.21:5432 | Optional |
+
+**Verify Connectivity:**
 ```bash
-# Embedding model (required)
-ollama pull nomic-embed-text
+# Test Ollama LLM endpoint
+curl http://192.168.214.22:11435/api/tags
 
-# LLM for graph extraction (required)
-ollama pull llama3
+# Test Ollama embedding endpoint
+curl http://192.168.214.22:11436/api/tags
 
-# Optional: Alternative models
-ollama pull mxbai-embed-large  # Better quality embeddings
-ollama pull llama3.1           # Larger LLM (70B)
-```
+# Test Qdrant
+curl http://192.168.214.21:6333/collections
 
-**Verify Ollama is Running:**
-```bash
-curl http://localhost:11434/api/tags
-```
-
-### 3. Start Local Infrastructure
-
-```bash
-# From project root
-make up
-
-# This starts:
-# - Qdrant (vector DB) on port 6333
-# - Neo4j (graph DB) on port 7474/7687
-# - MinIO (object storage) on port 9000/9001
-# - PostgreSQL on port 5432
-# - Redis on port 6379
+# Test MinIO
+curl http://192.168.214.21:9000/minio/health/live
 ```
 
 ## Running the Ingestion Pipeline
 
-### Method 1: Direct Python Execution
+### Step 1: Test Infrastructure Connectivity
+
+Before running the ingestion pipeline, verify all remote services are accessible:
 
 ```bash
-# Run ingestion for a specific S3/MinIO bucket and prefix
-python pipelines/ingestion/main.py <bucket_name> <prefix>
+# Run the connectivity test
+python test_connection.py
 
-# Example: Ingest Kenya Law Reports
-python pipelines/ingestion/main.py kenya-law-reports supreme-court/
-
-# Example: Ingest case files
-python pipelines/ingestion/main.py court-records-dev nairobi-high-court/
+# Expected output:
+# ✓ Ollama LLM - PASS
+# ✓ Ollama Embed - PASS
+# ✓ Qdrant - PASS
+# ✓ Neo4j - PASS
 ```
 
-### Method 2: Using the Test Script
+If any tests fail, check your `.env` configuration and network connectivity.
+
+### Step 2: Set Environment Variables
+
+```bash
+# Export remote infrastructure endpoints
+export OLLAMA_LLM_ENDPOINT=http://192.168.214.22:11435/api/chat
+export OLLAMA_EMBED_ENDPOINT=http://192.168.214.22:11436/api/embeddings
+export QDRANT_HOST=192.168.214.21
+export NEO4J_URI=bolt://192.168.214.21:7687
+export NEO4J_PASSWORD=your_actual_password
+```
+
+Or use the `.env` file (recommended):
+```bash
+# Source the environment file
+set -a
+source .env
+set +a
+```
+
+### Step 3: Direct Python Execution
+
+```bash
+# Run ingestion for a specific MinIO bucket and prefix
+python main.py <bucket_name> <prefix>
+
+# Example: Ingest Kenya Law Reports
+python main.py kenya-law-reports supreme-court/
+
+# Example: Ingest case files
+python main.py court-records-dev nairobi-high-court/
+```
+
+### Step 4: Using Test Scripts
 
 ```bash
 # Upload sample data to MinIO and trigger ingestion
-python testExample/minio_ingestion.py
+python ../../testExample/minio_ingestion.py
+
+# Or use the bulk upload script
+python ../../scripts/bulk_upload_s3.py
 ```
 
-**What this does:**
-1. Loads files from `kenya_law_data/` directory
-2. Uploads to MinIO bucket `kenya-law-reports-dev`
-3. Triggers ingestion pipeline
-4. Processes PDFs, DOCX, HTML files
-
-### Method 3: Local MinIO Ingestion Script
-
-```bash
-# For local development with MinIO
-python scripts/local_minio_ingestion.py
-```
+**Process Flow:**
+1. Load documents from local directory or MinIO bucket
+2. Ray Data distributes parsing across workers
+3. Documents chunked into 512-token segments
+4. **Fork A**: Send chunks to remote Ollama (192.168.214.22:11436) for embeddings
+5. **Fork B**: Send chunks to remote Ollama (192.168.214.22:11435) for graph extraction
+6. Index embeddings to Qdrant (192.168.214.21:6333)
+7. Index graph data to Neo4j (192.168.214.21:7687)
 
 ## Process Flow (Step-by-Step)
 
@@ -463,7 +508,7 @@ graph_ds.write_datasource(Neo4jIndexer())
 
 ## Troubleshooting
 
-### Issue: Ollama Connection Error
+### Issue: Remote Ollama Connection Error
 
 **Error:**
 ```
@@ -472,14 +517,36 @@ httpx.ConnectError: [Errno 61] Connection refused
 
 **Solution:**
 ```bash
-# Check if Ollama is running
-curl http://localhost:11434/api/tags
+# Test connectivity to remote Ollama
+curl http://192.168.214.22:11435/api/tags
+curl http://192.168.214.22:11436/api/tags
 
-# If not, start Ollama
-ollama serve
+# Check if ports are accessible
+nc -zv 192.168.214.22 11435
+nc -zv 192.168.214.22 11436
 
-# Verify models are pulled
-ollama list
+# Verify environment variables are set
+echo $OLLAMA_LLM_ENDPOINT
+echo $OLLAMA_EMBED_ENDPOINT
+```
+
+### Issue: Network Timeout
+
+**Error:**
+```
+httpx.ReadTimeout: Read operation timed out
+```
+
+**Solution:**
+```bash
+# Check network connectivity
+ping 192.168.214.22
+ping 192.168.214.21
+
+# Test latency
+time curl http://192.168.214.22:11435/api/tags
+
+# If latency is high, increase timeout in code (already set to 120-180s)
 ```
 
 ### Issue: Out of Memory
@@ -583,10 +650,10 @@ ollama logs
 
 | Component | Before (Ray Serve) | After (Ollama) | Reason |
 |-----------|-------------------|----------------|---------|
-| Embedding | `ray-serve-embed:8000/embed` | `localhost:11434/api/embeddings` | Easier local dev |
-| LLM | `ray-serve-llm:8000/llm/chat` | `localhost:11434/api/chat` | No GPU cluster needed |
+| Embedding | `ray-serve-embed:8000/embed` | `192.168.214.22:11436/api/embeddings` | Remote Ollama |
+| LLM | `ray-serve-llm:8000/llm/chat` | `192.168.214.22:11435/api/chat` | Remote Ollama |
 | Batch Size | 100 (true batch) | 1 per call (sequential) | Ollama API design |
-| Deployment | Kubernetes + Ray Serve | Single Ollama instance | Simplified stack |
+| Deployment | Kubernetes + Ray Serve | Remote Ollama servers | Simplified testing |
 
 ### What Stayed the Same
 
@@ -614,37 +681,77 @@ ollama logs
    - Use Ray Serve for production
    - Code is compatible with both (just change endpoints)
 
+## Summary of Changes for Remote Infrastructure
+
+### Updated Components
+
+1. **embedding_compute.py**
+   - Uses `OLLAMA_EMBED_ENDPOINT` environment variable
+   - Connects to remote embedding service (port 11436)
+   - Timeout increased to 120 seconds for network latency
+
+2. **extractor_graph.py**
+   - Uses `OLLAMA_LLM_ENDPOINT` environment variable
+   - Connects to remote LLM service (port 11435)
+   - Timeout increased to 180 seconds for LLM inference
+
+3. **qdrant_indexing.py**
+   - Default host changed to `localhost` (configurable)
+   - Default collection changed to `kenya_law_reports`
+
+4. **neo4j_indexing.py**
+   - Default URI changed to `bolt://localhost:7687` (configurable)
+
+5. **main.py**
+   - Added dotenv support for environment variables
+   - Added Ray initialization check to prevent double init
+   - Added logging configuration
+
+6. **Configuration Files**
+   - Created `.env.example` with remote endpoints
+   - Updated `requirements.txt` with httpx, ray, qdrant-client, neo4j
+   - Created `test_connection.py` for infrastructure testing
+
 ## Next Steps
 
-1. **Test the Pipeline:**
+1. **Configure Environment:**
    ```bash
-   # Pull models
-   ollama pull nomic-embed-text
-   ollama pull llama3
+   # Copy example config
+   cp .env.example .env
 
-   # Start infrastructure
-   make up
-
-   # Run test ingestion
-   python testExample/minio_ingestion.py
+   # Edit with your values
+   nano .env
    ```
 
-2. **Verify Data:**
+2. **Test Connectivity:**
+   ```bash
+   # Run connection tests
+   python test_connection.py
+   ```
+
+3. **Install Dependencies:**
+   ```bash
+   # Install required packages
+   pip install -r requirements.txt
+   ```
+
+4. **Run Ingestion:**
+   ```bash
+   # Set environment
+   source .env
+
+   # Run pipeline
+   python main.py kenya-law-reports supreme-court/
+   ```
+
+5. **Verify Data:**
    ```bash
    # Check Qdrant vectors
-   curl http://localhost:6333/collections/kenya_law_reports
+   curl http://192.168.214.21:6333/collections/kenya_law_reports
 
-   # Check Neo4j graph
-   # Open http://localhost:7474 in browser
+   # Check Neo4j graph (open in browser)
+   # http://192.168.214.21:7474
    # Run: MATCH (n) RETURN n LIMIT 25
-   ```
-
-3. **Query the Data:**
-   ```bash
-   # Test semantic search
-   curl -X POST http://localhost:8000/api/v1/legal-research \
-     -H "Content-Type: application/json" \
-     -d '{"query": "adverse possession test Kenya"}'
    ```
 
 ## Additional Resources
