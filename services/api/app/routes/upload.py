@@ -1,4 +1,5 @@
 # services/api/app/routes/upload.py
+import logging
 import uuid
 
 import boto3
@@ -8,13 +9,17 @@ from pydantic import BaseModel
 from services.api.app.auth import get_current_user  # Assume auth exists
 from services.api.app.config import settings
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter()
 
 # Initialize S3 Client (boto3 is synchronous, but presigning is fast/CPU-bound)
 s3_client = boto3.client(
     "s3",
     region_name=settings.AWS_REGION,
-    # Use internal VPC endpoint if available, else public
+    aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+    aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+    endpoint_url=settings.S3_ENDPOINT_URL if settings.S3_ENDPOINT_URL else None,
 )
 
 
@@ -53,10 +58,11 @@ async def generate_upload_url(
                 "ContentType": req.content_type,
                 "Metadata": {"original_filename": req.filename, "user_id": user["id"]},
             },
-            ExpiresIn=3600,  # URL valid for 1 hour
+            ExpiresIn=3600,
         )
 
         return PresignedURLResponse(upload_url=url, file_id=file_id, s3_key=s3_key)
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error generating presigned URL: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail=str(e))

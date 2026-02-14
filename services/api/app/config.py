@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     # AWS S3 (Documents)
     AWS_REGION: str = "us-east-1"
     S3_BUCKET_NAME: str
+    S3_ENDPOINT_URL: str
+    AWS_ACCESS_KEY_ID: str
+    AWS_SECRET_ACCESS_KEY: str
 
     # Ray Serve (Internal LLM/Embeddings)
     RAY_LLM_ENDPOINT: str = "http://llm-service:8000/llm"
