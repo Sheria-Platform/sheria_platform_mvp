@@ -52,12 +52,20 @@ make up
 # Option A: Test with sample data
 python testExample/minio_ingestion.py
 
-# Option B: Ingest from specific bucket
+# Option B: Ingest from specific bucket (basic)
 python pipelines/ingestion/main.py <bucket_name> <prefix>
+
+# Option C: With production options (NEW in v1.1.0)
+python pipelines/ingestion/main.py <bucket_name> <prefix> \
+  --max-workers 8 \
+  --enable-graph \
+  --log-level DEBUG
 
 # Example: Kenya Law Reports
 python pipelines/ingestion/main.py kenya-law-reports supreme-court/
 ```
+
+**New Features:** Graceful shutdown (Ctrl+C), automatic retry, error tracking. See [CONFIGURATION_GUIDE.md](CONFIGURATION_GUIDE.md) for 41+ config options.
 
 ---
 

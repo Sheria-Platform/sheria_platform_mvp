@@ -16,8 +16,13 @@ QDRANT_HOST = os.getenv("QDRANT_HOST", "192.168.214.21")
 QDRANT_PORT = int(os.getenv("QDRANT_PORT", "6333"))
 COLLECTION_NAME = os.getenv("QDRANT_COLLECTION", "kenya_law_reports")
 
-# Embedding dimension (qwen3-embedding:4b produces 768-dimensional vectors)
-VECTOR_SIZE = 2560
+# Embedding dimension
+# NOTE: Must match your embedding model's output dimension
+# - nomic-embed-text: 768 dimensions (default)
+# - mxbai-embed-large: 1024 dimensions
+# - qwen3-embedding:4b: 2560 dimensions
+# Check your OLLAMA_EMBED_MODEL and update accordingly
+VECTOR_SIZE = int(os.getenv("QDRANT_VECTOR_SIZE", "768"))  # Default for nomic-embed-text
 
 # Connect to Qdrant
 client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
