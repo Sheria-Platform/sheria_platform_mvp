@@ -2,71 +2,216 @@
 version: '3.8'
 
 services:
-  # 1. Postgres (Chat History)
+  # 1. Postgres (Case Metadata & Judicial Decisions)
   postgres:
     image: postgres:15-alpine
+    container_name: sheria-postgres
     environment:
-      POSTGRES_USER: ragadmin
-      POSTGRES_PASSWORD: changeme
-      POSTGRES_DB: rag_db
+      POSTGRES_USER: ${POSTGRES_USER:-ragadmin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      POSTGRES_DB: ${POSTGRES_DB:-rag_db}
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - pg_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ragadmin}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
-  # 2. Redis (Cache)
+  # 2. Redis (Semantic Cache)
   redis:
     image: redis:7-alpine
+    container_name: sheria-redis
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT:-6379}:6379"
     volumes:
       - redis-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
 
-  # 3. Qdrant (Vector DB)
+  # 3. Qdrant (Vector Database for Kenya Law Reports)
   qdrant:
-    image: qdrant/qdrant:v1.7.3
+    image: ${QDRANT_IMAGE:-qdrant/qdrant:v1.7.3}
+    container_name: sheria-qdrant
     ports:
-      - "6333:6333"  # REST API
-      - "6334:6334"  # gRPC
+      - "${QDRANT_PORT:-6333}:6333"  # REST API
+      - "${QDRANT_GRPC_PORT:-6334}:6334"  # gRPC
     volumes:
       - qdrant_data:/qdrant/storage
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:6333/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
-  # 4. Neo4j (Graph DB)
+  # 4. Neo4j (Citation Graph & Legal Relationships)
   neo4j:
-    image: neo4j:5.16.0-community
+    image: ${NEO4J_IMAGE:-neo4j:5.16.0-community}
+    container_name: sheria-neo4j
     environment:
-      NEO4J_AUTH: neo4j/password
-      NEO4J_dbms_memory_pagecache_size: 1G
+      NEO4J_AUTH: ${NEO4J_AUTH:-neo4j/password}
+      NEO4J_dbms_memory_pagecache_size: ${NEO4J_MEMORY_PAGECACHE_SIZE:-1G}
     ports:
-      - "7474:7474" # HTTP
-      - "7687:7687" # Bolt
+      - "${NEO4J_HTTP_PORT:-7474}:7474"  # HTTP
+      - "${NEO4J_BOLT_PORT:-7687}:7687"  # Bolt
     volumes:
       - neo4j_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "cypher-shell -u neo4j -p ${NEO4J_PASSWORD:-password} 'RETURN 1' || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
 
-  # 5. MinIO (S3 Mock) - Optional for full offline dev
+  # 5. MinIO (S3-Compatible Storage for Court Documents)
   minio:
     image: minio/minio
-    command: server /data
+    container_name: sheria-minio
+    command: server /data --console-address ":9001"
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "${MINIO_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
     environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      MINIO_BROWSER_REDIRECT_URL: ${MINIO_BROWSER_REDIRECT_URL:-http://localhost:9001}
+      MINIO_SERVER_URL: ${MINIO_SERVER_URL:-http://localhost:9000}
     volumes:
       - minio-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+  
+  openmaxio-browser:
+    image: ghcr.io/astrateam-net/minio-browser:1.7.6
+    container_name: openmaxio-browser
+    restart: unless-stopped
+    ports:
+      - "8080:9090"
+    command: ./console server
+    environment:
+      CONSOLE_MINIO_SERVER: http://localhost:9000
+    depends_on:
+      - minio_server
+
+  # 6. Ollama (Local LLM for Embeddings & Graph Extraction)
+  ollama:
+    image: ollama/ollama:latest
+    container_name: sheria-ollama
+    ports:
+      - "${OLLAMA_PORT:-11434}:11434"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: ${OLLAMA_NUM_GPU:-1}
+              capabilities: [gpu]
+    volumes:
+      - ollama:/root/.ollama
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:11434/api/tags || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # 6b. Ollama Nginx Proxy (Load Balancer for Remote Ollama Cluster)
+  ollama-proxy:
+    image: nginx:alpine
+    container_name: sheria-ollama-proxy
+    restart: unless-stopped
+    ports:
+      - "11435:11435"  # LLM endpoint
+      - "11436:11436"  # Embedding endpoint
+      - "11437:11437"  # Reranker endpoint
+      - "8080:8080"    # Status/health endpoint
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    network_mode: host  # Required to reach remote hosts
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # 7. Open WebUI (Web Interface for Ollama - Development)
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: sheria-open-webui
+    ports:
+      - "${OPEN_WEBUI_PORT:-3030}:8080"
+    environment:
+      # Ollama connection
+      OLLAMA_BASE_URL: ${OLLAMA_HOST:-http://ollama:11434}
+
+      # Security
+      WEBUI_SECRET_KEY: ${WEBUI_SECRET_KEY:-change-me-to-random-string}
+
+      # Database (optional - uses SQLite by default)
+      DATABASE_URL: postgresql://${POSTGRES_USER:-ragadmin}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-rag_db}
+
+      # Redis cache (optional)
+      REDIS_URL: redis://redis:6379/1
+
+      # Authentication
+      ENABLE_SIGNUP: ${ENABLE_SIGNUP:-true}
+      DEFAULT_USER_ROLE: ${DEFAULT_USER_ROLE:-user}
+      WEBUI_AUTH: ${WEBUI_AUTH:-true}
+
+      # RAG Configuration
+      ENABLE_RAG: ${ENABLE_RAG:-true}
+      RAG_EMBEDDING_ENGINE: ${RAG_EMBEDDING_ENGINE:-ollama}
+      RAG_EMBEDDING_MODEL: ${RAG_EMBEDDING_MODEL:-nomic-embed-text}
+
+      # Vector DB - Can integrate with Qdrant if needed
+      VECTOR_DB: qdrant
+      QDRANT_URL: http://qdrant:6333
+
+      # Web Search (optional)
+      ENABLE_WEB_SEARCH: ${ENABLE_WEB_SEARCH:-false}
+
+      # UI Customization
+      WEBUI_NAME: ${WEBUI_NAME:-Sheria Legal Research}
+
+      # CORS (for local dev)
+      CORS_ALLOW_ORIGIN: "*"
+
+    volumes:
+      - open-webui:/app/backend/data
+    depends_on:
+      - ollama
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    restart: unless-stopped
 
 volumes:
   pg_data:
+    name: sheria-pg-data
   qdrant_data:
+    name: sheria-qdrant-data
   neo4j_data:
+    name: sheria-neo4j-data
   minio-data:
+    name: sheria-minio-data
   redis-data:
+    name: sheria-redis-data
+  ollama:
+    name: sheria-ollama
+  open-webui:
+    name: sheria-open-webui
 
-curl -X POST http://192.168.215.84:8000/api/v1/chat/stream \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer YM8z9VRuJyNjHhYAcfkjSaAbFYhvKET4PcBhZw8xfeES" \
-  -d '{
-    "message": "Analyze the financial risks mentioned in the Q3 report.",
-    "session_id": "test-session-1"
-  }'
+networks:
+  default:
+    name: sheria-network
