@@ -53,6 +53,13 @@ opentelemetry-semantic-conventions==0.59b0
 prometheus_client==0.23.1
 posthog==5.4.0
 
+# Numeric / Vector
+numpy==1.26.4        # Required by ollama_embeddings.py for Qdrant-compatible arrays
+qdrant-client==1.9.1 # Qdrant Python client (if not already installed via another path)
+
+# LangGraph (Agentic workflow)
+langgraph>=0.2.0     # StateGraph, conditional edges, astream()
+
 # Utilities
 tenacity==9.1.2
 backoff==2.2.1

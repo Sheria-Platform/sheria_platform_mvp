@@ -1,60 +1,132 @@
 # services/api/app/memory/postgres.py
-from datetime import datetime
+"""PostgreSQL-backed conversation memory.
 
-from sqlalchemy import JSON, Column, DateTime, Integer, String, Text
+Persists every chat turn (user and assistant messages) to the
+``chat_history`` table so conversation context survives across API
+restarts and can be audited.
+
+Example:
+    >>> await postgres_memory.add_message(
+    ...     session_id="abc-123",
+    ...     role="user",
+    ...     content="What is adverse possession?",
+    ...     user_id="judge-001",
+    ... )
+    >>> history = await postgres_memory.get_history("abc-123", limit=6)
+"""
+
+from datetime import datetime
+from typing import Sequence
+
+from sqlalchemy import JSON, Column, DateTime, Integer, String, Text, select
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 from services.api.app.config import settings
 
-# 1. Database Setup
 Base = declarative_base()
 
 
-# 2. Define the Chat History Table
 class ChatHistory(Base):
-    """
-    Stores every conversation turn.
+    """ORM model for the ``chat_history`` table.
+
+    Each row represents one turn in a conversation.
+
+    Attributes:
+        id: Auto-incrementing primary key.
+        session_id: UUID string grouping messages into a conversation.
+        user_id: Identifier of the authenticated user.
+        role: Speaker -- ``"user"``, ``"assistant"``, or ``"system"``.
+        content: The raw message text.
+        metadata_: Flexible JSON blob for token counts, latency, etc.
+        created_at: UTC timestamp of insertion.
     """
 
     __tablename__ = "chat_history"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    session_id = Column(String, index=True)  # User's conversation ID
-    user_id = Column(String, index=True)
-    role = Column(String)  # "user" or "assistant"
-    content = Column(Text)  # The text message
-    metadata_ = Column(JSON, default={})  # Extra info (latency, tokens used)
+    session_id = Column(String, index=True, nullable=False)
+    user_id = Column(String, index=True, nullable=False)
+    role = Column(String(50), nullable=False)
+    content = Column(Text, nullable=False)
+    metadata_ = Column(JSON, default={}, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
-# 3. Async Engine & Session
+# Async engine -- ``echo=False`` suppresses SQL statement logging
 engine = create_async_engine(settings.DATABASE_URL, echo=False)
-AsyncSessionLocal = sessionmaker(
-    bind=engine, class_=AsyncSession, expire_on_commit=False
+
+AsyncSessionLocal: sessionmaker = sessionmaker(
+    bind=engine,
+    class_=AsyncSession,
+    expire_on_commit=False,
 )
 
 
 class PostgresMemory:
-    """
-    Manager for persisting conversation state.
+    """Async manager for persisting and retrieving conversation turns.
+
+    Uses SQLAlchemy async sessions backed by ``asyncpg``.  Each method
+    opens its own session to keep transactions short-lived.
     """
 
-    async def add_message(self, session_id: str, role: str, content: str, user_id: str):
+    async def add_message(
+        self,
+        session_id: str,
+        role: str,
+        content: str,
+        user_id: str,
+    ) -> None:
+        """Persist a single chat turn to the database.
+
+        Args:
+            session_id: UUID string for the conversation thread.
+            role: Speaker role -- ``"user"`` or ``"assistant"``.
+            content: The message text to store.
+            user_id: Authenticated user identifier for multi-tenancy.
+
+        Raises:
+            sqlalchemy.exc.SQLAlchemyError: On database write failure.
+        """
         async with AsyncSessionLocal() as session:
             async with session.begin():
                 msg = ChatHistory(
-                    session_id=session_id, role=role, content=content, user_id=user_id
+                    session_id=session_id,
+                    role=role,
+                    content=content,
+                    user_id=user_id,
                 )
                 session.add(msg)
-                # Commit happens automatically via 'async with session.begin()'
+                # ``session.begin()`` commits automatically on exit
 
-    async def get_history(self, session_id: str, limit: int = 10):
-        """
-        Fetch last N messages for context window.
-        """
-        from sqlalchemy import select
+    async def get_history(
+        self,
+        session_id: str,
+        limit: int = 10,
+    ) -> Sequence[ChatHistory]:
+        """Retrieve the most recent *limit* messages for a session.
 
+        Messages are returned in chronological order (oldest first)
+        to match the format expected by LLM ``messages`` lists.
+
+        Args:
+            session_id: The conversation thread identifier.
+            limit: Maximum number of messages to return.  Fetches the
+                *newest* ``limit`` rows, then reverses them.
+
+        Returns:
+            A sequence of ``ChatHistory`` ORM objects ordered oldest
+            to newest.
+
+        Example:
+            >>> history = await postgres_memory.get_history(
+            ...     "session-abc", limit=6
+            ... )
+            >>> messages = [
+            ...     {"role": m.role, "content": m.content}
+            ...     for m in history
+            ... ]
+        """
         async with AsyncSessionLocal() as session:
             result = await session.execute(
                 select(ChatHistory)
@@ -62,8 +134,10 @@ class PostgresMemory:
                 .order_by(ChatHistory.created_at.desc())
                 .limit(limit)
             )
-            # Reverse to get chronological order (Oldest -> Newest)
-            return result.scalars().all()[::-1]
+            # Reverse to restore chronological (oldest -> newest) order
+            rows = result.scalars().all()
+            return list(reversed(rows))
 
 
+# Global singleton -- stateless; no lifecycle management required
 postgres_memory = PostgresMemory()

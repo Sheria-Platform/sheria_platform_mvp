@@ -1,6 +1,6 @@
 # services/api/app/enhancers/query_rewriter.py
 
-from services.api.app.clients.ray_llm import llm_client
+from services.api.app.clients.ollama_client import ollama_client as llm_client
 
 SYSTEM_PROMPT = """
 You are a Query Rewriter.
