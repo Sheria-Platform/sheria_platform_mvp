@@ -77,13 +77,18 @@ async def retrieve_node(state: AgentState) -> dict:
     async def _vector_search() -> list[str]:
         """Search Qdrant and format results with source attribution."""
         results = await qdrant_client.search(vector=query_vector, limit=5)
-        return [
-            (
-                f"{r.payload['text']} "
-                f"[Source: {r.payload['metadata']['filename']}]"
+        docs = []
+        for r in results:
+            text = r.payload.get("text", "")
+            # Payload shape varies by ingestion pipeline; try common locations
+            filename = (
+                r.payload.get("metadata", {}).get("filename")
+                or r.payload.get("source")
+                or r.payload.get("filename")
+                or "unknown"
             )
-            for r in results
-        ]
+            docs.append(f"{text} [Source: {filename}]")
+        return docs
 
     async def _graph_search() -> list[str]:
         """Search Neo4j fulltext index for entity relationships."""

@@ -22,12 +22,64 @@ from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
 from fastapi import FastAPI
+from qdrant_client.http.models import Distance, VectorParams
+from sqlalchemy import text
 
 from services.api.app.cache.redis import redis_client
 from services.api.app.clients.neo4j import neo4j_client
 from services.api.app.clients.ollama_client import ollama_client
 from services.api.app.clients.qdrant import qdrant_client
+from services.api.app.memory.postgres import Base, engine
 from services.api.app.routes import chat, feedback, health, upload
+
+# Dimension produced by nomic-embed-text (must match OLLAMA_EMBEDDING_MODEL)
+_EMBEDDING_DIM = 2560
+
+
+async def _ensure_qdrant_collections() -> None:
+    """Create required Qdrant collections if they do not already exist.
+
+    ``semantic_cache`` — stores Q&A embedding pairs for semantic deduplication.
+    Uses cosine distance at threshold 0.95 (see cache/semantic.py).
+
+    Safe to call on every startup; existing collections are left untouched.
+    """
+    existing = {
+        c.name
+        for c in (await qdrant_client.client.get_collections()).collections
+    }
+
+    if "semantic_cache" not in existing:
+        await qdrant_client.client.create_collection(
+            collection_name="semantic_cache",
+            vectors_config=VectorParams(
+                size=_EMBEDDING_DIM,
+                distance=Distance.COSINE,
+            ),
+        )
+        print("Created Qdrant collection: semantic_cache")
+
+
+async def _create_db_tables() -> None:
+    """Create all database tables if they do not already exist.
+
+    Runs ``CREATE TABLE IF NOT EXISTS`` for every SQLAlchemy ORM model
+    (``chat_history``) and the raw-SQL ``feedback`` table.  Safe to call
+    on every startup — existing tables are left untouched.
+    """
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS feedback (
+                id         SERIAL PRIMARY KEY,
+                session_id VARCHAR      NOT NULL,
+                user_id    VARCHAR      NOT NULL,
+                message_id INTEGER      NOT NULL,
+                score      INTEGER      NOT NULL,
+                comment    TEXT,
+                created_at TIMESTAMP    DEFAULT NOW()
+            )
+        """))
 
 
 @asynccontextmanager
@@ -38,10 +90,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     initialised before ``yield`` are torn down after ``yield``.
 
     Startup order:
-        1. Neo4j driver (synchronous pool open)
-        2. Redis connection pool
-        3. Qdrant client (health-check on connect)
-        4. Ollama HTTP client pool
+        1. Database tables (created if missing)
+        2. Neo4j driver (synchronous pool open)
+        3. Redis connection pool
+        4. Qdrant client (health-check on connect)
+        5. Qdrant collections (created if missing)
+        6. Ollama HTTP client pool
 
     Shutdown is performed in reverse order to respect dependencies.
 
@@ -54,9 +108,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """
     # ── Startup ──────────────────────────────────────────────────────
     print("Initializing clients...")
+    await _create_db_tables()
     neo4j_client.connect()
     await redis_client.connect()
     await qdrant_client.connect()
+    await _ensure_qdrant_collections()
     await ollama_client.start()
     print("All clients initialized successfully!")
 
