@@ -41,7 +41,6 @@ class VectorDBClient:
             host=settings.QDRANT_HOST,
             port=settings.QDRANT_PORT,
             prefer_grpc=True,        # gRPC for lower latency
-            check_compatibility=False,  # suppress version warnings
         )
 
     async def connect(self) -> None:
