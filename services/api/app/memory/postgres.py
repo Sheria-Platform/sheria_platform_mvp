@@ -1,7 +1,9 @@
 # services/api/app/memory/postgres.py
 from typing import Sequence
 
+from fastapi import Depends
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from services.api.app.models.rag import ChatHistory
 from services.api.app.core.database import get_db
@@ -11,22 +13,22 @@ class PostgresMemory:
     """
     Manager for persisting conversation state.
     """
+    def __init__(self, db_session: AsyncSession):
+        self.db_session = db_session
 
-    @staticmethod
-    async def add_message(session_id: str, role: str, content: str, user_id: str):
-        db_session = get_db()
+    async def add_message(self, session_id: str, role: str, content: str, user_id: str):
         msg = ChatHistory(
             session_id=session_id,
             role=role,
             content=content,
             user_id=user_id,
         )
-        db_session.add(msg)
+        self.db_session.add(msg)
 
-        await db_session.commit()
+        await self.db_session.commit()
 
-    @staticmethod
     async def get_history(
+            self,
             session_id: str,
             limit: int = 10,
     ) -> Sequence[ChatHistory]:
@@ -44,8 +46,7 @@ class PostgresMemory:
             A sequence of ``ChatHistory`` ORM objects ordered oldest
             to newest.
         """
-        db_session = get_db()
-        result = await db_session.execute(
+        result = await self.db_session.execute(
             select(ChatHistory)
             .where(ChatHistory.session_id == session_id)
             .order_by(ChatHistory.created_at.desc())
@@ -53,6 +54,3 @@ class PostgresMemory:
         )
         # Reverse to get chronological order (Oldest -> Newest)
         return result.scalars().all()[::-1]
-
-
-postgres_memory = PostgresMemory()

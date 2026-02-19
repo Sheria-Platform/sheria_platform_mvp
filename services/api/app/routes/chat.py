@@ -15,8 +15,9 @@ from services.api.app.cache.semantic import semantic_cache as global_cache
 from services.api.app.clients.ollama_client import OllamaClient  # Replaces RayLLMClient
 from services.api.app.clients.ollama_client import ollama_client as global_llm
 from services.api.app.memory.postgres import PostgresMemory
-from services.api.app.memory.postgres import postgres_memory as global_memory
+
 from services.api.app.schema.chat import ChatRequest
+from services.api.app.services.dependencies import get_memory
 from services.api.app.tools.auth import get_current_user
 
 router = APIRouter()
@@ -30,10 +31,6 @@ logger = logging.getLogger(__name__)
 
 def get_semantic_cache() -> SemanticCache:
     return global_cache
-
-
-def get_memory() -> PostgresMemory:
-    return global_memory
 
 
 def get_llm_client() -> OllamaClient:
