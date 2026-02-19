@@ -14,7 +14,7 @@ import httpx
 import numpy as np
 
 from libs.retry.backoff import exponential_backoff
-from services.api.app.config import settings
+from services.api.app.core.config import settings
 
 logger = logging.getLogger(__name__)
 

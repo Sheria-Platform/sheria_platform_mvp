@@ -6,12 +6,9 @@ from collections.abc import AsyncGenerator
 
 from fastapi import APIRouter, BackgroundTasks, Depends
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
 
 from services.api.app.agents.graph import agent_app
 from services.api.app.agents.state import AgentState
-from services.api.app.auth.jwt import get_current_user
-
 # Import classes for type hinting
 from services.api.app.cache.semantic import SemanticCache
 from services.api.app.cache.semantic import semantic_cache as global_cache
@@ -19,9 +16,12 @@ from services.api.app.clients.ollama_client import OllamaClient  # Replaces RayL
 from services.api.app.clients.ollama_client import ollama_client as global_llm
 from services.api.app.memory.postgres import PostgresMemory
 from services.api.app.memory.postgres import postgres_memory as global_memory
+from services.api.app.schema.chat import ChatRequest
+from services.api.app.tools.auth import get_current_user
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
 
 # --- Dependency Providers (DI) ---
 # These wrappers allow easy dependency overrides in pytest
@@ -41,25 +41,17 @@ def get_llm_client() -> OllamaClient:
 
 
 # --- Schemas ---
-class ChatRequest(BaseModel):
-    message: str = Field(..., min_length=1, description="The user's query")
-    session_id: str = Field(
-        default=None, description="UUID for the conversation thread"
-    )
-
-
-# --- Routes ---
 
 
 @router.post("/stream")
 async def chat_stream(
-    req: ChatRequest,
-    background_tasks: BackgroundTasks,
-    user: dict = Depends(get_current_user),
-    # Inject dependencies via FastAPI Depends
-    cache: SemanticCache = Depends(get_semantic_cache),
-    memory: PostgresMemory = Depends(get_memory),
-    llm: OllamaClient = Depends(get_llm_client),
+        req: ChatRequest,
+        background_tasks: BackgroundTasks,
+        user: dict = Depends(get_current_user),
+        # Inject dependencies via FastAPI Depends
+        cache: SemanticCache = Depends(get_semantic_cache),
+        memory: PostgresMemory = Depends(get_memory),
+        llm: OllamaClient = Depends(get_llm_client),
 ):
     """
     Main Chat Endpoint (Streaming).
@@ -108,7 +100,7 @@ async def chat_stream(
 
         try:
             async for event in agent_app.astream(
-                initial_state, config={"configurable": {"llm": llm, "user_id": user_id}}
+                    initial_state, config={"configurable": {"llm": llm, "user_id": user_id}}
             ):
                 node_name = list(event.keys())[0]
                 node_data = event[node_name]

@@ -1,2 +1,4 @@
 dataset==1.6.2
 ragas==0.4.3
+
+pydantic-settings

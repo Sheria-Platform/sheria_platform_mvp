@@ -5,7 +5,7 @@ import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.requests import Request
 
-from services.api.app.config import settings
+from services.api.app.core.config import settings
 
 
 def decode_token(request: Request):

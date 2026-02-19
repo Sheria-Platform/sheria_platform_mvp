@@ -4,22 +4,14 @@
 Wraps ``qdrant_client.AsyncQdrantClient`` to provide a clean singleton
 interface for the rest of the application.  Lifecycle is managed by the
 FastAPI lifespan handler in ``services/api/main.py``.
-
-Example:
-    >>> results = await qdrant_client.search(
-    ...     vector=[0.1, 0.2, ...], limit=5
-    ... )
-    >>> for hit in results:
-    ...     print(hit.payload["text"])
 """
 
 import logging
-from typing import Any
 
 from qdrant_client import AsyncQdrantClient
 from qdrant_client.http.models import ScoredPoint
 
-from services.api.app.config import settings
+from services.api.app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -89,12 +81,6 @@ class VectorDBClient:
         Raises:
             qdrant_client.http.exceptions.UnexpectedResponse: On
                 Qdrant API errors (e.g. collection not found).
-
-        Example:
-            >>> hits = await qdrant_client.search(
-            ...     vector=embedding, limit=3
-            ... )
-            >>> top_text = hits[0].payload["text"]
         """
         response = await self.client.query_points(
             collection_name=settings.QDRANT_COLLECTION,

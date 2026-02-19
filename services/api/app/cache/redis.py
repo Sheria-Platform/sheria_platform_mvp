@@ -3,18 +3,13 @@
 
 Provides a single shared ``redis.asyncio`` connection pool used by
 the semantic cache and (optionally) rate-limiting middleware.
-
-Example:
-    >>> r = redis_client.get_client()
-    >>> await r.set("key", "value", ex=3600)
-    >>> value = await r.get("key")
 """
 
 import logging
 
 import redis.asyncio as aioredis
 
-from services.api.app.config import settings
+from services.api.app.core.config import settings
 
 logger = logging.getLogger(__name__)
 

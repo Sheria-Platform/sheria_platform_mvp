@@ -26,10 +26,6 @@ The compiled ``agent_app`` is an async iterable; callers use
 ``async for event in agent_app.astream(state)`` to receive per-node
 state updates as they complete.
 
-Example:
-    >>> async for event in agent_app.astream(initial_state):
-    ...     node_name = list(event.keys())[0]
-    ...     print(f"Completed: {node_name}")
 """
 
 from langgraph.graph import END, StateGraph

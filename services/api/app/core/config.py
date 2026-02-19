@@ -1,4 +1,3 @@
-# services/api/app/config.py
 from typing import List
 
 from pydantic_settings import BaseSettings
@@ -21,7 +20,9 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------ #
     DATABASE_URL: str  # required — e.g. postgresql+asyncpg://...
     ALLOWED_ORIGINS: str
-
+    DB_ECHO: bool = False
+    DB_POOL_SIZE: int = 5
+    DB_MAX_OVERFLOW: int = 10
     # ------------------------------------------------------------------ #
     # Redis                                                                 #
     # ------------------------------------------------------------------ #

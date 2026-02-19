@@ -1,96 +1,20 @@
-# FastAPI & Web Framework
-fastapi==0.128.0
-uvicorn[standard]==0.38.0
-starlette==0.50.0
-python-multipart==0.0.20
-httptools==0.7.1
-watchfiles==1.1.1
-
-# Pydantic & Validation
-pydantic==2.12.4
-pydantic_core==2.41.5
-pydantic-settings==2.12.0
-typing_extensions==4.15.0
-annotated-types==0.7.0
-mypy_extensions==1.1.0
-
-# Async HTTP Clients
-httpx==0.28.1
-httpcore==1.0.9
-h11==0.16.0
-httpx-sse==0.4.3
-aiohttp==3.13.2
-aiofiles==25.1.0
-aiosignal==1.4.0
-aiohappyeyeballs==2.6.1
-anyio==4.11.0
-greenlet==3.3.0
-
-# Database & Cache
-sqlalchemy==2.0.44
+alembic==1.18.1
 asyncpg==0.31.0
-redis==7.1.0
+boto3==1.34.34
+fastapi==0.128.0
+greenlet==3.3.0
+gunicorn==23.0.0
+httpx==0.28.1
+langgraph==1.0.3
 neo4j==6.0.3
+numpy==2.2.6
 psycopg2-binary==2.9.11
-
-# Security & Authentication
-cryptography==46.0.3
-bcrypt==5.0.0
-python-jose[cryptography]
-passlib[bcrypt]
-rsa==4.9.1
-pyasn1==0.6.1
+pydantic==2.12.5
+pydantic_Settings==2.12.0
 pyjwt==2.10.1
-pyasn1_modules==0.4.2
-oauthlib==3.3.1
-requests-oauthlib==2.0.0
-
-# Monitoring & Observability
-opentelemetry-api==1.38.0
-opentelemetry-sdk==1.38.0
-opentelemetry-exporter-otlp-proto-common==1.38.0
-opentelemetry-exporter-otlp-proto-grpc==1.38.0
-opentelemetry-proto==1.38.0
-opentelemetry-semantic-conventions==0.59b0
-prometheus_client==0.23.1
-posthog==5.4.0
-
-# Numeric / Vector
-numpy==1.26.4        # Required by ollama_embeddings.py for Qdrant-compatible arrays
-qdrant-client==1.9.1 # Qdrant Python client (if not already installed via another path)
-
-# LangGraph (Agentic workflow)
-langgraph>=0.2.0     # StateGraph, conditional edges, astream()
-
-# Utilities
-tenacity==9.1.2
-backoff==2.2.1
-cachetools==6.2.2
-durationpy==0.10
-python-dotenv==1.2.1
-python-dateutil==2.9.0.post0
-pytz==2025.2
-
-# Logging & Debugging
-rich==14.2.0
-coloredlogs==15.0.1
-python-json-logger
-Deprecated==1.3.1
-
-# CLI & Tools
+python-multipart==0.0.20
+qdrant-client==1.16.2
+redis==7.1.0
 simpleeval==1.0.3
-typer==0.20.0
-click==8.3.0
-shellingham==1.5.4
-
-# WebSockets
-websockets==15.0.1
-websocket-client==1.9.0
-
-# Serialization
-orjson==3.11.4
-msgpack==1.1.2
-ormsgpack==1.12.0
-pyyaml==6.0.3
-dataclasses-json==0.6.7
-marshmallow==3.26.1
+sqlalchemy==2.0.46
+uvicorn==0.40.0

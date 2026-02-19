@@ -4,11 +4,6 @@
 Provides a singleton wrapper around the ``neo4j`` async driver.
 Lifecycle (``connect`` / ``close``) is managed by the FastAPI
 lifespan handler in ``services/api/main.py``.
-
-Example:
-    >>> await neo4j_client.query(
-    ...     "MATCH (n:Case) RETURN n.name LIMIT 5"
-    ... )
 """
 
 import logging
@@ -16,7 +11,7 @@ from typing import Any
 
 from neo4j import AsyncGraphDatabase
 
-from services.api.app.config import settings
+from services.api.app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
