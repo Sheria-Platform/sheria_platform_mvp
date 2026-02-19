@@ -3,8 +3,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import text
 
-from services.api.app.auth.jwt import get_current_user
-from services.api.app.memory.postgres import AsyncSessionLocal
+from services.api.app.auth import get_current_user
+from services.api.app.memory.postgres import asyncSessionLocal
 
 router = APIRouter()
 
@@ -22,7 +22,7 @@ async def submit_feedback(req: FeedbackRequest, user: dict = Depends(get_current
     Submit user feedback for an AI response.
     """
     try:
-        async with AsyncSessionLocal() as session:
+        async with asyncSessionLocal() as session:
             # We create a simple feedback table or add a column to chat_history.
             # Here, let's assume a 'feedback' table exists (simple raw SQL for demo)
             await session.execute(

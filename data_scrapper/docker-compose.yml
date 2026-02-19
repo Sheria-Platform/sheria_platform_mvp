@@ -1,13 +1,15 @@
 version: '3.5'
 services:
   admin_app_gateway:
-    # env_file:
-    #   - .env
-    # build: .
+    env_file:
+     - .env
+    build:
+     context: .
+     dockerfile: Dockerfile
     image: data_scrapper:latest
     command: bash -c "python3 data_scrapper.py"
     ports:
-    - 5701:5701
+    - "5701:5701"
     deploy:
       update_config:
         parallelism: 1

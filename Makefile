@@ -14,7 +14,9 @@ help:
 install:
 	pip3 install -r services/api/requirements.txt
 	pip3 install -r models/requirements.txt
-	pip3 install -r pipelines/ingestion/requirements.txt # (Hypothetical separate deps)
+	pip3 install -r pipelines/ingestion/requirements.txt
+	pip3 install -r requirements.txt
+
 
 # Run Local Development Environment
 up:
