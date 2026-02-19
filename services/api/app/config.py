@@ -10,41 +10,53 @@ class Settings(BaseSettings):
     Reads environment variables automatically (case-insensitive).
     """
 
-    # General
+    # ------------------------------------------------------------------ #
+    # General                                                               #
+    # ------------------------------------------------------------------ #
     ENV: str = "prod"
     LOG_LEVEL: str = "INFO"
 
+    # ------------------------------------------------------------------ #
+    # Database                                                              #
+    # ------------------------------------------------------------------ #
+    DATABASE_URL: str  # required — e.g. postgresql+asyncpg://...
     ALLOWED_ORIGINS: str
 
-    # Database (Aurora Postgres)
-    DATABASE_URL: str  # e.g., postgresql+asyncpg://user:pass@host:5432/db
+    # ------------------------------------------------------------------ #
+    # Redis                                                                 #
+    # ------------------------------------------------------------------ #
+    REDIS_URL: str  # required — e.g. redis://localhost:6379/0
 
-    # Redis (Cache)
-    REDIS_URL: str  # e.g., redis://elasticache-endpoint:6379/0
-
-    # Vector DB (Qdrant)
+    # ------------------------------------------------------------------ #
+    # Qdrant (Vector Database)                                              #
+    # ------------------------------------------------------------------ #
     QDRANT_HOST: str = "qdrant-service"
     QDRANT_PORT: int = 6333
-    QDRANT_COLLECTION: str = "rag_collection"
+    QDRANT_COLLECTION: str = "kenya_law_reports"
 
-    # Graph DB (Neo4j)
+    # ------------------------------------------------------------------ #
+    # Neo4j (Graph Database)                                                #
+    # ------------------------------------------------------------------ #
     NEO4J_URI: str = "bolt://neo4j-cluster:7687"
     NEO4J_USER: str = "neo4j"
-    NEO4J_PASSWORD: str  # Sensitive
+    NEO4J_PASSWORD: str  # required — sensitive
 
-    # AWS S3 (Documents)
+    # ------------------------------------------------------------------ #
+    # AWS S3                                                                #
+    # ------------------------------------------------------------------ #
     AWS_REGION: str = "us-east-1"
     S3_BUCKET_NAME: str
     S3_ENDPOINT_URL: str
     AWS_ACCESS_KEY_ID: str
     AWS_SECRET_ACCESS_KEY: str
 
-    # Ray Serve (Internal LLM/Embeddings)
-    RAY_LLM_ENDPOINT: str = "http://llm-service:8000/llm"
-    RAY_EMBED_ENDPOINT: str = "http://embed-service:8000/embed"
-
-    RAY_CHAT_MODEL: str
-    RAY_EMBED_MODEL: str
+    # ------------------------------------------------------------------ #
+    # Ollama (LLM & Embeddings)                                             #
+    # ------------------------------------------------------------------ #
+    OLLAMA_BASE_URL: str = "http://ollama:11434"
+    OLLAMA_LLM_MODEL: str = "llama3.3"
+    OLLAMA_EMBEDDING_MODEL: str = "nomic-embed-text"
+    OLLAMA_TIMEOUT: int = 60  # seconds
 
     # Security
     JWT_SECRET_KEY: str

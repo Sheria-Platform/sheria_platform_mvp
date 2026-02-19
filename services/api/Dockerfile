@@ -1,59 +1,59 @@
-# ================================
-# STAGE 1 — BUILDER
-# ================================
-FROM python:3.12-slim AS builder
+# services/api/Dockerfile
+# Multi-stage build for the Sheria FastAPI service (Ubuntu-based)
+# Stage 1: Builder — install dependencies
+FROM python:3.11-slim-bookworm AS builder
 
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+WORKDIR /build
+
+# Install build tools needed for some Python packages
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy and install Python dependencies first (layer cache)
+COPY services/api/requirements.txt .
+RUN pip install --no-cache-dir --upgrade pip \
+    && pip install --no-cache-dir --prefix=/install -r requirements.txt
+
+# Stage 2: Runtime — lean production image
+FROM python:3.11-slim-bookworm AS runtime
+
+# Security: run as non-root user
+RUN groupadd -r sheria && useradd -r -g sheria sheria
 
 WORKDIR /app
 
-# System dependencies for building wheels, if any
-RUN apt-get update -y \
-    && apt-get install -y --no-install-recommends \
-        build-essential \
+# Runtime system deps only
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpq5 \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt .
+# Copy installed packages from builder stage
+COPY --from=builder /install /usr/local
 
-RUN pip install --upgrade pip \
-    && pip wheel --wheel-dir /wheels -r requirements.txt
+# Copy application source
+COPY services/ /app/services/
+COPY libs/ /app/libs/
 
-COPY . .
+# Ensure Python can find packages in /app
+ENV PYTHONPATH=/app
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
 
-# ================================
-# STAGE 2 — RUNTIME
-# ================================
-FROM python:3.12-slim AS runtime
+# Drop to non-root
+USER sheria
 
-# Runtime environment
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    HOME=/usr/src/app \
-    USERNAME=appuser \
-    USERGROUP=appdata \
-    UID=9001 \
-    GID=9001
+EXPOSE 8000
 
-# Install minimal runtime OS deps
-RUN apt-get update -y \
-    && apt-get install -y --no-install-recommends \
-        ca-certificates \
-    && addgroup --gid $GID $USERGROUP \
-    && adduser --uid $UID --gid $GID --disabled-password --gecos "" $USERNAME \
-    && rm -rf /var/lib/apt/lists/*
+# Health check matches docker-compose service healthcheck
+HEALTHCHECK --interval=15s --timeout=5s --retries=5 \
+    CMD curl -f http://localhost:8000/health || exit 1
 
-WORKDIR $HOME
-
-# Copy only required Python wheels
-COPY --from=builder /wheels /wheels
-RUN pip install --no-cache-dir /wheels/*
-
-# Copy application code
-COPY --from=builder /app /usr/src/app
-
-RUN chown -R $USERNAME:$USERGROUP $HOME
-
-USER $USERNAME
+# Production: Uvicorn with multiple workers
+CMD ["uvicorn", "services.api.main:app", \
+     "--host", "0.0.0.0", \
+     "--port", "8000", \
+     "--workers", "4", \
+     "--log-level", "info"]

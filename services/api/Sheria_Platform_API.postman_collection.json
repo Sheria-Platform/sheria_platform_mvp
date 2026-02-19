@@ -1,0 +1,420 @@
+{
+  "info": {
+    "name": "Sheria Platform API",
+    "description": "AI-powered judicial intelligence platform for Kenya's court system.\n\nProvides agentic legal research, document verification, and predictive analytics via a streaming RAG pipeline.\n\n## Auth\nAll protected endpoints require a `Bearer` JWT in the `Authorization` header.\n\nSet the `jwt_token` collection variable to avoid repeating it per-request.\n\n## Base URL\nSet the `base_url` collection variable (default: `http://localhost:8000`).",
+    "version": "1.0.0",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000",
+      "type": "string",
+      "description": "API base URL. Change for staging/production deployments."
+    },
+    {
+      "key": "jwt_token",
+      "value": "",
+      "type": "string",
+      "description": "JWT Bearer token. Obtain by signing a token with your JWT_SECRET_KEY and paste here."
+    },
+    {
+      "key": "session_id",
+      "value": "",
+      "type": "string",
+      "description": "UUID for an ongoing conversation thread. Auto-populated by the Chat/Stream response."
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{jwt_token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "item": [
+    {
+      "name": "Health",
+      "description": "Kubernetes liveness and readiness probes. No authentication required.",
+      "item": [
+        {
+          "name": "Liveness Probe",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/health/liveness",
+              "host": ["{{base_url}}"],
+              "path": ["health", "liveness"]
+            },
+            "description": "Always returns 200 OK while the server process is alive.\n\nKubernetes uses this probe to decide whether to **restart** the container. It performs no I/O."
+          },
+          "response": [
+            {
+              "name": "200 OK – server alive",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                { "key": "Content-Type", "value": "application/json" }
+              ],
+              "body": "{\n  \"status\": \"ok\"\n}",
+              "_postman_previewlanguage": "json"
+            }
+          ]
+        },
+        {
+          "name": "Readiness Probe",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/health/readiness",
+              "host": ["{{base_url}}"],
+              "path": ["health", "readiness"]
+            },
+            "description": "Returns 200 when Redis and Neo4j are reachable; 503 when either dependency is down.\n\nKubernetes uses this probe to decide whether to **send traffic** to the pod."
+          },
+          "response": [
+            {
+              "name": "200 OK – all dependencies healthy",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                { "key": "Content-Type", "value": "application/json" }
+              ],
+              "body": "{\n  \"redis\": \"up\",\n  \"neo4j\": \"up\"\n}",
+              "_postman_previewlanguage": "json"
+            },
+            {
+              "name": "503 Service Unavailable – dependency down",
+              "status": "Service Unavailable",
+              "code": 503,
+              "header": [
+                { "key": "Content-Type", "value": "application/json" }
+              ],
+              "body": "{\n  \"redis\": \"down\",\n  \"neo4j\": \"up\"\n}",
+              "_postman_previewlanguage": "json"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Chat",
+      "description": "Streaming RAG pipeline endpoint. Responses are NDJSON (`application/x-ndjson`).\n\nEach line is a JSON object with a `type` field:\n- `\"status\"` — intermediate agent node completion event\n- `\"answer\"` — final synthesised response from the Responder node\n- `\"error\"` — unhandled exception during streaming\n\n**Auth required:** Bearer JWT",
+      "item": [
+        {
+          "name": "Stream Chat (New Session)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Parse the first NDJSON line that contains session_id",
+                  "const lines = pm.response.text().split('\\n').filter(l => l.trim());",
+                  "for (const line of lines) {",
+                  "    try {",
+                  "        const obj = JSON.parse(line);",
+                  "        if (obj.session_id) {",
+                  "            pm.collectionVariables.set('session_id', obj.session_id);",
+                  "            console.log('session_id saved:', obj.session_id);",
+                  "            break;",
+                  "        }",
+                  "    } catch (e) {}",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"What is the test for adverse possession in Kenya?\"\n}",
+              "options": {
+                "raw": { "language": "json" }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/chat/stream",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "chat", "stream"]
+            },
+            "description": "Starts a **new** conversation thread. Omit `session_id` to have the server generate one.\n\nThe response is an NDJSON stream. Each newline-delimited JSON object represents either an agent status update or the final answer.\n\nThe post-request test script automatically stores `session_id` in the collection variable for subsequent turns."
+          },
+          "response": [
+            {
+              "name": "200 – NDJSON Stream (cache miss path)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                { "key": "Content-Type", "value": "application/x-ndjson" }
+              ],
+              "body": "{\"type\":\"status\",\"node\":\"planner\",\"session_id\":\"550e8400-e29b-41d4-a716-446655440000\",\"info\":\"Completed step: planner\"}\n{\"type\":\"status\",\"node\":\"retriever\",\"session_id\":\"550e8400-e29b-41d4-a716-446655440000\",\"info\":\"Completed step: retriever\"}\n{\"type\":\"status\",\"node\":\"responder\",\"session_id\":\"550e8400-e29b-41d4-a716-446655440000\",\"info\":\"Completed step: responder\"}\n{\"type\":\"answer\",\"content\":\"The test for adverse possession in Kenya requires...\",\"session_id\":\"550e8400-e29b-41d4-a716-446655440000\"}\n",
+              "_postman_previewlanguage": "text"
+            },
+            {
+              "name": "200 – NDJSON Stream (semantic cache hit)",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                { "key": "Content-Type", "value": "application/x-ndjson" }
+              ],
+              "body": "{\"type\":\"answer\",\"content\":\"The test for adverse possession in Kenya requires...\",\"session_id\":\"550e8400-e29b-41d4-a716-446655440000\"}\n",
+              "_postman_previewlanguage": "text"
+            },
+            {
+              "name": "401 Unauthorized – missing or invalid token",
+              "status": "Unauthorized",
+              "code": 401,
+              "header": [
+                { "key": "Content-Type", "value": "application/json" }
+              ],
+              "body": "{\n  \"detail\": \"Could not validate credentials\"\n}",
+              "_postman_previewlanguage": "json"
+            }
+          ]
+        },
+        {
+          "name": "Stream Chat (Continue Session)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"message\": \"Can you give me a specific case citation for that?\",\n  \"session_id\": \"{{session_id}}\"\n}",
+              "options": {
+                "raw": { "language": "json" }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/chat/stream",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "chat", "stream"]
+            },
+            "description": "Continues an existing conversation by supplying the `session_id` from a previous turn.\n\nThe server loads the last 6 message turns from Postgres to build the context window before running the agent."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Upload",
+      "description": "S3 presigned URL generation for direct client-to-S3 uploads.\n\n**Flow:**\n1. Call `POST /api/v1/upload/generate-presigned-url` → receive `upload_url`, `file_id`, `s3_key`\n2. `PUT` the file binary directly to `upload_url` (client-side, no API proxy)\n3. Pass `s3_key` to the ingestion pipeline\n\n**Auth required:** Bearer JWT",
+      "item": [
+        {
+          "name": "Generate Presigned Upload URL",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const body = pm.response.json();",
+                  "    pm.collectionVariables.set('upload_url', body.upload_url);",
+                  "    pm.collectionVariables.set('file_id', body.file_id);",
+                  "    pm.collectionVariables.set('s3_key', body.s3_key);",
+                  "    console.log('Presigned URL saved. file_id:', body.file_id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"filename\": \"judgment_2023.pdf\",\n  \"content_type\": \"application/pdf\"\n}",
+              "options": {
+                "raw": { "language": "json" }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/upload/generate-presigned-url",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "upload", "generate-presigned-url"]
+            },
+            "description": "Generates a time-limited (1 hour) S3 presigned PUT URL.\n\nThe client uses the returned `upload_url` to upload the file binary directly to S3 without routing through the API server — suitable for large PDFs, court recordings, and exhibits.\n\nThe post-request test script saves `upload_url`, `file_id`, and `s3_key` as collection variables."
+          },
+          "response": [
+            {
+              "name": "200 OK – presigned URL generated",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                { "key": "Content-Type", "value": "application/json" }
+              ],
+              "body": "{\n  \"upload_url\": \"https://sheria-court-records-dev.s3.amazonaws.com/uploads/judge-001/550e8400-e29b-41d4-a716-446655440000.pdf?X-Amz-Algorithm=AWS4-HMAC-SHA256&...\",\n  \"file_id\": \"550e8400-e29b-41d4-a716-446655440000\",\n  \"s3_key\": \"uploads/judge-001/550e8400-e29b-41d4-a716-446655440000.pdf\"\n}",
+              "_postman_previewlanguage": "json"
+            },
+            {
+              "name": "401 Unauthorized",
+              "status": "Unauthorized",
+              "code": 401,
+              "header": [
+                { "key": "Content-Type", "value": "application/json" }
+              ],
+              "body": "{\n  \"detail\": \"Could not validate credentials\"\n}",
+              "_postman_previewlanguage": "json"
+            },
+            {
+              "name": "500 Internal Server Error – S3 / IAM failure",
+              "status": "Internal Server Error",
+              "code": 500,
+              "header": [
+                { "key": "Content-Type", "value": "application/json" }
+              ],
+              "body": "{\n  \"detail\": \"An error occurred (AccessDenied) when calling the GeneratePresignedUrl operation: ...\"\n}",
+              "_postman_previewlanguage": "json"
+            }
+          ]
+        },
+        {
+          "name": "PUT File to S3 (Client-Side Step)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/pdf",
+                "description": "Must match the content_type sent to generate-presigned-url"
+              }
+            ],
+            "body": {
+              "mode": "file",
+              "file": {
+                "src": ""
+              }
+            },
+            "url": {
+              "raw": "{{upload_url}}",
+              "host": ["{{upload_url}}"]
+            },
+            "description": "Upload the binary file directly to S3 using the presigned URL obtained from the previous step.\n\n**This request does NOT go through the Sheria API** — it goes directly to S3. No `Authorization` header is needed; the presigned URL is self-authenticating.\n\nSet `upload_url` collection variable first by running \"Generate Presigned Upload URL\"."
+          },
+          "response": [
+            {
+              "name": "200 OK – file uploaded",
+              "status": "OK",
+              "code": 200,
+              "header": [],
+              "body": "",
+              "_postman_previewlanguage": "text"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Feedback",
+      "description": "Rate individual assistant responses with a thumbs-up / thumbs-down score and an optional comment.\n\nFeedback is persisted to the `feedback` table in PostgreSQL.\n\n**Auth required:** Bearer JWT",
+      "item": [
+        {
+          "name": "Submit Feedback (Thumbs Up)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"session_id\": \"{{session_id}}\",\n  \"message_id\": 42,\n  \"score\": 1,\n  \"comment\": \"Very accurate citation of the adverse possession test.\"\n}",
+              "options": {
+                "raw": { "language": "json" }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/feedback/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "feedback", ""]
+            },
+            "description": "Submit a positive rating (`score: 1`) for an assistant response.\n\n`message_id` is the primary-key ID of the `chat_history` row for the assistant's message."
+          },
+          "response": [
+            {
+              "name": "200 OK – feedback recorded",
+              "status": "OK",
+              "code": 200,
+              "header": [
+                { "key": "Content-Type", "value": "application/json" }
+              ],
+              "body": "{\n  \"status\": \"recorded\"\n}",
+              "_postman_previewlanguage": "json"
+            },
+            {
+              "name": "401 Unauthorized",
+              "status": "Unauthorized",
+              "code": 401,
+              "header": [
+                { "key": "Content-Type", "value": "application/json" }
+              ],
+              "body": "{\n  \"detail\": \"Could not validate credentials\"\n}",
+              "_postman_previewlanguage": "json"
+            },
+            {
+              "name": "500 Internal Server Error – DB write failure",
+              "status": "Internal Server Error",
+              "code": 500,
+              "header": [
+                { "key": "Content-Type", "value": "application/json" }
+              ],
+              "body": "{\n  \"detail\": \"relation \\\"feedback\\\" does not exist\"\n}",
+              "_postman_previewlanguage": "json"
+            }
+          ]
+        },
+        {
+          "name": "Submit Feedback (Thumbs Down)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"session_id\": \"{{session_id}}\",\n  \"message_id\": 43,\n  \"score\": -1,\n  \"comment\": \"The cited case was overruled in 2019.\"\n}",
+              "options": {
+                "raw": { "language": "json" }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/feedback/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "feedback", ""]
+            },
+            "description": "Submit a negative rating (`score: -1`) with an optional explanatory comment.\n\nComments are used to improve the model via the judicial feedback loop (`eval/feedback/judicial_review.py`)."
+          },
+          "response": []
+        }
+      ]
+    }
+  ]
+}
