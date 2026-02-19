@@ -53,3 +53,5 @@ if __name__ == "__main__":
         sys.exit(1)
 
     upload_directory(sys.argv[1], sys.argv[2])
+# kenya_law_data/case_law
+# 
