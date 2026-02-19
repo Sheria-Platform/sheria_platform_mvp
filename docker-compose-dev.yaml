@@ -7,18 +7,20 @@ x-common-config: &common-config
     - sheria_network
 x-common-fastapi-config: &common-fastapi-config
   <<: *common-config
-  image: sheria_platform_rag_backend:latest
+  image: sheria_rag_service:latest
   build:
     context: .
-    dockerfile: Dockerfile
+    dockerfile: services/api/Dockerfile
   volumes:
-    - .:/usr/src/app
+    - .:/app
+  networks:
+    - sheria_network
 
 services:
   rag_fastapi_backend:
     <<: *common-fastapi-config
     container_name: rag_fastapi_backend
-    command: python main.py
+    command: python services/api/dev.py
     restart: always
     ports:
       - "8000:8000"
