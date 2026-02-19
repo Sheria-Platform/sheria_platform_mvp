@@ -49,7 +49,7 @@ EXPOSE 8000
 
 # Health check matches docker-compose service healthcheck
 HEALTHCHECK --interval=15s --timeout=5s --retries=5 \
-    CMD curl -f http://localhost:8000/health || exit 1
+    CMD curl -f http://localhost:8000/health/liveness || exit 1
 
 # Production: Uvicorn with multiple workers
 CMD ["uvicorn", "services.api.main:app", \

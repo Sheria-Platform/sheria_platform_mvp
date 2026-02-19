@@ -82,14 +82,16 @@ class VectorDBClient:
             qdrant_client.http.exceptions.UnexpectedResponse: On
                 Qdrant API errors (e.g. collection not found).
         """
-        response = await self.client.query_points(
+        response = await self.client.search(
             collection_name=settings.QDRANT_COLLECTION,
-            query=vector,
+            query_vector=vector,
             limit=limit,
             with_payload=True,
         )
 
-        return response.points
+        points = response.points if hasattr(response, 'points') else response
+
+        return points
 
 
 # Global singleton — lifecycle managed by main.py lifespan

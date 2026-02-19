@@ -88,7 +88,13 @@ async def chat_stream(
 
     # 4. Initialize Agent State (LangGraph)
     initial_state = AgentState(
-        messages=history_dicts, current_query=req.message, documents=[], plan=[]
+        messages=history_dicts,
+        current_query=req.message,
+        documents=[],
+        plan=[],
+        action="direct_answer",
+        tool_choice="",
+        tool_input="",
     )
 
     # 5. Define Generator for Streaming Response
