@@ -45,6 +45,8 @@ class RagConversationAPI:
         try:
             if conversation_id == 'new':
                 data.conversation_id = None
+            else:
+                data.conversation_id = conversation_id
 
             generator = await manage_conversations(
                 data_in=data,
