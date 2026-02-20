@@ -20,14 +20,10 @@ class ConversationRead(BaseModel):
         from_attributes = True
 
 
-class MessageContent(BaseModel):
-    role: str
-    text: str
-
-
 class MessageRead(BaseModel):
     id: UUID
-    content: MessageContent
+    content: str
+    role: str
     created_at: datetime
 
     class Config:

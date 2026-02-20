@@ -5,6 +5,7 @@ import random
 from typing import Dict, Sequence
 
 from fastapi import BackgroundTasks
+from fastapi.requests import Request
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,8 +15,12 @@ from services.api.app.agents.state import AgentState
 from services.api.app.cache.semantic import SemanticCache
 from services.api.app.clients.ollama_client import OllamaClient
 from services.api.app.models.rag import Messages, Conversations
-from services.api.app.schema.chat import ChatRequest
+from services.api.app.schema.rag import ChatRequest
+
+from services.api.app.schema.pagination import Pagination
+from services.api.app.schema.rag import MessageRead, ConversationRead
 from services.api.app.services.background import run_background_tasks
+from services.api.app.services.pagination import Paginator
 
 logger = logging.getLogger(__name__)
 
@@ -279,10 +284,10 @@ async def manage_conversations(data_in: ChatRequest,
     for msg in history_dicts[:-1]:
         if msg["role"] == "user":
             formatted_messages.append(HumanMessage(content=msg["content"]))
-            
+
         elif msg["role"] == "assistant":
             formatted_messages.append(AIMessage(content=msg["content"]))
-            
+
         elif msg["role"] == "system":
             formatted_messages.append(SystemMessage(content=msg["content"]))
 
@@ -385,3 +390,82 @@ async def manage_conversations(data_in: ChatRequest,
 
     return stream_response()
 
+
+async def fetch_conversation_messages(
+        db_session: AsyncSession,
+        conversation_id: str,
+        pagination_params: Pagination,
+        request: Request):
+    """
+    Retrieves a paginated list of messages for a specific conversation.
+
+    This function queries the database for all messages belonging to the specified conversation
+    and returns them in a paginated format. The pagination includes metadata such as total
+    count, page numbers, and navigation links.
+
+    Args:
+        db_session (AsyncSession): The SQLAlchemy async database session for executing
+            queries and managing database transactions.
+        conversation_id (str): The unique identifier of the conversation whose messages
+            should be retrieved.
+        pagination_params (Pagination): The pagination parameters object containing
+            settings such as page number, page size, and sorting options.
+        request (Request): The FastAPI request object used to generate pagination links
+            and metadata based on the current request context.
+
+    Returns:
+        dict: A paginated response dictionary containing the list of messages
+            serialized according to the MessageRead schema, along with pagination
+            metadata such as total count, current page, total pages, and navigation links.
+    """
+    query = select(Messages).where(Messages.conversation_id == conversation_id)
+
+    paginator_class = Paginator(
+        db_session=db_session,
+        params=pagination_params,
+        query=query,
+        request=request,
+        schema=MessageRead
+    )
+
+    response = await paginator_class.get_response()
+
+    return response
+
+
+async def fetch_conversations(db_session: AsyncSession, user_id: str, pagination_params: Pagination, request: Request):
+    """
+    Retrieves a paginated list of conversations for a specific user.
+
+    This function queries the database for all conversations belonging to the specified user
+    and returns them in a paginated format. The pagination includes metadata such as total
+    count, page numbers, and navigation links.
+
+    Args:
+        db_session (AsyncSession): The SQLAlchemy async database session for executing
+            queries and managing database transactions.
+        user_id (str): The unique identifier of the user whose conversations should be
+            retrieved.
+        pagination_params (Pagination): The pagination parameters object containing
+            settings such as page number, page size, and sorting options.
+        request (Request): The FastAPI request object used to generate pagination links
+            and metadata based on the current request context.
+
+    Returns:
+        dict: A paginated response dictionary containing the list of conversations
+            serialized according to the ConversationRead schema, along with pagination
+            metadata such as total count, current page, total pages, and navigation links.
+    """
+    query = select(Conversations).where(Conversations.user_id == user_id)
+
+    paginator_class = Paginator(
+        db_session=db_session,
+        params=pagination_params,
+        query=query,
+        request=request,
+        schema=ConversationRead
+    )
+
+    response = await paginator_class.get_response()
+
+    return response
