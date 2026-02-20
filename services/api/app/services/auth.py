@@ -77,7 +77,6 @@ def decode_token(token: str):
                 algorithms=[settings.JWT_ALGORITHM]
             )
 
-        print(payload)
         return payload
     except jwt.ExpiredSignatureError:
         raise Exception("Token expired")

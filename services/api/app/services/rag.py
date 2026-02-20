@@ -72,7 +72,6 @@ class ConversationCRUDManager:
             user_id: str,
             conversation_id: str | None = None
     ) -> Conversations:
-        # 1. Logic for existing conversation
         if conversation_id:
             # Critical: Filter by user_id to prevent data leakage
             result = await self.db_session.execute(
@@ -128,6 +127,15 @@ async def manage_conversations(data_in: ChatRequest,
     conversation_id = str(conversation_instance.id)
     data_in.conversation_id = conversation_id
 
+    if is_first_conversation:
+        background_tasks.add_task(
+            run_background_tasks,
+            task_type='update_title',
+            **{'conversation_id': conversation_id,
+               'user_query': user_query,
+               'user_id': user_id}
+        )
+
     cached_answer = await cache.get_cached_response(user_query)
 
     if cached_answer:
@@ -152,14 +160,6 @@ async def manage_conversations(data_in: ChatRequest,
     conversation_history = await memory.get_history(conversation_id, limit=6)
     history_dicts = [{"role": msg.role, "content": msg.content} for msg in conversation_history]
     history_dicts.append({"role": "user", "content": user_query})
-
-    if is_first_conversation:
-        background_tasks.add_task(
-            run_background_tasks,
-            **{'conversation_id': conversation_id,
-               'user_query': user_query,
-               'user_id': user_id}
-        )
 
     initial_state = AgentState(
         messages=history_dicts,
