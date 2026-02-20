@@ -2,6 +2,7 @@
 from langchain_core.callbacks.manager import dispatch_custom_event
 from langchain_core.runnables import RunnableConfig
 
+from services.api.app.agents.nodes.constitution import Compass
 from services.api.app.agents.state import AgentState
 
 
@@ -31,30 +32,35 @@ async def generate_node(state: AgentState, config: RunnableConfig) -> dict:
     llm = config["configurable"]["llm"]
 
     query = state["current_query"]
+    action = state.get("action", "retrieve")
     documents = state.get("documents", [])
 
-    context_str = "\n\n".join(documents)
+    if action == "direct_answer":
+        # We use a leaner prompt that focuses on Persona, not Context
+        system_content = (f"{Compass.IDENTITY['persona']}\nTask: Respond to the user's greeting or identity query "
+                          f"politely.")
+        user_content = query
 
-    prompt = f"""
-    You are a helpful Enterprise Assistant. Use the context below to answer the user's question.
+    else:
+        system_content = Compass.SYSTEM_BASE
+        context_str = "\n\n".join(documents)
+        user_content = f"""
+                <context>
+                {context_str or 'No documents found.'}
+                </context>
 
-    Context:
-    {context_str}
-
-    Question:
-    {query}
-
-    Instructions:
-    1. Cite sources using [Source: Filename].
-    2. If the answer is not in the context, say "I don't have that information in my documents."
-    3. Be concise and professional.
-    """
+                Based on the <context> provided above, answer this question: {query}
+            """
 
     full_response = ''
 
     async for token in llm.generate_streaming(
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.3
+        messages=[
+            {'role': 'system', 'content': system_content},
+            {"role": "user", "content": user_content
+             }
+        ],
+        temperature=0.1
     ):
         full_response += token
 

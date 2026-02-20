@@ -24,6 +24,7 @@ Example:
 import asyncio
 import logging
 
+from services.api.app.agents.nodes.constitution import Compass
 from services.api.app.agents.state import AgentState
 from services.api.app.clients.neo4j import neo4j_client
 from services.api.app.clients.ollama_embeddings import embeddings_client
@@ -32,13 +33,7 @@ from services.api.app.clients.qdrant import qdrant_client
 logger = logging.getLogger(__name__)
 
 # Cypher for one-hop entity neighbourhood search via fulltext index
-_GRAPH_CYPHER = """
-CALL db.index.fulltext.queryNodes("entity_index", $query)
-YIELD node, score
-MATCH (node)-[r]->(neighbor)
-RETURN node.name + ' ' + type(r) + ' ' + neighbor.name AS text
-LIMIT 5
-"""
+_GRAPH_CYPHER = Compass.GRAPH_CYPHER
 
 
 async def retrieve_node(state: AgentState) -> dict:

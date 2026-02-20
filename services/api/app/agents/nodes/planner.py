@@ -24,27 +24,11 @@ Example:
 import json
 import logging
 
+from services.api.app.agents.nodes.constitution import Compass
 from services.api.app.agents.state import AgentState
 from services.api.app.clients.ollama_client import ollama_client
 
 logger = logging.getLogger(__name__)
-
-_SYSTEM_PROMPT = """
-You are a RAG Planning Agent.
-Analyze the User Query and Conversation History.
-
-Decide the next step:
-1. If the user greets (Hello/Hi), output "direct_answer".
-2. If the user asks a specific question requiring data, output "retrieve".
-3. If the user asks for math/code, output "tool_use".
-
-Output JSON format ONLY:
-{
-    "action": "retrieve" | "direct_answer" | "tool_use",
-    "refined_query": "The standalone search query",
-    "reasoning": "Why you chose this action"
-}
-"""
 
 
 async def planner_node(state: AgentState) -> dict:
@@ -81,10 +65,12 @@ async def planner_node(state: AgentState) -> dict:
         else last_message["content"]
     )
 
+    system_instruction = f"{Compass.IDENTITY['persona']}\n\n{Compass.PLANNER}"
+
     try:
         response_text = await ollama_client.chat_completion(
             messages=[
-                {"role": "system", "content": _SYSTEM_PROMPT},
+                {"role": "system", "content": system_instruction},
                 {"role": "user", "content": user_query},
             ],
             temperature=0.0,  # deterministic planning
@@ -93,12 +79,16 @@ async def planner_node(state: AgentState) -> dict:
 
         plan: dict = json.loads(response_text)
         action: str = plan.get("action", "retrieve")
+        refined_query = plan.get("refined_query", user_query)
+
         logger.info("Plan derived: action=%s", action)
 
         return {
-            "current_query": plan.get("refined_query", user_query),
-            "plan": [plan.get("reasoning", "")],
+            "current_query": refined_query,
             "action": action,
+            "intent": plan.get("reasoning", "Standard routing"),
+
+            "plan": [f"Action: {action} - {plan.get('reasoning', '')}"]
         }
 
     except Exception as exc:
