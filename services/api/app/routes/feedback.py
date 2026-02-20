@@ -17,7 +17,7 @@ from pydantic import BaseModel
 from sqlalchemy import text
 
 from services.api.app.core.database import get_db
-from services.api.app.tools.auth import get_current_user
+from services.api.app.services.auth import get_current_user
 
 router = APIRouter()
 logger = logging.getLogger(__name__)

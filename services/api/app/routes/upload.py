@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from botocore.config import Config
 from fastapi.responses import JSONResponse
 
-from services.api.app.tools.auth import get_current_user  # Assume auth exists
+from services.api.app.services.auth import get_current_user  # Assume auth exists
 from services.api.app.core.config import settings
 
 logger = logging.getLogger(__name__)

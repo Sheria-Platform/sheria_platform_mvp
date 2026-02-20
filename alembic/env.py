@@ -5,10 +5,9 @@ from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from services.api.app.config import settings
-from services.api.app.memory import *
-from  services.api.app.memory import postgres
-from services.api.app.memory import models
+from services.api.app.core.config import settings
+from services.api.app.core.database import Base
+from services.api.app.models import *
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

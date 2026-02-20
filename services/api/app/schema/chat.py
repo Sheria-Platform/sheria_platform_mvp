@@ -1,8 +1,34 @@
-from pydantic import BaseModel, Field
+from datetime import datetime
+from typing import Optional
+from uuid import UUID
+
+from pydantic import BaseModel
 
 
 class ChatRequest(BaseModel):
-    message: str = Field(..., min_length=1, description="The user's query")
-    session_id: str = Field(
-        default=None, description="UUID for the conversation thread"
-    )
+    query: str
+    conversation_id: Optional[str] = None
+
+
+class ConversationRead(BaseModel):
+    id: UUID
+    title: str
+    created_at: datetime
+    updated_at: datetime | None
+
+    class Config:
+        from_attributes = True
+
+
+class MessageContent(BaseModel):
+    role: str
+    text: str
+
+
+class MessageRead(BaseModel):
+    id: UUID
+    content: MessageContent
+    created_at: datetime
+
+    class Config:
+        from_attributes = True

@@ -173,6 +173,31 @@ class OllamaClient:
             logger.error("Ollama streaming request timed out")
             raise
 
+    async def generate_conversation_title(self, user_query: str) -> str:
+        """
+        Summarizes a user query into a 5-word title.
+        """
+        # Keep it simple and focused
+        prompt = f"""Summarize the following query into a concise title of no more than 5 words. 
+        Focus on contextualizing the query. Do not use punctuation.
+        Do not provide any introductory text. Output only the title.
+
+        QUERY: {user_query}
+        TITLE:"""
+
+        # Prepare the messages for the chat_completion endpoint
+        messages = [{"role": "user", "content": prompt}]
+
+        # Call your existing utility
+        # We use low temperature for consistency (titles shouldn't be 'creative')
+        title = await self.chat_completion(
+            messages=messages,
+            temperature=0.2,
+            max_tokens=20
+        )
+
+        return title.strip()
+
 
 # Global singleton — lifecycle managed by main.py lifespan
 ollama_client = OllamaClient()

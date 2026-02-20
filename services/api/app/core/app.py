@@ -12,7 +12,8 @@ from services.api.app.clients.neo4j import neo4j_client
 from services.api.app.clients.ollama_client import ollama_client
 from services.api.app.clients.qdrant import qdrant_client
 from services.api.app.core.config import settings
-from services.api.app.routes import chat, feedback, health, upload
+from services.api.app.routes import rag, feedback, health, upload
+from services.api.app.tools.exceptions import register_validation_handler
 
 # Dimension produced by nomic-embed-text (must match OLLAMA_EMBEDDING_MODEL)
 _EMBEDDING_DIM = 2560
@@ -82,12 +83,14 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    app.include_router(chat.router, prefix="/api/v1/chat", tags=["Chat"])
+    app.include_router(rag.conversations_router, prefix="/api/v1", tags=["Chat"])
     app.include_router(upload.router, prefix="/api/v1/upload", tags=["Upload"])
     app.include_router(
         feedback.router, prefix="/api/v1/feedback", tags=["Feedback"]
     )
     app.include_router(health.router, prefix="/health", tags=["Health"])
+
+    register_validation_handler(app=app)
 
     if is_secure:
         @app.middleware("http")
