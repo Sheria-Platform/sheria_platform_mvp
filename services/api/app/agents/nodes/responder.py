@@ -1,14 +1,35 @@
 # services/api/app/agents/nodes/responder.py
+from langchain_core.callbacks.manager import dispatch_custom_event
+from langchain_core.runnables import RunnableConfig
+
 from services.api.app.agents.state import AgentState
-from services.api.app.clients.ollama_client import ollama_client  # Replaces ray_llm
 
 
-async def generate_node(state: AgentState) -> dict:
+async def generate_node(state: AgentState, config: RunnableConfig) -> dict:
     """
-    Synthesizes the final answer using retrieved documents.
+    Generate a response to the user's query using retrieved documents as context.
 
-    Uses Ollama /api/chat instead of Ray Serve for LLM inference.
+    This node streams tokens from the LLM as it generates a response based on the
+    provided context documents. Each token is dispatched as a custom event for
+    real-time streaming to the client. The response includes source citations and
+    follows professional assistant guidelines.
+
+    Args:
+        state (AgentState): The current agent state containing:
+            - current_query (str): The user's question to be answered
+            - documents (list, optional): List of retrieved document strings to use as context
+        config (RunnableConfig): The runnable configuration containing:
+            - configurable["llm"]: The language model instance with streaming capabilities
+
+    Returns:
+        dict: A dictionary containing:
+            - messages (list): A list with a single assistant message dict containing:
+                - role (str): Set to "assistant"
+                - content (str): The complete generated response with citations
     """
+
+    llm = config["configurable"]["llm"]
+
     query = state["current_query"]
     documents = state.get("documents", [])
 
@@ -29,10 +50,17 @@ async def generate_node(state: AgentState) -> dict:
     3. Be concise and professional.
     """
 
-    # Call Ollama LLM (replaces llm_client.chat_completion)
-    answer = await ollama_client.chat_completion(
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.3,  # Low creativity, high fidelity
-    )
+    full_response = ''
 
-    return {"messages": [{"role": "assistant", "content": answer}]}
+    async for token in llm.generate_streaming(
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.3
+    ):
+        full_response += token
+
+        dispatch_custom_event(
+            name="llm_token",
+            data={"content": token}
+        )
+
+    return {"messages": [{"role": "assistant", "content": full_response}]}
