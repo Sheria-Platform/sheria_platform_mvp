@@ -84,7 +84,7 @@ async def submit_feedback(
             ),
             {
                 "sid": req.session_id,
-                "uid": user["id"],
+                "uid": user["sub"],
                 "mid": req.message_id,
                 "score": req.score,
                 "comment": req.comment,

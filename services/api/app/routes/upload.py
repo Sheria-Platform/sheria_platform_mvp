@@ -52,7 +52,7 @@ async def generate_upload_url(
     # 1. Generate a unique file ID (UUID) to prevent overwrites
     file_id = str(uuid.uuid4())
     extension = req.filename.split(".")[-1] if "." in req.filename else "bin"
-    s3_key = f"uploads/{user['id']}/{file_id}.{extension}"
+    s3_key = f"uploads/{user['sub']}/{file_id}.{extension}"
 
     try:
         url = s3_client.generate_presigned_url(
@@ -83,7 +83,7 @@ async def upload_file_to_minio(
     """
     file_id = str(uuid.uuid4())
     extension = file.filename.split(".")[-1] if "." in file.filename else "bin"
-    s3_key = f"uploads/{user['id']}/{file_id}.{extension}"
+    s3_key = f"uploads/{user['sub']}/{file_id}.{extension}"
 
     try:
         transfer_config = TransferConfig(
