@@ -61,7 +61,7 @@ async def generate_upload_url(
                 "Bucket": settings.S3_BUCKET_NAME,
                 "Key": s3_key,
                 "ContentType": req.content_type,
-                "Metadata": {"original_filename": req.filename, "user_id": user["id"]},
+                "Metadata": {"original_filename": req.filename, "user_id": user["sub"]},
             },
             ExpiresIn=3600,
         )
