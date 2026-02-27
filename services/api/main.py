@@ -18,23 +18,85 @@ Example:
         docker compose up sheria-api
 """
 
+import logging
+import time
+import uuid
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
 from fastapi import FastAPI
+from prometheus_client import make_asgi_app
 from qdrant_client.http.models import Distance, VectorParams
 from sqlalchemy import text
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+from starlette.responses import Response
 
+from libs.observability.metrics import REQUEST_COUNT, REQUEST_LATENCY
+from libs.observability.tracing import configure_tracing
 from services.api.app.cache.redis import redis_client
 from services.api.app.clients.neo4j import neo4j_client
 from services.api.app.clients.ollama_client import ollama_client
 from services.api.app.clients.qdrant import qdrant_client
+from services.api.app.logging import bind_context
 from services.api.app.memory.postgres import Base, engine
 from services.api.app.routes import chat, feedback, health, upload
+
+logger = logging.getLogger(__name__)
 
 # Dimension produced by nomic-embed-text (must match OLLAMA_EMBEDDING_MODEL)
 _EMBEDDING_DIM = 2560
 
+
+# ── Request Logging Middleware ─────────────────────────────────────────────
+
+class RequestLoggingMiddleware(BaseHTTPMiddleware):
+    """Attaches a trace_id to every request and logs start/end with latency.
+
+    For each incoming request this middleware:
+    1. Generates a unique ``trace_id`` (UUID4).
+    2. Calls ``bind_context(trace_id=...)`` so the ID appears in every log
+       record emitted anywhere in the request's async task.
+    3. Logs request start (method, path).
+    4. After the handler returns, logs completion with HTTP status and
+       ``duration_ms``.
+    5. Increments Prometheus ``REQUEST_COUNT`` and ``REQUEST_LATENCY``.
+    """
+
+    async def dispatch(self, request: Request, call_next) -> Response:
+        trace_id = str(uuid.uuid4())
+        bind_context(trace_id=trace_id)
+
+        start = time.perf_counter()
+        logger.info(
+            "Request started",
+            extra={"method": request.method, "path": str(request.url.path)},
+        )
+
+        response = await call_next(request)
+
+        duration_ms = round((time.perf_counter() - start) * 1000, 2)
+        endpoint = str(request.url.path)
+
+        REQUEST_LATENCY.labels(endpoint=endpoint).observe(duration_ms / 1000)
+        REQUEST_COUNT.labels(
+            method=request.method,
+            endpoint=endpoint,
+            status=response.status_code,
+        ).inc()
+
+        logger.info(
+            "Request completed",
+            extra={
+                "path": endpoint,
+                "status_code": response.status_code,
+                "duration_ms": duration_ms,
+            },
+        )
+        return response
+
+
+# ── Startup Helpers ────────────────────────────────────────────────────────
 
 async def _ensure_qdrant_collections() -> None:
     """Create required Qdrant collections if they do not already exist.
@@ -57,7 +119,7 @@ async def _ensure_qdrant_collections() -> None:
                 distance=Distance.COSINE,
             ),
         )
-        print("Created Qdrant collection: semantic_cache")
+        logger.info("Created Qdrant collection: semantic_cache")
 
 
 async def _create_db_tables() -> None:
@@ -107,27 +169,29 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         Nothing — control returns to FastAPI while the server runs.
     """
     # ── Startup ──────────────────────────────────────────────────────
-    print("Initializing clients...")
+    logger.info("Initializing clients...")
     await _create_db_tables()
     neo4j_client.connect()
     await redis_client.connect()
     await qdrant_client.connect()
     await _ensure_qdrant_collections()
     await ollama_client.start()
-    print("All clients initialized successfully!")
+    logger.info("All clients initialized successfully")
 
     yield
 
     # ── Shutdown ─────────────────────────────────────────────────────
-    print("Closing clients...")
+    logger.info("Closing clients...")
     await ollama_client.close()
     await qdrant_client.disconnect()
     await redis_client.close()
     await neo4j_client.close()
-    print("All clients closed successfully!")
+    logger.info("All clients closed successfully")
 
 
 # ── Application ───────────────────────────────────────────────────────────
+configure_tracing("sheria-api")
+
 app = FastAPI(
     title="Sheria Platform API",
     version="1.0.0",
@@ -139,6 +203,8 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+app.add_middleware(RequestLoggingMiddleware)
+
 # ── Route Registration ────────────────────────────────────────────────────
 app.include_router(chat.router, prefix="/api/v1/chat", tags=["Chat"])
 app.include_router(upload.router, prefix="/api/v1/upload", tags=["Upload"])
@@ -146,6 +212,12 @@ app.include_router(
     feedback.router, prefix="/api/v1/feedback", tags=["Feedback"]
 )
 app.include_router(health.router, prefix="/health", tags=["Health"])
+
+# ── Prometheus Metrics Endpoint ───────────────────────────────────────────
+# Mounted as a sub-application so prometheus_client handles content
+# negotiation (text/plain vs. OpenMetrics) automatically.
+# Scraped by Prometheus at GET /metrics
+app.mount("/metrics", make_asgi_app())
 
 if __name__ == "__main__":
     import uvicorn

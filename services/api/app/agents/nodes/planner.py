@@ -23,6 +23,7 @@ Example:
 
 import json
 import logging
+import time
 
 from services.api.app.agents.state import AgentState
 from services.api.app.clients.ollama_client import ollama_client
@@ -72,7 +73,8 @@ async def planner_node(state: AgentState) -> dict:
         returns ``action="retrieve"`` as a safe default so the graph
         continues rather than crashing.
     """
-    logger.info("Planner Node: Analyzing query...")
+    logger.info("Planner node started", extra={"node": "planner"})
+    start = time.perf_counter()
 
     last_message = state["messages"][-1]
     user_query: str = (
@@ -93,7 +95,12 @@ async def planner_node(state: AgentState) -> dict:
 
         plan: dict = json.loads(response_text)
         action: str = plan.get("action", "retrieve")
-        logger.info("Plan derived: action=%s", action)
+        duration_ms = round((time.perf_counter() - start) * 1000, 2)
+
+        logger.info(
+            "Planner node completed",
+            extra={"node": "planner", "action": action, "duration_ms": duration_ms},
+        )
 
         return {
             "current_query": plan.get("refined_query", user_query),
@@ -102,7 +109,12 @@ async def planner_node(state: AgentState) -> dict:
         }
 
     except Exception as exc:
-        logger.error("Planning failed: %s", exc)
+        duration_ms = round((time.perf_counter() - start) * 1000, 2)
+        logger.error(
+            "Planner node failed, defaulting to retrieve",
+            exc_info=True,
+            extra={"node": "planner", "duration_ms": duration_ms},
+        )
         return {
             "current_query": user_query,
             "plan": ["Error in planning, defaulting to retrieval."],

@@ -1,6 +1,7 @@
 # services/api/app/routes/chat.py
 import json
 import logging
+import time
 import uuid
 from collections.abc import AsyncGenerator
 
@@ -8,6 +9,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from libs.observability.metrics import CACHE_HITS, NODE_LATENCY
 from services.api.app.agents.graph import agent_app
 from services.api.app.agents.state import AgentState
 from services.api.app.auth.jwt import get_current_user
@@ -17,6 +19,7 @@ from services.api.app.cache.semantic import SemanticCache
 from services.api.app.cache.semantic import semantic_cache as global_cache
 from services.api.app.clients.ollama_client import OllamaClient  # Replaces RayLLMClient
 from services.api.app.clients.ollama_client import ollama_client as global_llm
+from services.api.app.logging import bind_context
 from services.api.app.memory.postgres import PostgresMemory
 from services.api.app.memory.postgres import postgres_memory as global_memory
 
@@ -69,13 +72,26 @@ async def chat_stream(
     session_id = req.session_id or str(uuid.uuid4())
     user_id = user["id"]
 
-    logger.info("Chat request for session %s from user %s", session_id, user_id)
+    # Attach session and user to all log records for this request
+    bind_context(session_id=session_id, user_id=user_id)
+
+    request_start = time.perf_counter()
+    logger.info(
+        "Chat request received",
+        extra={"message_length": len(req.message)},
+    )
 
     # 2. Semantic Cache Check (Fast Path)
+    cache_start = time.perf_counter()
     cached_ans = await cache.get_cached_response(req.message)
+    cache_duration_ms = round((time.perf_counter() - cache_start) * 1000, 2)
 
     if cached_ans:
-        logger.info("Cache hit for session %s", session_id)
+        CACHE_HITS.labels(result="hit").inc()
+        logger.info(
+            "Semantic cache hit",
+            extra={"duration_ms": cache_duration_ms},
+        )
 
         async def stream_cache():
             yield json.dumps(
@@ -91,6 +107,12 @@ async def chat_stream(
 
         return StreamingResponse(stream_cache(), media_type="application/x-ndjson")
 
+    CACHE_HITS.labels(result="miss").inc()
+    logger.info(
+        "Semantic cache miss",
+        extra={"duration_ms": cache_duration_ms},
+    )
+
     # 3. Load Conversation History (Context Window)
     history_objs = await memory.get_history(session_id, limit=6)
     history_dicts = [{"role": msg.role, "content": msg.content} for msg in history_objs]
@@ -104,6 +126,7 @@ async def chat_stream(
     # 5. Define Generator for Streaming Response
     async def event_generator() -> AsyncGenerator[str]:
         final_answer = ""
+        node_start = time.perf_counter()
 
         try:
             async for event in agent_app.astream(
@@ -111,6 +134,15 @@ async def chat_stream(
             ):
                 node_name = list(event.keys())[0]
                 node_data = event[node_name]
+
+                node_duration_ms = round((time.perf_counter() - node_start) * 1000, 2)
+                NODE_LATENCY.labels(node=node_name).observe(node_duration_ms / 1000)
+                logger.info(
+                    "Agent node completed",
+                    extra={"node": node_name, "duration_ms": node_duration_ms},
+                )
+                # Reset timer for the next node
+                node_start = time.perf_counter()
 
                 # Emit Status Update
                 yield json.dumps(
@@ -138,6 +170,11 @@ async def chat_stream(
 
             # 6. Post-Processing
             if final_answer:
+                total_ms = round((time.perf_counter() - request_start) * 1000, 2)
+                logger.info(
+                    "Chat request completed",
+                    extra={"duration_ms": total_ms, "answer_length": len(final_answer)},
+                )
                 await memory.add_message(session_id, "user", req.message, user_id)
                 await memory.add_message(session_id, "assistant", final_answer, user_id)
                 await cache.set_cached_response(req.message, final_answer)
