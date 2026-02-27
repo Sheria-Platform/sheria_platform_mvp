@@ -1,6 +1,11 @@
 # services/api/app/agents/nodes/responder.py
+import logging
+import time
+
 from services.api.app.agents.state import AgentState
 from services.api.app.clients.ollama_client import ollama_client  # Replaces ray_llm
+
+logger = logging.getLogger(__name__)
 
 
 async def generate_node(state: AgentState) -> dict:
@@ -11,6 +16,12 @@ async def generate_node(state: AgentState) -> dict:
     """
     query = state["current_query"]
     documents = state.get("documents", [])
+
+    logger.info(
+        "Responder node started",
+        extra={"node": "responder", "doc_count": len(documents)},
+    )
+    start = time.perf_counter()
 
     context_str = "\n\n".join(documents)
 
@@ -33,6 +44,16 @@ async def generate_node(state: AgentState) -> dict:
     answer = await ollama_client.chat_completion(
         messages=[{"role": "user", "content": prompt}],
         temperature=0.3,  # Low creativity, high fidelity
+    )
+
+    duration_ms = round((time.perf_counter() - start) * 1000, 2)
+    logger.info(
+        "Responder node completed",
+        extra={
+            "node": "responder",
+            "duration_ms": duration_ms,
+            "answer_length": len(answer),
+        },
     )
 
     return {"messages": [{"role": "assistant", "content": answer}]}

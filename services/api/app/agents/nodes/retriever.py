@@ -23,7 +23,9 @@ Example:
 
 import asyncio
 import logging
+import time
 
+from libs.observability.metrics import RETRIEVAL_DOCS
 from services.api.app.agents.state import AgentState
 from services.api.app.clients.neo4j import neo4j_client
 from services.api.app.clients.ollama_embeddings import embeddings_client
@@ -67,10 +69,17 @@ async def retrieve_node(state: AgentState) -> dict:
         list so vector search results are never lost.
     """
     query: str = state["current_query"]
-    logger.info("Retriever Node: query=%s", query)
+    logger.info("Retriever node started", extra={"node": "retriever"})
+    node_start = time.perf_counter()
 
-    # Step 1: Embed query via Ollama (sequential — Qdrant needs it)
+    # Step 1: Embed query (sequential — Qdrant needs the vector first)
+    embed_start = time.perf_counter()
     query_vector: list[float] = await embeddings_client.embed_query(query)
+    embed_ms = round((time.perf_counter() - embed_start) * 1000, 2)
+    logger.debug(
+        "Query embedded",
+        extra={"node": "retriever", "duration_ms": embed_ms},
+    )
 
     # Step 2: Parallel retrieval ──────────────────────────────────────
 
@@ -98,20 +107,39 @@ async def retrieve_node(state: AgentState) -> dict:
             )
             return [row["text"] for row in rows]
         except Exception as exc:
-            logger.error("Graph search failed: %s", exc)
+            logger.error(
+                "Graph search failed",
+                exc_info=True,
+                extra={"node": "retriever"},
+            )
             return []
 
+    retrieval_start = time.perf_counter()
     vector_docs, graph_docs = await asyncio.gather(
         _vector_search(), _graph_search()
     )
+    retrieval_ms = round((time.perf_counter() - retrieval_start) * 1000, 2)
 
     # Step 3: Merge and deduplicate
     combined: list[str] = list(set(vector_docs + graph_docs))
+    total_ms = round((time.perf_counter() - node_start) * 1000, 2)
+
+    # Track retrieval counts in Prometheus
+    RETRIEVAL_DOCS.labels(source="vector").observe(len(vector_docs))
+    RETRIEVAL_DOCS.labels(source="graph").observe(len(graph_docs))
+    RETRIEVAL_DOCS.labels(source="combined").observe(len(combined))
+
     logger.info(
-        "Retriever Node: %d docs (vector=%d, graph=%d)",
-        len(combined),
-        len(vector_docs),
-        len(graph_docs),
+        "Retriever node completed",
+        extra={
+            "node": "retriever",
+            "vector_docs": len(vector_docs),
+            "graph_docs": len(graph_docs),
+            "combined_docs": len(combined),
+            "embed_ms": embed_ms,
+            "retrieval_ms": retrieval_ms,
+            "duration_ms": total_ms,
+        },
     )
 
     return {"documents": combined}
