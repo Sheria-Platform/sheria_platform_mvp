@@ -1,0 +1,58 @@
+# Kenya Law (new.kenyalaw.org)
+# Discovered structure (2026-02-27):
+#   Listing pages : /judgments/{COURT_CODE}/?page=N  (HTML, paginated)
+#   Search page   : /search/?q={term}&page=N          (HTML, paginated)
+#   Document URL  : /akn/ke/judgment/{court}/{year}/{num}/eng@{date}
+#   PDF download  : {document_url}/source.pdf
+#   DOCX download : {document_url}/source
+#
+# NO public JSON/REST API is available.
+
+kenya_law:
+  base_url: "https://new.kenyalaw.org"
+
+  # Rate limiting — 1 request per 2 seconds. Be polite.
+  rate_limit_rps: 0.5
+
+  robots_txt: true
+
+  # Crawl mode: "court" (listing pages) or "search" (keyword search)
+  default_mode: "court"
+
+  # Courts to crawl in court mode (all superior courts by default).
+  # Remove courts you don't need to reduce crawl time.
+  courts:
+    - KESC     # Supreme Court of Kenya
+    - KECA     # Court of Appeal of Kenya
+    - KEHC     # High Court of Kenya
+    - KEELRC   # Employment and Labour Relations Court
+    - KEELC    # Environment and Land Court
+    - KEIC     # Industrial Court of Kenya
+
+  # Document formats to attempt. PDF is tried first; DOCX is fallback.
+  file_types:
+    - pdf
+    - docx
+
+  # AKN URL pattern for individual judgments
+  akn_pattern: "/akn/ke/judgment/{court}/{year}/{number}/eng@{date}"
+
+  # These CSS selectors are documented here for reference.
+  # The crawler parses all <a href="/akn/ke/judgment/..."> links directly.
+  selectors:
+    judgment_link: "a[href*='/akn/ke/judgment/']"
+    next_page: "a[rel='next'], a:contains('Next')"
+
+
+generic:
+  base_url: null           # supplied at runtime via --urls flag
+  rate_limit_rps: 0.3      # conservative for unknown sites
+  max_depth: 3
+  robots_txt: true
+  file_types:
+    - pdf
+    - docx
+    - doc
+  selectors:
+    pdf_link: "a[href$='.pdf']"
+    docx_link: "a[href$='.docx'], a[href$='.doc']"
