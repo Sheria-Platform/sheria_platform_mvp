@@ -17,8 +17,8 @@ Usage:
     python main.py <bucket_name> <prefix> [max_workers] [--enable-graph]
 
 Example:
-    python main.py srtmanager kenya_law_data/case 4
-    python main.py srtmanager kenya_law_data/case 4 --enable-graph
+    python main.py legal-documents legal/kenya_law/ 4
+    python main.py legal-documents legal/kenya_law/ 4 --enable-graph
 
 Environment Variables:
     See .env.example for required configuration
@@ -28,7 +28,7 @@ import os
 import signal
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from minio import Minio
 
@@ -96,6 +96,7 @@ def validate_config() -> Dict[str, Any]:
         "embedding_batch_size": int(os.getenv("EMBEDDING_BATCH_SIZE", "50")),
         "graph_batch_size": int(os.getenv("GRAPH_BATCH_SIZE", "10")),
         "max_file_size_mb": int(os.getenv("MAX_FILE_SIZE_MB", "100")),
+        "file_batch_size": int(os.getenv("FILE_BATCH_SIZE", "20")),
     }
 
     # Validate ranges
@@ -105,11 +106,50 @@ def validate_config() -> Dict[str, Any]:
         raise ValueError(f"chunk_overlap must be between 0 and chunk_size, got {config['chunk_overlap']}")
     if config["max_workers"] < 1 or config["max_workers"] > 32:
         raise ValueError(f"max_workers must be between 1 and 32, got {config['max_workers']}")
+    if config["file_batch_size"] < 1 or config["file_batch_size"] > 500:
+        raise ValueError(f"file_batch_size must be between 1 and 500, got {config['file_batch_size']}")
 
     logger.info("Configuration validated successfully")
     logger.debug(f"Config: {config}")
 
     return config
+
+
+COURT_NAMES = {
+    "kehc": "High Court",
+    "keelc": "Environment and Land Court",
+    "keic": "Industrial Court",
+    "keca": "Court of Appeal",
+    "kesc": "Supreme Court",
+    "kehcc": "Constitutional and Human Rights Division",
+}
+
+
+def extract_path_metadata(object_path: str) -> dict:
+    """
+    Parse MinIO object path into legal document metadata.
+
+    Expected: legal/kenya_law/{year}/{case_slug}/{citation_code}.pdf
+    Returns:  source, year, case_slug, citation_code, court_code, court_name, case_number
+    """
+    metadata = {}
+    parts = object_path.replace("\\", "/").split("/")
+    try:
+        if len(parts) >= 5 and parts[0] == "legal" and parts[1] == "kenya_law":
+            metadata["source"] = "kenya_law"
+            metadata["year"] = parts[2]
+            metadata["case_slug"] = parts[3]
+            citation_code = parts[4].rsplit(".", 1)[0]  # strip .pdf
+            metadata["citation_code"] = citation_code
+            # citation format: {court_code}_{year}_{number}
+            cp = citation_code.rsplit("_", 2)
+            if len(cp) == 3:
+                metadata["court_code"] = cp[0]
+                metadata["case_number"] = cp[2]
+                metadata["court_name"] = COURT_NAMES.get(cp[0], cp[0].upper())
+    except Exception:
+        pass  # non-standard paths — degrade gracefully
+    return metadata
 
 
 def process_single_file(file_info: Tuple[str, bytes], config: Dict[str, Any]) -> Tuple[List[dict], Optional[str]]:
@@ -161,6 +201,7 @@ def process_single_file(file_info: Tuple[str, bytes], config: Dict[str, Any]) ->
         for chunk in chunks:
             chunk["metadata"].update(metadata)
             chunk["metadata"]["source_file"] = filename
+            chunk["metadata"].update(extract_path_metadata(filename))
 
         return chunks, None
 
@@ -318,22 +359,171 @@ def batch_extract_graph(chunks: List[dict], batch_size: int, max_retries: int = 
     return results, failed_count
 
 
-def main(bucket_name: str, prefix: str, max_workers: Optional[int] = None, enable_graph: Optional[bool] = None) -> int:
+def _iter_file_batches(
+    client,
+    bucket_name: str,
+    prefix: str,
+    batch_size: int,
+    config: Dict[str, Any],
+    stats: Dict[str, Any],
+) -> Iterator[List[Tuple[str, bytes]]]:
+    """
+    Stream MinIO objects lazily and yield fixed-size batches of downloaded PDFs.
+
+    Never materialises the full listing into memory. Non-PDF files are skipped.
+    Download failures are counted in stats["files_failed"] and logged, but do
+    not stop the stream.
+
+    Args:
+        client: Minio client instance
+        bucket_name: Bucket to list
+        prefix: Key prefix filter
+        batch_size: Max files per yielded batch
+        config: Pipeline config dict (unused here, passed for future use)
+        stats: Shared stats dict mutated in-place
+
+    Yields:
+        List of (object_name, file_bytes) tuples, at most batch_size entries
+    """
+    object_iter = client.list_objects(bucket_name, prefix=prefix, recursive=True)
+    current_batch: List[Tuple[str, bytes]] = []
+
+    for obj in object_iter:
+        if _shutdown_requested:
+            break
+        stats["files_seen"] += 1
+        if not obj.object_name.lower().endswith(".pdf"):
+            logger.debug(f"Skipping non-PDF: {obj.object_name}")
+            continue
+        try:
+            response = client.get_object(bucket_name, obj.object_name)
+            file_bytes = response.read()
+            response.close()
+            current_batch.append((obj.object_name, file_bytes))
+            stats["files_downloaded"] += 1
+        except Exception as e:
+            logger.error(f"Failed to download {obj.object_name}: {e}")
+            stats["files_failed"] += 1
+
+        if len(current_batch) >= batch_size:
+            yield current_batch
+            current_batch = []  # allow GC of completed batch bytes
+
+    if current_batch:
+        yield current_batch
+
+
+def _process_file_batch(
+    file_batch: List[Tuple[str, bytes]],
+    config: Dict[str, Any],
+    stats: Dict[str, Any],
+    qdrant_indexer,
+    neo4j_indexer,
+    batch_num: int,
+) -> None:
+    """
+    Run the full per-batch pipeline: parse+chunk -> embed -> Qdrant -> (opt) graph -> Neo4j.
+
+    Mutates stats in-place. Indexers are passed in (created once in main, reused).
+
+    Args:
+        file_batch: List of (object_name, file_bytes) tuples for this batch
+        config: Pipeline configuration dict
+        stats: Shared stats dict mutated in-place
+        qdrant_indexer: Initialised QdrantIndexer (reused across batches)
+        neo4j_indexer: Initialised Neo4jIndexer or None if graph disabled
+        batch_num: 1-based batch counter for log messages
+    """
+    # Stage A: Parse + chunk in parallel
+    batch_chunks: List[dict] = []
+    with ThreadPoolExecutor(max_workers=config["max_workers"]) as executor:
+        futures = [executor.submit(process_single_file, fi, config) for fi in file_batch]
+        for future in as_completed(futures):
+            if _shutdown_requested:
+                for f in futures:
+                    f.cancel()
+                break
+            try:
+                chunks, error = future.result()
+                if chunks:
+                    batch_chunks.extend(chunks)
+                    stats["files_processed"] += 1
+                if error:
+                    stats["files_failed"] += 1
+            except Exception as e:
+                logger.error(f"[Batch {batch_num}] File processing future failed: {e}", exc_info=True)
+                stats["files_failed"] += 1
+
+    stats["chunks_created"] += len(batch_chunks)
+
+    if not batch_chunks or _shutdown_requested:
+        return
+
+    # Stage B: Embed
+    chunks_with_vectors, embed_failures = batch_embed(
+        batch_chunks, batch_size=config["embedding_batch_size"], max_retries=3
+    )
+    stats["vectors_failed"] += embed_failures
+
+    # Stage C: Index to Qdrant (sub-batches of 100)
+    if chunks_with_vectors and not _shutdown_requested:
+        for i in range(0, len(chunks_with_vectors), 100):
+            if _shutdown_requested:
+                break
+            sub = chunks_with_vectors[i:i + 100]
+            for attempt in range(3):
+                try:
+                    qdrant_indexer.write(sub)
+                    stats["vectors_indexed"] += len(sub)
+                    break
+                except Exception as e:
+                    logger.warning(f"[Batch {batch_num}] Qdrant attempt {attempt + 1}/3: {e}")
+                    if attempt == 2:
+                        logger.error(f"[Batch {batch_num}] Failed to index sub-batch to Qdrant after 3 attempts")
+
+    # Stage D: Graph extraction + Neo4j (optional)
+    if config["enable_graph"] and neo4j_indexer and not _shutdown_requested:
+        chunks_with_graph, graph_failures = batch_extract_graph(
+            batch_chunks, batch_size=config["graph_batch_size"], max_retries=3
+        )
+        stats["graph_failed"] += graph_failures
+        for i in range(0, len(chunks_with_graph), 100):
+            if _shutdown_requested:
+                break
+            sub = chunks_with_graph[i:i + 100]
+            for attempt in range(3):
+                try:
+                    neo4j_indexer.write(sub)
+                    stats["graph_indexed"] += len(sub)
+                    break
+                except Exception as e:
+                    logger.warning(f"[Batch {batch_num}] Neo4j attempt {attempt + 1}/3: {e}")
+                    if attempt == 2:
+                        logger.error(f"[Batch {batch_num}] Failed to index sub-batch to Neo4j after 3 attempts")
+
+
+def main(
+    bucket_name: str,
+    prefix: str,
+    max_workers: Optional[int] = None,
+    enable_graph: Optional[bool] = None,
+    file_batch_size: Optional[int] = None,
+) -> int:
     """
     Main ingestion workflow with production-grade error handling.
 
     This function orchestrates the complete document ingestion pipeline:
     1. Validates configuration and inputs
-    2. Loads documents from MinIO
-    3. Parses and chunks documents in parallel
-    4. Generates embeddings and indexes to Qdrant
-    5. (Optional) Extracts graph data and indexes to Neo4j
+    2. Streams documents from MinIO in fixed-size memory batches
+    3. Per batch: parses+chunks in parallel, embeds, indexes to Qdrant
+    4. Per batch (optional): extracts graph data, indexes to Neo4j
 
     Args:
         bucket_name: MinIO bucket name (required, non-empty string)
         prefix: Prefix path for files to ingest (required, non-empty string)
         max_workers: Number of parallel workers for file processing (1-32, default from config)
         enable_graph: Whether to extract graph data (slow, optional, default from config)
+        file_batch_size: Files processed per memory batch (1-500, default from FILE_BATCH_SIZE env or 20)
 
     Returns:
         Exit code: 0 for success, 1 for failure
@@ -343,7 +533,7 @@ def main(bucket_name: str, prefix: str, max_workers: Optional[int] = None, enabl
         Exception: For critical failures that prevent pipeline execution
 
     Example:
-        >>> main("srtmanager", "kenya_law_data/case", max_workers=4, enable_graph=False)
+        >>> main("legal-documents", "legal/kenya_law/", max_workers=4, enable_graph=False)
         0
     """
     # Install signal handlers for graceful shutdown
@@ -372,13 +562,19 @@ def main(bucket_name: str, prefix: str, max_workers: Optional[int] = None, enabl
     if enable_graph is not None:
         config["enable_graph"] = enable_graph
 
+    if file_batch_size is not None:
+        if file_batch_size < 1 or file_batch_size > 500:
+            raise ValueError(f"file_batch_size must be between 1 and 500, got {file_batch_size}")
+        config["file_batch_size"] = file_batch_size
+
     logger.info(f"Starting ingestion: bucket={bucket_name}, prefix={prefix}")
     logger.info(f"Configuration: workers={config['max_workers']}, graph={config['enable_graph']}, "
-                f"chunk_size={config['chunk_size']}, overlap={config['chunk_overlap']}")
+                f"chunk_size={config['chunk_size']}, overlap={config['chunk_overlap']}, "
+                f"file_batch_size={config['file_batch_size']}")
 
     # Statistics tracking
     stats = {
-        "files_found": 0,
+        "files_seen": 0,
         "files_downloaded": 0,
         "files_processed": 0,
         "files_failed": 0,
@@ -404,193 +600,53 @@ def main(bucket_name: str, prefix: str, max_workers: Optional[int] = None, enabl
             raise ValueError(f"Bucket '{bucket_name}' does not exist")
         logger.info(f"Connected to MinIO bucket: {bucket_name}")
 
-        # 2. List and download files
-        logger.info("Listing files from MinIO...")
+        # 2. Stream files and process in fixed-size memory batches
+        logger.info(f"Streaming files from MinIO in batches of {config['file_batch_size']}...")
+        qdrant_indexer = QdrantIndexer()
+        neo4j_indexer = Neo4jIndexer() if config["enable_graph"] else None
+        batch_num = 0
+
         try:
-            objects = list(client.list_objects(bucket_name, prefix=prefix, recursive=True))
-        except Exception as e:
-            logger.error(f"Failed to list objects: {e}")
-            return 1
-
-        stats["files_found"] = len(objects)
-        logger.info(f"Found {stats['files_found']} files")
-
-        if not objects:
-            logger.warning("No files found!")
-            return 0  # Not an error, just nothing to process
-
-        logger.info("Downloading files...")
-        files_to_process = []
-        for obj in objects:
-            if _shutdown_requested:
-                logger.warning("Shutdown requested, stopping file download")
-                break
-
-            try:
-                response = client.get_object(bucket_name, obj.object_name)
-                file_bytes = response.read()
-                response.close()
-                files_to_process.append((obj.object_name, file_bytes))
-                stats["files_downloaded"] += 1
-                logger.debug(f"Downloaded {obj.object_name}: {len(file_bytes)} bytes")
-            except Exception as e:
-                logger.error(f"Failed to download {obj.object_name}: {e}")
-                stats["files_failed"] += 1
-
-        logger.info(f"Downloaded {stats['files_downloaded']}/{stats['files_found']} files successfully")
-
-        # 3. Process files in parallel (parse + chunk)
-        logger.info(f"Processing files with {config['max_workers']} workers...")
-        all_chunks = []
-        processing_errors = []
-
-        with ThreadPoolExecutor(max_workers=config['max_workers']) as executor:
-            futures = [executor.submit(process_single_file, file_info, config)
-                       for file_info in files_to_process]
-
-            for future in as_completed(futures):
+            for file_batch in _iter_file_batches(
+                client, bucket_name, prefix, config["file_batch_size"], config, stats
+            ):
                 if _shutdown_requested:
-                    logger.warning("Shutdown requested, cancelling remaining file processing")
-                    for f in futures:
-                        f.cancel()
                     break
+                batch_num += 1
+                logger.info(f"[Batch {batch_num}] {len(file_batch)} files "
+                            f"(seen so far: {stats['files_seen']})")
+                _process_file_batch(
+                    file_batch, config, stats, qdrant_indexer, neo4j_indexer, batch_num
+                )
+                logger.info(f"[Batch {batch_num}] done -- "
+                            f"processed={stats['files_processed']} "
+                            f"vectors={stats['vectors_indexed']} "
+                            f"failed={stats['files_failed']}")
+        finally:
+            qdrant_indexer.close()
+            if neo4j_indexer:
+                neo4j_indexer.close()
 
-                try:
-                    chunks, error = future.result()
-                    if chunks:
-                        all_chunks.extend(chunks)
-                        stats["files_processed"] += 1
-                    if error:
-                        processing_errors.append(error)
-                        stats["files_failed"] += 1
-                except Exception as e:
-                    logger.error(f"File processing future failed: {e}", exc_info=True)
-                    stats["files_failed"] += 1
+        if batch_num == 0:
+            logger.warning("No PDF files found under the given prefix.")
+            return 0
 
-        stats["chunks_created"] = len(all_chunks)
-        logger.info(f"File processing complete: {stats['files_processed']} successful, {stats['files_failed']} failed")
-        logger.info(f"Total chunks created: {stats['chunks_created']}")
-
-        if processing_errors:
-            logger.warning(f"Processing errors encountered: {len(processing_errors)}")
-            for error in processing_errors[:10]:  # Log first 10 errors
-                logger.debug(f"  - {error}")
-
-        if not all_chunks:
-            logger.warning("No chunks to process!")
-            return 0 if _shutdown_requested else 1
-
-        # 4. Generate embeddings (for vector search in Qdrant)
-        if _shutdown_requested:
-            logger.warning("Shutdown requested, skipping embedding generation")
-            return 1
-
-        logger.info("Generating embeddings...")
-        chunks_with_vectors, embedding_failures = batch_embed(
-            all_chunks,
-            batch_size=config["embedding_batch_size"],
-            max_retries=3
-        )
-        stats["vectors_failed"] = embedding_failures
-        logger.info(f"Generated {len(chunks_with_vectors)} embeddings ({embedding_failures} failed)")
-
-        # 5. Extract graph data (for Neo4j) - OPTIONAL
-        chunks_with_graph = []
-        if config["enable_graph"]:
-            if _shutdown_requested:
-                logger.warning("Shutdown requested, skipping graph extraction")
-                return 1
-
-            logger.info("Extracting graph data...")
-            chunks_with_graph, graph_failures = batch_extract_graph(
-                all_chunks,
-                batch_size=config["graph_batch_size"],
-                max_retries=3
-            )
-            stats["graph_failed"] = graph_failures
-            logger.info(f"Extracted graph data for {len(chunks_with_graph)} chunks ({graph_failures} with empty data)")
-        else:
-            logger.info("Skipping graph extraction (disabled)")
-
-        # 6. Write vectors to Qdrant
-        if chunks_with_vectors:
-            if _shutdown_requested:
-                logger.warning("Shutdown requested, skipping Qdrant indexing")
-                return 1
-
-            logger.info("Writing vectors to Qdrant...")
-            qdrant_indexer = QdrantIndexer()
-            qdrant_batch_size = 100
-
-            for i in range(0, len(chunks_with_vectors), qdrant_batch_size):
-                if _shutdown_requested:
-                    logger.warning("Shutdown requested, stopping Qdrant indexing")
-                    break
-
-                batch = chunks_with_vectors[i:i + qdrant_batch_size]
-
-                for attempt in range(3):  # Retry logic
-                    try:
-                        qdrant_indexer.write(batch)
-                        stats["vectors_indexed"] += len(batch)
-                        logger.info(f"Indexed {stats['vectors_indexed']}/{len(chunks_with_vectors)} vectors to Qdrant")
-                        break
-                    except Exception as e:
-                        logger.warning(f"Failed to write batch to Qdrant (attempt {attempt + 1}/3): {e}")
-                        if attempt == 2:
-                            logger.error(f"Failed to index batch after 3 attempts", exc_info=True)
-
-            qdrant_indexer.close()  # Cleanup
-        else:
-            logger.warning("No vectors to index to Qdrant")
-
-        # 7. Write graph to Neo4j (if enabled)
-        if config["enable_graph"] and chunks_with_graph:
-            if _shutdown_requested:
-                logger.warning("Shutdown requested, skipping Neo4j indexing")
-                return 1
-
-            logger.info("Writing graph to Neo4j...")
-            neo4j_indexer = Neo4jIndexer()
-            neo4j_batch_size = 100
-
-            for i in range(0, len(chunks_with_graph), neo4j_batch_size):
-                if _shutdown_requested:
-                    logger.warning("Shutdown requested, stopping Neo4j indexing")
-                    break
-
-                batch = chunks_with_graph[i:i + neo4j_batch_size]
-
-                for attempt in range(3):  # Retry logic
-                    try:
-                        neo4j_indexer.write(batch)
-                        stats["graph_indexed"] += len(batch)
-                        logger.info(f"Indexed {stats['graph_indexed']}/{len(chunks_with_graph)} graph entries to Neo4j")
-                        break
-                    except Exception as e:
-                        logger.warning(f"Failed to write batch to Neo4j (attempt {attempt + 1}/3): {e}")
-                        if attempt == 2:
-                            logger.error(f"Failed to index graph batch after 3 attempts", exc_info=True)
-
-            neo4j_indexer.close()  # Cleanup
-        else:
-            logger.info("Skipping Neo4j indexing (graph extraction disabled or no data)")
-
-        # 8. Summary
+        # 3. Summary
         print(f"\n{'='*60}")
-        status = "✓ Ingestion Completed" if not _shutdown_requested else "⚠ Ingestion Interrupted"
-        print(f"{status}")
+        status = "COMPLETED" if not _shutdown_requested else "INTERRUPTED (graceful)"
+        print(f"Ingestion {status}")
         print(f"{'='*60}")
-        print(f"  Files found:      {stats['files_found']}")
-        print(f"  Files downloaded: {stats['files_downloaded']}")
-        print(f"  Files processed:  {stats['files_processed']}")
-        print(f"  Files failed:     {stats['files_failed']}")
-        print(f"  Total chunks:     {stats['chunks_created']}")
-        print(f"  Vectors indexed:  {stats['vectors_indexed']}")
-        print(f"  Vectors failed:   {stats['vectors_failed']}")
+        print(f"  Files seen (streamed): {stats['files_seen']}")
+        print(f"  Files downloaded:      {stats['files_downloaded']}")
+        print(f"  Files processed:       {stats['files_processed']}")
+        print(f"  Files failed:          {stats['files_failed']}")
+        print(f"  File batches run:      {batch_num}")
+        print(f"  Total chunks:          {stats['chunks_created']}")
+        print(f"  Vectors indexed:       {stats['vectors_indexed']}")
+        print(f"  Vectors failed:        {stats['vectors_failed']}")
         if config["enable_graph"]:
-            print(f"  Graph indexed:    {stats['graph_indexed']}")
-            print(f"  Graph empty:      {stats['graph_failed']}")
+            print(f"  Graph indexed:         {stats['graph_indexed']}")
+            print(f"  Graph empty:           {stats['graph_failed']}")
         print(f"{'='*60}\n")
 
         return 0 if stats['files_processed'] > 0 else 1
@@ -617,16 +673,16 @@ if __name__ == "__main__":
         epilog="""
 Examples:
   # Basic ingestion (embeddings only, fast)
-  python main.py srtmanager kenya_law_data/case
+  python main.py legal-documents legal/kenya_law/
 
   # With custom worker count
-  python main.py srtmanager kenya_law_data/case --max-workers 8
+  python main.py legal-documents legal/kenya_law/ --max-workers 8
 
   # With graph extraction (slow)
-  python main.py srtmanager kenya_law_data/case --enable-graph
+  python main.py legal-documents legal/kenya_law/ --enable-graph
 
-  # Full configuration
-  python main.py srtmanager kenya_law_data/case --max-workers 8 --enable-graph
+  # Specific year only
+  python main.py legal-documents legal/kenya_law/2026/ --max-workers 8 --enable-graph
 
 Environment Variables:
   See .env.example for all available configuration options.
@@ -661,6 +717,13 @@ Environment Variables:
     )
 
     parser.add_argument(
+        "--file-batch-size",
+        type=int,
+        default=None,
+        help="Files per memory batch (1-500, default: FILE_BATCH_SIZE env var or 20)"
+    )
+
+    parser.add_argument(
         "--log-level",
         type=str,
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
@@ -679,7 +742,8 @@ Environment Variables:
             bucket_name=args.bucket_name,
             prefix=args.prefix,
             max_workers=args.max_workers,
-            enable_graph=args.enable_graph
+            enable_graph=args.enable_graph,
+            file_batch_size=args.file_batch_size,
         )
         sys.exit(exit_code)
     except Exception as e:
