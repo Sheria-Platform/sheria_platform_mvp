@@ -209,7 +209,7 @@ class QdrantIndexer:
                 self.client.upsert(
                     collection_name=self.collection_name,
                     points=points,
-                    wait=True  # Wait for operation to complete
+                    wait=False
                 )
                 logger.debug(f"Successfully indexed {len(points)} points to Qdrant")
                 return len(points)

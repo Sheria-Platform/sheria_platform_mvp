@@ -211,7 +211,12 @@ def process_single_file(file_info: Tuple[str, bytes], config: Dict[str, Any]) ->
         return [], error
 
 
-def batch_embed(chunks: List[dict], batch_size: int, max_retries: int = 3) -> Tuple[List[dict], int]:
+def batch_embed(
+    chunks: List[dict],
+    batch_size: int,
+    max_retries: int = 3,
+    embedder: Optional["BatchEmbedder"] = None,
+) -> Tuple[List[dict], int]:
     """
     Generate embeddings for chunks in batches with retry logic.
 
@@ -219,19 +224,20 @@ def batch_embed(chunks: List[dict], batch_size: int, max_retries: int = 3) -> Tu
         chunks: List of chunks with text and metadata
         batch_size: Number of chunks to embed at once
         max_retries: Maximum number of retries for failed batches
+        embedder: Pre-created BatchEmbedder instance to reuse. If None, one is
+            created and closed internally (legacy behaviour).
 
     Returns:
         Tuple of (list of chunks with embeddings added, number of failed chunks)
-
-    Note:
-        Failed batches are logged but pipeline continues. Chunks without
-        embeddings are excluded from results.
     """
     if not chunks:
         logger.warning("No chunks provided for embedding")
         return [], 0
 
-    embedder = BatchEmbedder()
+    _owns_embedder = embedder is None
+    if _owns_embedder:
+        embedder = BatchEmbedder()
+
     results = []
     failed_count = 0
     total_batches = (len(chunks) - 1) // batch_size + 1
@@ -255,11 +261,9 @@ def batch_embed(chunks: List[dict], batch_size: int, max_retries: int = 3) -> Tu
 
                 result = embedder(batch_dict)
 
-                # Validate result structure
                 if "vector" not in result or len(result["vector"]) != len(batch):
                     raise ValueError(f"Invalid embedding response: expected {len(batch)} vectors")
 
-                # Add embeddings to chunks
                 for j, chunk in enumerate(batch):
                     chunk["vector"] = result["vector"][j]
                     results.append(chunk)
@@ -276,12 +280,18 @@ def batch_embed(chunks: List[dict], batch_size: int, max_retries: int = 3) -> Tu
         if not success:
             logger.error(f"Skipping batch {batch_num} ({len(batch)} chunks)")
 
-    embedder.close()  # Cleanup resources
+    if _owns_embedder:
+        embedder.close()
     logger.info(f"Embedding complete: {len(results)} successful, {failed_count} failed")
     return results, failed_count
 
 
-def batch_extract_graph(chunks: List[dict], batch_size: int, max_retries: int = 3) -> Tuple[List[dict], int]:
+def batch_extract_graph(
+    chunks: List[dict],
+    batch_size: int,
+    max_retries: int = 3,
+    extractor: Optional["GraphExtractor"] = None,
+) -> Tuple[List[dict], int]:
     """
     Extract graph data from chunks in batches with retry logic.
 
@@ -289,19 +299,20 @@ def batch_extract_graph(chunks: List[dict], batch_size: int, max_retries: int = 
         chunks: List of chunks with text and metadata
         batch_size: Number of chunks to process at once
         max_retries: Maximum number of retries for failed batches
+        extractor: Pre-created GraphExtractor instance to reuse. If None, one is
+            created and closed internally (legacy behaviour).
 
     Returns:
         Tuple of (list of chunks with graph data added, number of failed chunks)
-
-    Note:
-        Failed batches are logged but pipeline continues. Chunks with empty
-        graph data are still included in results.
     """
     if not chunks:
         logger.warning("No chunks provided for graph extraction")
         return [], 0
 
-    extractor = GraphExtractor()
+    _owns_extractor = extractor is None
+    if _owns_extractor:
+        extractor = GraphExtractor()
+
     results = []
     failed_count = 0
     total_batches = (len(chunks) - 1) // batch_size + 1
@@ -325,13 +336,11 @@ def batch_extract_graph(chunks: List[dict], batch_size: int, max_retries: int = 
 
                 result = extractor(batch_dict)
 
-                # Validate result structure
                 if "graph_nodes" not in result or "graph_edges" not in result:
                     raise ValueError("Invalid graph extraction response structure")
                 if len(result["graph_nodes"]) != len(batch) or len(result["graph_edges"]) != len(batch):
                     raise ValueError(f"Graph response length mismatch: expected {len(batch)}")
 
-                # Add graph data to chunks
                 for j, chunk in enumerate(batch):
                     chunk["graph_nodes"] = result["graph_nodes"][j]
                     chunk["graph_edges"] = result["graph_edges"][j]
@@ -347,14 +356,14 @@ def batch_extract_graph(chunks: List[dict], batch_size: int, max_retries: int = 
                     failed_count += len(batch)
 
         if not success:
-            # Add chunks with empty graph data to maintain consistency
             for chunk in batch:
                 chunk["graph_nodes"] = []
                 chunk["graph_edges"] = []
                 results.append(chunk)
             logger.error(f"Added batch {batch_num} with empty graph data")
 
-    extractor.close()  # Cleanup resources
+    if _owns_extractor:
+        extractor.close()
     logger.info(f"Graph extraction complete: {len(results) - failed_count} successful, {failed_count} with empty data")
     return results, failed_count
 
@@ -368,10 +377,12 @@ def _iter_file_batches(
     stats: Dict[str, Any],
 ) -> Iterator[List[Tuple[str, bytes]]]:
     """
-    Stream MinIO objects lazily and yield fixed-size batches of downloaded PDFs.
+    Yield fixed-size batches of downloaded PDFs from MinIO.
 
-    Never materialises the full listing into memory. Non-PDF files are skipped.
-    Download failures are counted in stats["files_failed"] and logged, but do
+    Phase 1: List all object names (cheap metadata — no bytes transferred).
+    Phase 2: Download each batch in parallel using a thread pool.
+
+    Download failures are counted in stats["files_failed"] and logged but do
     not stop the stream.
 
     Args:
@@ -379,38 +390,50 @@ def _iter_file_batches(
         bucket_name: Bucket to list
         prefix: Key prefix filter
         batch_size: Max files per yielded batch
-        config: Pipeline config dict (unused here, passed for future use)
+        config: Pipeline config dict (max_workers used for download concurrency)
         stats: Shared stats dict mutated in-place
 
     Yields:
         List of (object_name, file_bytes) tuples, at most batch_size entries
     """
-    object_iter = client.list_objects(bucket_name, prefix=prefix, recursive=True)
-    current_batch: List[Tuple[str, bytes]] = []
-
-    for obj in object_iter:
+    # Phase 1: collect all PDF names (names are small — listing is metadata-only)
+    all_pdf_names: List[str] = []
+    for obj in client.list_objects(bucket_name, prefix=prefix, recursive=True):
         if _shutdown_requested:
-            break
+            return
         stats["files_seen"] += 1
-        if not obj.object_name.lower().endswith(".pdf"):
+        if obj.object_name.lower().endswith(".pdf"):
+            all_pdf_names.append(obj.object_name)
+        else:
             logger.debug(f"Skipping non-PDF: {obj.object_name}")
-            continue
-        try:
-            response = client.get_object(bucket_name, obj.object_name)
-            file_bytes = response.read()
-            response.close()
-            current_batch.append((obj.object_name, file_bytes))
-            stats["files_downloaded"] += 1
-        except Exception as e:
-            logger.error(f"Failed to download {obj.object_name}: {e}")
-            stats["files_failed"] += 1
 
-        if len(current_batch) >= batch_size:
-            yield current_batch
-            current_batch = []  # allow GC of completed batch bytes
+    def _download(name: str) -> Tuple[str, bytes]:
+        resp = client.get_object(bucket_name, name)
+        data = resp.read()
+        resp.close()
+        return name, data
 
-    if current_batch:
-        yield current_batch
+    # Phase 2: download in parallel batches
+    max_workers = config["max_workers"]
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        for i in range(0, len(all_pdf_names), batch_size):
+            if _shutdown_requested:
+                break
+            batch_names = all_pdf_names[i:i + batch_size]
+            futures = {pool.submit(_download, name): name for name in batch_names}
+            batch_results: List[Tuple[str, bytes]] = []
+            for future in as_completed(futures):
+                if _shutdown_requested:
+                    break
+                name = futures[future]
+                try:
+                    batch_results.append(future.result())
+                    stats["files_downloaded"] += 1
+                except Exception as e:
+                    logger.error(f"Failed to download {name}: {e}")
+                    stats["files_failed"] += 1
+            if batch_results:
+                yield batch_results
 
 
 def _process_file_batch(
@@ -420,11 +443,14 @@ def _process_file_batch(
     qdrant_indexer,
     neo4j_indexer,
     batch_num: int,
+    embedder,
+    extractor,
 ) -> None:
     """
-    Run the full per-batch pipeline: parse+chunk -> embed -> Qdrant -> (opt) graph -> Neo4j.
+    Run the full per-batch pipeline: parse+chunk -> [embed ‖ graph] -> Qdrant + Neo4j.
 
-    Mutates stats in-place. Indexers are passed in (created once in main, reused).
+    Fork A (embed) and Fork B (graph extract) run concurrently in a thread pool.
+    Indexers and AI clients are passed in (created once in main, reused across batches).
 
     Args:
         file_batch: List of (object_name, file_bytes) tuples for this batch
@@ -433,6 +459,8 @@ def _process_file_batch(
         qdrant_indexer: Initialised QdrantIndexer (reused across batches)
         neo4j_indexer: Initialised Neo4jIndexer or None if graph disabled
         batch_num: 1-based batch counter for log messages
+        embedder: Shared BatchEmbedder instance
+        extractor: Shared GraphExtractor instance or None if graph disabled
     """
     # Stage A: Parse + chunk in parallel
     batch_chunks: List[dict] = []
@@ -459,10 +487,18 @@ def _process_file_batch(
     if not batch_chunks or _shutdown_requested:
         return
 
-    # Stage B: Embed
-    chunks_with_vectors, embed_failures = batch_embed(
-        batch_chunks, batch_size=config["embedding_batch_size"], max_retries=3
-    )
+    # Stage B+D (Fork A ‖ Fork B): embed and graph-extract concurrently
+    graph_future = None
+    with ThreadPoolExecutor(max_workers=2) as fork:
+        embed_future = fork.submit(
+            batch_embed, batch_chunks, config["embedding_batch_size"], 3, embedder
+        )
+        if config["enable_graph"] and neo4j_indexer and extractor:
+            graph_future = fork.submit(
+                batch_extract_graph, batch_chunks, config["graph_batch_size"], 3, extractor
+            )
+
+    chunks_with_vectors, embed_failures = embed_future.result()
     stats["vectors_failed"] += embed_failures
 
     # Stage C: Index to Qdrant (sub-batches of 100)
@@ -481,11 +517,9 @@ def _process_file_batch(
                     if attempt == 2:
                         logger.error(f"[Batch {batch_num}] Failed to index sub-batch to Qdrant after 3 attempts")
 
-    # Stage D: Graph extraction + Neo4j (optional)
-    if config["enable_graph"] and neo4j_indexer and not _shutdown_requested:
-        chunks_with_graph, graph_failures = batch_extract_graph(
-            batch_chunks, batch_size=config["graph_batch_size"], max_retries=3
-        )
+    # Stage E: Index graph results to Neo4j (if graph fork ran)
+    if graph_future and not _shutdown_requested:
+        chunks_with_graph, graph_failures = graph_future.result()
         stats["graph_failed"] += graph_failures
         for i in range(0, len(chunks_with_graph), 100):
             if _shutdown_requested:
@@ -604,6 +638,8 @@ def main(
         logger.info(f"Streaming files from MinIO in batches of {config['file_batch_size']}...")
         qdrant_indexer = QdrantIndexer()
         neo4j_indexer = Neo4jIndexer() if config["enable_graph"] else None
+        embedder = BatchEmbedder()
+        extractor = GraphExtractor() if config["enable_graph"] else None
         batch_num = 0
 
         try:
@@ -616,7 +652,8 @@ def main(
                 logger.info(f"[Batch {batch_num}] {len(file_batch)} files "
                             f"(seen so far: {stats['files_seen']})")
                 _process_file_batch(
-                    file_batch, config, stats, qdrant_indexer, neo4j_indexer, batch_num
+                    file_batch, config, stats, qdrant_indexer, neo4j_indexer, batch_num,
+                    embedder=embedder, extractor=extractor,
                 )
                 logger.info(f"[Batch {batch_num}] done -- "
                             f"processed={stats['files_processed']} "
@@ -626,6 +663,9 @@ def main(
             qdrant_indexer.close()
             if neo4j_indexer:
                 neo4j_indexer.close()
+            embedder.close()
+            if extractor:
+                extractor.close()
 
         if batch_num == 0:
             logger.warning("No PDF files found under the given prefix.")

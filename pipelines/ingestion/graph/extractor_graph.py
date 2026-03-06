@@ -230,11 +230,11 @@ class GraphExtractor:
             for attempt in range(self.max_retries):
                 try:
                     # 1. Construct Prompt
+                    truncated_text = text[:4000]
                     prompt = f"""{GraphSchema.get_system_prompt()}
 
 Input Text:
-{text[:4000]}  # Truncate to avoid token limits
-"""
+{truncated_text}"""
 
                     # 2. Call Ollama LLM
                     response = self.client.post(
