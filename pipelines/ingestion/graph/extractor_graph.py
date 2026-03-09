@@ -13,7 +13,7 @@ Environment Variables:
     LLM_MAX_RETRIES: Maximum retry attempts (default: 3)
     LLM_RETRY_DELAY: Initial retry delay in seconds (default: 2)
     LLM_TEMPERATURE: LLM temperature for deterministic output (default: 0.0)
-    LLM_MAX_TOKENS: Maximum tokens for generation (default: 1024)
+    LLM_MAX_TOKENS: Maximum tokens for generation (default: 4096)
 """
 import json
 import logging
@@ -113,7 +113,7 @@ class GraphExtractor:
         self.max_retries = int(os.getenv("LLM_MAX_RETRIES", "3"))
         self.retry_delay = float(os.getenv("LLM_RETRY_DELAY", "2"))
         self.temperature = float(os.getenv("LLM_TEMPERATURE", "0.0"))
-        self.max_tokens = int(os.getenv("LLM_MAX_TOKENS", "1024"))
+        self.max_tokens = int(os.getenv("LLM_MAX_TOKENS", "4096"))
 
         # Validate configuration
         if not self.llm_endpoint or not self.llm_endpoint.startswith("http"):
@@ -309,6 +309,18 @@ Input Text:
                     # 3. Parse JSON Output
                     response_data = response.json()
                     content = response_data.get("message", {}).get("content", "")
+
+                    # Detect token limit truncation — retrying produces the same result
+                    done_reason = response_data.get("done_reason", "")
+                    if done_reason == "length":
+                        logger.error(
+                            f"LLM truncated response for text {idx} due to token limit "
+                            f"(num_predict={self.max_tokens}). Increase LLM_MAX_TOKENS. "
+                            f"Content length: {len(content)} chars."
+                        )
+                        nodes_list.append([])
+                        edges_list.append([])
+                        break  # No point retrying — same truncation will occur
 
                     if not content or not content.strip():
                         logger.warning(f"Empty response from LLM for text {idx} (attempt {attempt + 1}/{self.max_retries})")
