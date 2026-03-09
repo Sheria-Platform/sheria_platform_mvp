@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sheria Ingestion Dashboard</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="https://unpkg.com/htmx.org@1.9.13/dist/htmx.min.js" defer></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.x/dist/cdn.min.js"></script>
+</head>
+<body>
+  <main class="container">
+
+    <header>
+      <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:.5rem;">
+        <h1 style="margin:0;">Sheria Ingestion Dashboard</h1>
+        <span x-data="healthPoller()" x-init="poll()" :class="ok ? 'badge-ok' : 'badge-fail'"
+              x-text="ok ? '● Server OK' : '● Server unreachable'"></span>
+      </div>
+      {% if api_key_enabled %}
+      <small class="muted">API key authentication is enabled for JSON endpoints.</small>
+      {% endif %}
+    </header>
+
+    <div class="grid">
+
+      <!-- Upload panel -->
+      <section>
+        <h2>Upload File</h2>
+        <form hx-post="/ui/upload"
+              hx-encoding="multipart/form-data"
+              hx-target="#jobs-tbody"
+              hx-swap="afterbegin"
+              x-data="dropZone()">
+          <div class="drop-zone"
+               :class="{'drop-zone--active': dragging}"
+               x-on:dragover.prevent="dragging=true"
+               x-on:dragleave.prevent="dragging=false"
+               x-on:drop.prevent="handleDrop($event)"
+               x-on:click="$refs.fileInput.click()">
+            <span x-text="fileName || 'Drop file here or click to browse'"></span>
+          </div>
+          <input type="file" name="file" x-ref="fileInput" style="display:none"
+                 x-on:change="fileName=$event.target.files[0]?.name"
+                 accept="{{ supported_extensions|join(',') }}" required>
+          <input type="text" name="bucket_name" value="api-uploads" placeholder="Bucket" required>
+          <label>
+            <input type="checkbox" name="enable_graph" value="true">
+            Enable graph extraction
+          </label>
+          <button type="submit">Upload &amp; Ingest</button>
+        </form>
+      </section>
+
+      <!-- Trigger panel -->
+      <section>
+        <h2>Trigger Ingestion</h2>
+        <form hx-post="/ui/trigger"
+              hx-target="#jobs-tbody"
+              hx-swap="afterbegin">
+          <input type="text" name="bucket_name" placeholder="Bucket" required>
+          <input type="text" name="prefix" placeholder="Prefix  e.g. legal/kenya_law/" required>
+          <input type="number" name="max_workers" placeholder="Workers (optional, 1–32)" min="1" max="32">
+          <label>
+            <input type="checkbox" name="enable_graph" value="true">
+            Enable graph extraction
+          </label>
+          <input type="number" name="file_batch_size" placeholder="Batch size (optional, 1–500)" min="1" max="500">
+          <button type="submit">Trigger Ingestion</button>
+        </form>
+      </section>
+
+    </div>
+
+    <!-- Jobs table -->
+    <section>
+      <h2>Jobs <small class="muted">(auto-refreshes every 3s)</small></h2>
+      <div style="overflow-x:auto;">
+        <table>
+          <thead>
+            <tr>
+              <th>Job ID</th>
+              <th>Status</th>
+              <th>Bucket</th>
+              <th>Prefix</th>
+              <th>Age</th>
+              <th>Duration</th>
+            </tr>
+          </thead>
+          <tbody id="jobs-tbody"
+                 hx-get="/ui/jobs"
+                 hx-trigger="load, every 3s"
+                 hx-swap="innerHTML">
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+  </main>
+
+  <script>
+    function healthPoller() {
+      return {
+        ok: true,
+        poll() {
+          setInterval(async () => {
+            try { this.ok = (await fetch('/health')).ok; } catch { this.ok = false; }
+          }, 10000);
+        }
+      };
+    }
+
+    function dropZone() {
+      return {
+        dragging: false,
+        fileName: '',
+        handleDrop(e) {
+          this.dragging = false;
+          const f = e.dataTransfer.files[0];
+          if (f) {
+            const dt = new DataTransfer();
+            dt.items.add(f);
+            this.$refs.fileInput.files = dt.files;
+            this.fileName = f.name;
+          }
+        }
+      };
+    }
+
+    function toggleStats(row) {
+      const next = row.nextElementSibling;
+      if (next && next.classList.contains('stats-row')) {
+        next.hidden = !next.hidden;
+      }
+    }
+  </script>
+</body>
+</html>

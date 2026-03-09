@@ -1,0 +1,71 @@
+/* Badges */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: .3rem;
+  padding: .15rem .55rem;
+  border-radius: 999px;
+  font-size: .78rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.badge-pending { background: #e5e7eb; color: #374151; }
+.badge-running { background: #dbeafe; color: #1d4ed8; }
+.badge-done    { background: #dcfce7; color: #15803d; }
+.badge-failed  { background: #fee2e2; color: #b91c1c; }
+.badge-ok      { color: #15803d; }
+.badge-fail    { color: #b91c1c; }
+
+/* Running pulse */
+.pulse-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #1d4ed8;
+  animation: pulse 1.4s infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: .4; transform: scale(.8); }
+}
+
+/* Drop zone */
+.drop-zone {
+  border: 2px dashed var(--pico-muted-border-color, #d1d5db);
+  border-radius: 8px;
+  padding: 2rem 1rem;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color .2s, background .2s;
+  margin-bottom: 1rem;
+  color: var(--pico-muted-color, #6b7280);
+}
+.drop-zone--active {
+  border-color: var(--pico-primary, #1d4ed8);
+  background: var(--pico-primary-focus, #eff6ff);
+}
+
+/* htmx loading indicator */
+.htmx-indicator { display: none; }
+.htmx-request .htmx-indicator { display: inline; }
+
+/* Stats expand row */
+.stats-row td {
+  background: var(--pico-card-background-color, #f9fafb);
+  border-top: none;
+}
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: .3rem 1rem;
+  margin: 0;
+}
+.stats-grid dt { font-weight: 600; margin: 0; }
+.stats-grid dd { margin: 0; color: var(--pico-muted-color, #6b7280); }
+
+/* Misc */
+.row-error td { background: #fee2e2; }
+.error-text { color: #b91c1c; margin: 0; }
+.muted { color: var(--pico-muted-color, #6b7280); }
+.center { text-align: center; }

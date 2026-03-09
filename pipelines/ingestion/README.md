@@ -306,8 +306,9 @@ curl http://192.168.214.21:9000/minio/health/live
 
 ## API Server
 
-The ingestion pipeline ships with a lightweight FastAPI server (`server.py`) that lets other
-services trigger ingestion and poll job status over HTTP — no shell access required.
+The ingestion pipeline ships with a lightweight FastAPI server (`server.py`) that exposes both a
+browser-accessible **Web Dashboard** and a set of JSON API endpoints for programmatic access —
+no shell access required.
 
 ### Starting the Server
 
@@ -322,12 +323,16 @@ python -m pipelines.ingestion.server
 INGEST_RELOAD=true python -m pipelines.ingestion.server
 ```
 
-Interactive API docs are available at **http://localhost:8001/docs** once the server is running.
+Once running:
+- **Web Dashboard** → http://localhost:8001/
+- **Interactive API docs** → http://localhost:8001/docs
 
 ### Authentication (optional)
 
 Set the `INGEST_API_KEY` environment variable to enable a simple API-key guard.
-All non-health endpoints then require an `X-API-Key: <key>` header.
+All `/ingest/*` JSON endpoints then require an `X-API-Key: <key>` header.
+The web dashboard (`/`, `/ui/*`) is **never** gated by the API key — it is intended for
+operators with network access to the server.
 
 ```bash
 export INGEST_API_KEY="change-me-in-production"
@@ -335,7 +340,106 @@ export INGEST_API_KEY="change-me-in-production"
 
 Leave it unset (default) to disable authentication for internal/trusted networks.
 
-### Endpoints
+---
+
+### Web Dashboard
+
+The dashboard is a zero-build-step single-page UI served directly from FastAPI using
+[Jinja2](https://jinja.palletsprojects.com/) templates, [htmx 1.9](https://htmx.org/),
+[Alpine.js 3.14](https://alpinejs.dev/), and [Pico CSS v2](https://picocss.com/) — all via CDN,
+no Node.js or build step required.
+
+Open **http://localhost:8001/** in any browser.
+
+#### Features
+
+| Panel | What it does |
+|-------|-------------|
+| **Upload File** | Drag-and-drop (or click-to-browse) a single file → uploads to MinIO → triggers ingestion |
+| **Trigger Ingestion** | Point at an existing MinIO bucket/prefix and enqueue a background job |
+| **Jobs Table** | Live view of all jobs; htmx polls `/ui/jobs` every 3 seconds automatically |
+| **Health indicator** | Alpine.js polls `/health` every 10 seconds and shows a green/red badge |
+
+#### How the live polling works (htmx)
+
+The jobs table uses htmx's `every` polling trigger — no JavaScript required:
+
+```html
+<tbody hx-get="/ui/jobs" hx-trigger="load, every 3s" hx-swap="innerHTML">
+```
+
+- `hx-trigger="load, every 3s"` — fires immediately on page load, then every 3 seconds
+- `hx-swap="innerHTML"` — replaces only the table rows, not the surrounding structure
+- The server responds with a rendered HTML fragment (not JSON), so no client-side rendering
+
+When you submit a form (Upload or Trigger), htmx uses `hx-swap="afterbegin"` to prepend the
+new job row at the top of the table immediately, before the next poll cycle.
+
+#### Drag-and-drop upload (Alpine.js)
+
+The upload panel uses Alpine.js for the drop-zone interaction:
+
+```html
+<div x-data="dropZone()"
+     x-on:dragover.prevent="dragging=true"
+     x-on:dragleave.prevent="dragging=false"
+     x-on:drop.prevent="handleDrop($event)">
+```
+
+`x-on:dragover.prevent` / `x-on:drop.prevent` call `event.preventDefault()` automatically,
+which is required by browsers to allow drop targets. The dropped file is transferred to the
+hidden `<input type="file">` via `DataTransfer`, then htmx submits the form as
+`multipart/form-data`.
+
+#### Expanding a completed job row
+
+Click any `done` or `failed` row to expand it and reveal:
+- Final pipeline stats (chunks processed, vectors indexed, graph nodes, failures)
+- Error message if the job failed
+
+Expansion is driven by a plain `onclick="toggleStats(this)"` JS function — no framework needed
+for this since the two `<tr>` elements are siblings and Alpine's `x-data` scope does not cross
+sibling boundaries.
+
+#### Static assets
+
+Custom CSS lives in `static/style.css` and is mounted at `/static`:
+
+```python
+app.mount("/static", StaticFiles(directory=str(_HERE / "static")), name="static")
+```
+
+Styles cover: status badges (pending/running/done/failed), animated pulse dot for running jobs,
+the drag-and-drop zone, the stats expand row, and htmx loading indicators.
+
+#### UI routes (summary)
+
+| Route | Method | Returns | Notes |
+|-------|--------|---------|-------|
+| `/` | GET | Full dashboard page | Passes `api_key_enabled` + `supported_extensions` to template |
+| `/ui/jobs` | GET | `partials/jobs_table.html` | All jobs newest-first, max 100 |
+| `/ui/trigger` | POST | `partials/job_row.html` | Form fields: `bucket_name, prefix, max_workers, enable_graph, file_batch_size` |
+| `/ui/upload` | POST | `partials/job_row.html` | Multipart: `file, bucket_name, enable_graph`; returns error row fragment on failure |
+
+All UI routes use `include_in_schema=False` (excluded from `/docs`) and carry no API-key
+dependency — they sit alongside but separate from the guarded `/ingest/*` JSON routes.
+
+#### Template structure
+
+```
+pipelines/ingestion/
+├── templates/
+│   ├── index.html                  # Full dashboard page
+│   └── partials/
+│       ├── jobs_table.html         # <tbody> fragment for htmx polling
+│       └── job_row.html            # Two <tr> per job (summary + expandable stats)
+└── static/
+    └── style.css                   # Badges, drop zone, stats grid
+```
+
+---
+
+### JSON API Endpoints
 
 #### `GET /health` — Liveness check
 
@@ -405,7 +509,7 @@ curl http://localhost:8001/ingest/jobs
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `INGEST_API_KEY` | `""` (disabled) | Optional API key for the `X-API-Key` header |
+| `INGEST_API_KEY` | `""` (disabled) | Optional API key for `/ingest/*` JSON endpoints |
 | `INGEST_HOST` | `0.0.0.0` | Bind address |
 | `INGEST_PORT` | `8001` | Listen port |
 | `INGEST_RELOAD` | `false` | Enable uvicorn auto-reload (development only) |
@@ -840,12 +944,15 @@ ollama logs
 
 ## Production Documentation
 
+**New in v1.2.0:** Web Dashboard — browser UI for operators, no shell access needed.
+
+- **[QUICKSTART.md](QUICKSTART.md)** - 5-minute setup guide including the new dashboard
+
 **New in v1.1.0:** Production-hardened pipeline with comprehensive documentation:
 
 - **[AUDIT_REPORT.md](AUDIT_REPORT.md)** - Complete audit findings, issues fixed, and recommendations
 - **[HARDENING_SUMMARY.md](HARDENING_SUMMARY.md)** - Implementation summary and production readiness score
 - **[CONFIGURATION_GUIDE.md](CONFIGURATION_GUIDE.md)** - All 41 configuration variables explained with examples
-- **[QUICKSTART.md](QUICKSTART.md)** - 5-minute setup guide for local development
 
 **Production Readiness:** 85/100 ✅ Ready for initial deployment with monitoring.
 

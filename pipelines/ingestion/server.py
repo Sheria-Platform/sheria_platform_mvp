@@ -30,8 +30,10 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
-from fastapi.responses import JSONResponse
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
+from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 from minio import Minio
 from pydantic import BaseModel, Field
 
@@ -149,6 +151,9 @@ async def lifespan(app: FastAPI):
     _executor.shutdown(wait=False)
 
 
+_HERE = Path(__file__).parent
+templates = Jinja2Templates(directory=str(_HERE / "templates"))
+
 app = FastAPI(
     title="Sheria Ingestion API",
     version="1.0.0",
@@ -159,6 +164,20 @@ app = FastAPI(
     ),
     lifespan=lifespan,
 )
+
+app.mount("/static", StaticFiles(directory=str(_HERE / "static")), name="static")
+
+
+def _job_age(created_at: float) -> str:
+    delta = time.time() - created_at
+    if delta < 60:
+        return "just now"
+    if delta < 3600:
+        return f"{int(delta / 60)}m ago"
+    return f"{int(delta / 3600)}h ago"
+
+
+templates.env.globals["job_age"] = _job_age
 
 
 # ---------------------------------------------------------------------------
@@ -306,6 +325,135 @@ async def list_jobs(
     with _jobs_lock:
         jobs = sorted(_jobs.values(), key=lambda j: j["created_at"], reverse=True)
     return [dict(j) for j in jobs[:100]]
+
+
+# ---------------------------------------------------------------------------
+# UI Routes (no API-key guard, excluded from OpenAPI schema)
+# ---------------------------------------------------------------------------
+@app.get("/", response_class=HTMLResponse, include_in_schema=False)
+async def dashboard(request: Request) -> HTMLResponse:
+    """Serve the full dashboard page."""
+    return templates.TemplateResponse(
+        "index.html",
+        {
+            "request": request,
+            "api_key_enabled": bool(API_KEY),
+            "supported_extensions": sorted(SUPPORTED_EXTENSIONS),
+        },
+    )
+
+
+@app.get("/ui/jobs", response_class=HTMLResponse, include_in_schema=False)
+async def ui_jobs(request: Request) -> HTMLResponse:
+    """Return the jobs tbody fragment for htmx polling."""
+    with _jobs_lock:
+        jobs = sorted(_jobs.values(), key=lambda j: j["created_at"], reverse=True)
+    return templates.TemplateResponse(
+        "partials/jobs_table.html",
+        {"request": request, "jobs": [dict(j) for j in jobs[:100]]},
+    )
+
+
+@app.post("/ui/trigger", response_class=HTMLResponse, include_in_schema=False)
+async def ui_trigger(
+    request: Request,
+    bucket_name: str = Form(...),
+    prefix: str = Form(...),
+    max_workers: Optional[int] = Form(default=None),
+    enable_graph: Optional[str] = Form(default=None),
+    file_batch_size: Optional[int] = Form(default=None),
+) -> HTMLResponse:
+    """Trigger ingestion from the UI form and return a job row fragment."""
+    job_id = _create_job(bucket_name, prefix)
+    kwargs: Dict[str, Any] = {"enable_graph": enable_graph == "true"}
+    if max_workers is not None:
+        kwargs["max_workers"] = max_workers
+    if file_batch_size is not None:
+        kwargs["file_batch_size"] = file_batch_size
+
+    _executor.submit(_run_job, job_id, bucket_name, prefix, kwargs)
+
+    with _jobs_lock:
+        job = dict(_jobs[job_id])
+
+    return templates.TemplateResponse(
+        "partials/job_row.html",
+        {"request": request, "job": job, "error": None},
+    )
+
+
+@app.post("/ui/upload", response_class=HTMLResponse, include_in_schema=False)
+async def ui_upload(
+    request: Request,
+    file: UploadFile = File(...),
+    bucket_name: str = Form(default="api-uploads"),
+    enable_graph: Optional[str] = Form(default=None),
+) -> HTMLResponse:
+    """Upload a file from the UI form and return a job row fragment (or error row)."""
+    suffix = Path(file.filename or "").suffix.lower()
+    if suffix not in SUPPORTED_EXTENSIONS:
+        return templates.TemplateResponse(
+            "partials/job_row.html",
+            {
+                "request": request,
+                "job": None,
+                "error": (
+                    f"Unsupported file type {suffix!r}. "
+                    f"Supported: {sorted(SUPPORTED_EXTENSIONS)}"
+                ),
+            },
+        )
+
+    file_bytes = await file.read()
+    if not file_bytes:
+        return templates.TemplateResponse(
+            "partials/job_row.html",
+            {"request": request, "job": None, "error": "Uploaded file is empty"},
+        )
+
+    try:
+        config = validate_config()
+        client = Minio(
+            config["minio_endpoint"],
+            access_key=config["minio_access_key"],
+            secret_key=config["minio_secret_key"],
+            secure=config["minio_secure"],
+        )
+        if not client.bucket_exists(bucket_name):
+            client.make_bucket(bucket_name)
+
+        object_name = f"api-uploads/{uuid.uuid4()}{suffix}"
+        client.put_object(
+            bucket_name,
+            object_name,
+            io.BytesIO(file_bytes),
+            length=len(file_bytes),
+            content_type=file.content_type or "application/octet-stream",
+        )
+        logger.info(f"UI upload: {file.filename!r} → s3://{bucket_name}/{object_name}")
+    except Exception as exc:
+        logger.error(f"MinIO upload failed: {exc}", exc_info=True)
+        return templates.TemplateResponse(
+            "partials/job_row.html",
+            {"request": request, "job": None, "error": f"MinIO upload failed: {exc}"},
+        )
+
+    job_id = _create_job(bucket_name, object_name)
+    _executor.submit(
+        _run_job,
+        job_id,
+        bucket_name,
+        object_name,
+        {"enable_graph": enable_graph == "true"},
+    )
+
+    with _jobs_lock:
+        job = dict(_jobs[job_id])
+
+    return templates.TemplateResponse(
+        "partials/job_row.html",
+        {"request": request, "job": job, "error": None},
+    )
 
 
 # ---------------------------------------------------------------------------
