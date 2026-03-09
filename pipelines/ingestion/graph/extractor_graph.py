@@ -28,6 +28,39 @@ from pipelines.ingestion.graph.schema_graph import GraphSchema
 
 logger = logging.getLogger(__name__)
 
+# JSON schema for constrained decoding via Ollama's format field.
+# Guarantees the LLM always returns {"nodes": [...], "edges": [...]} structure,
+# even for short or non-legal chunks that would otherwise produce explanatory text.
+GRAPH_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "nodes": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string"},
+                    "type": {"type": "string"}
+                },
+                "required": ["id", "type"]
+            }
+        },
+        "edges": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "source": {"type": "string"},
+                    "target": {"type": "string"},
+                    "type": {"type": "string"}
+                },
+                "required": ["source", "target", "type"]
+            }
+        }
+    },
+    "required": ["nodes", "edges"]
+}
+
 
 class GraphExtractor:
     """
@@ -139,8 +172,8 @@ class GraphExtractor:
             except (json.JSONDecodeError, AttributeError):
                 continue
 
-        # Log failure for debugging
-        logger.debug(f"Failed to parse JSON. Content preview: {content[:200]}")
+        # Log failure for diagnosing any remaining edge cases
+        logger.warning(f"Failed to parse JSON from LLM response. Preview: {content[:300]!r}")
         return None
 
     def _validate_graph_data(self, graph_data: Dict[str, Any]) -> Tuple[List[dict], List[dict]]:
@@ -244,10 +277,10 @@ Input Text:
 {truncated_text}"""
 
                     # 2. Call Ollama LLM
-                    # Note: "think": false disables Qwen3 chain-of-thought at the API level.
-                    # "format": "json" is intentionally omitted — it conflicts with Qwen3
-                    # thinking suppression and produces empty responses. JSON parsing is
-                    # handled robustly in _extract_json_from_response instead.
+                    # "think": false disables Qwen3 chain-of-thought at the API level.
+                    # "format": GRAPH_OUTPUT_SCHEMA uses constrained decoding to guarantee
+                    # the output always matches the declared nodes/edges structure, even for
+                    # short or non-legal chunks that would otherwise return explanatory text.
                     response = self.client.post(
                         self.llm_endpoint,
                         json={
@@ -264,6 +297,7 @@ Input Text:
                                 }
                             ],
                             "stream": False,
+                            "format": GRAPH_OUTPUT_SCHEMA,
                             "options": {
                                 "temperature": self.temperature,
                                 "num_predict": self.max_tokens,
