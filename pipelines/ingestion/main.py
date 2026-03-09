@@ -513,8 +513,8 @@ def _process_file_batch(
             sub = chunks_with_vectors[i:i + 100]
             for attempt in range(3):
                 try:
-                    qdrant_indexer.write(sub)
-                    stats["vectors_indexed"] += len(sub)
+                    indexed = qdrant_indexer.write(sub)
+                    stats["vectors_indexed"] += indexed
                     break
                 except Exception as e:
                     logger.warning(f"[Batch {batch_num}] Qdrant attempt {attempt + 1}/3: {e}")
@@ -531,8 +531,8 @@ def _process_file_batch(
             sub = chunks_with_graph[i:i + 100]
             for attempt in range(3):
                 try:
-                    neo4j_indexer.write(sub)
-                    stats["graph_indexed"] += len(sub)
+                    indexed = neo4j_indexer.write(sub)
+                    stats["graph_indexed"] += indexed
                     break
                 except Exception as e:
                     logger.warning(f"[Batch {batch_num}] Neo4j attempt {attempt + 1}/3: {e}")

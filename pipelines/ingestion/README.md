@@ -22,15 +22,16 @@ python test_connection.py
 # 3. Run ingestion
 python main.py <bucket_name> <prefix>
 
-# 4. With options (NEW)
-python main.py <bucket_name> <prefix> --max-workers 8 --enable-graph --log-level DEBUG
+# 4. With options
+python main.py <bucket_name> <prefix> [--max-workers N] [--enable-graph] [--file-batch-size N] [--log-level {DEBUG,INFO,WARNING,ERROR}]
 
 
 ┌─────────────────────────────────────────────────────────┐
 │  1. Document Loading (S3/MinIO)                         │
 │     ├── PDF (Court Judgments)                           │
 │     ├── DOCX (Pleadings, Briefs)                        │
-│     └── HTML (Kenya Law Reports)                        │
+│     ├── HTML (Kenya Law Reports)                        │
+│     └── TXT  (Plain-text statutes/regulations)          │
 └──────────────────┬──────────────────────────────────────┘
                    │
                    ▼
@@ -96,6 +97,10 @@ python main.py <bucket_name> <prefix> --max-workers 8 --enable-graph --log-level
 - Strips scripts and styling
 - Preserves legal citation format
 
+#### TXT Loader (`txt_loader.py`)
+- Decodes UTF-8 plain-text files (corrupt bytes replaced, never crash)
+- Metadata: `filename`, `type`, `char_count`
+
 ### 2. Chunking Strategy (`chunking/splitter_chunking.py`)
 
 **Why 512 tokens?**
@@ -108,6 +113,11 @@ python main.py <bucket_name> <prefix> --max-workers 8 --enable-graph --log-level
 - Preserves case citations: `[Case Name] v. [Case Name] [2023] KESC 45`
 - Keeps legal tests intact: "The test for adverse possession requires..."
 - Maintains ratio decidendi (legal reasoning) within single chunks where possible
+
+**Chunk metadata added per chunk:**
+- `chunk_hash` — MD5 of chunk text (deduplication)
+- `ingested_at` — ISO 8601 UTC timestamp
+- `length` — character count of the chunk
 
 ### 3. Embedding Generation (`embedding/embedding_compute.py`)
 
@@ -336,22 +346,24 @@ set +a
 
 ```bash
 # Basic usage (embeddings only, fast)
-python main.py <bucket_name> <prefix> [max_workers]
+python main.py <bucket_name> <prefix>
 
 # With graph extraction enabled (slow, optional)
-python main.py <bucket_name> <prefix> [max_workers] --enable-graph
+python main.py <bucket_name> <prefix> --enable-graph
 
 # Examples:
-python main.py srtmanager kenya_law_data/case 4              # Fast (embeddings only)
-python main.py srtmanager kenya_law_data/case 4 --enable-graph  # Full (with graph)
+python main.py srtmanager kenya_law_data/case --max-workers 4              # Fast (embeddings only)
+python main.py srtmanager kenya_law_data/case --max-workers 4 --enable-graph  # Full (with graph)
 ```
 
 **Configuration Options:**
 
 | Option | Description | Default | Set via |
 |--------|-------------|---------|---------|
-| `max_workers` | Parallel workers for file processing | 4 | CLI arg or `MAX_WORKERS` env var |
+| `--max-workers N` | Parallel workers for file processing | 4 | CLI flag or `MAX_WORKERS` env var |
 | `--enable-graph` | Enable graph extraction (slow) | false | CLI flag or `ENABLE_GRAPH=true` env var |
+| `--file-batch-size N` | Files processed per worker batch | 10 | CLI flag or `FILE_BATCH_SIZE` env var |
+| `--log-level` | Logging verbosity | INFO | CLI flag or `LOG_LEVEL` env var |
 
 **Graph Extraction:**
 - **Disabled by default** (much faster, embeddings only)
@@ -382,77 +394,48 @@ python ../../scripts/bulk_upload_s3.py
 ## Process Flow (Step-by-Step)
 
 ### Step 1: Document Loading
-```python
-# Read binary files from S3/MinIO
-ds = ray.data.read_binary_files(
-    paths=f"s3://{bucket_name}/{prefix}",
-    include_paths=True
-)
-```
+
+Files are iterated from MinIO using `_iter_file_batches`, which lists objects under the given
+prefix and groups them into batches (`--file-batch-size`, default 10). A `ThreadPoolExecutor`
+downloads each batch concurrently up to `--max-workers` (default 4) threads.
 
 ### Step 2: Parsing & Chunking
-```python
-# Parse documents and chunk into 512-token segments
-chunked_ds = ds.map_batches(
-    process_batch,
-    batch_size=10,  # 10 files per batch
-    num_cpus=1
-)
-```
 
-**What happens in `process_batch`:**
-1. Extract text from PDF/DOCX/HTML
-2. Split into 512-token chunks with 50-token overlap
-3. Add metadata (filename, source, timestamp, file_type)
-4. Return list of chunks
+Each file is dispatched through `process_single_file`, which:
+
+1. Selects the correct loader via `get_loader(filename)` (PDF, DOCX, HTML, or TXT)
+2. Extracts raw text + base metadata from the loader
+3. Splits into 512-token chunks with 50-token overlap (`splitter_chunking.py`)
+4. Enriches every chunk with `chunk_hash` (MD5), `ingested_at` (ISO 8601 UTC), and `length`
 
 ### Step 3: Parallel Processing (Fork)
 
+After chunking, a `ThreadPoolExecutor(max_workers=2)` runs two branches concurrently:
+
 **Branch A: Embedding Generation**
-```python
-# Generate embeddings using Ollama
-vector_ds = chunked_ds.map_batches(
-    BatchEmbedder,
-    concurrency=5,
-    batch_size=100
-)
-```
+- Calls `embed_chunks(batch)` → Ollama embeddings API (`nomic-embed-text`)
+- Returns `(chunks_with_vectors, embed_failures)` — chunks where Ollama returned `None` are
+  excluded from indexing and counted in `embed_failures`
 
-**What happens in `BatchEmbedder`:**
-1. For each chunk, call Ollama embeddings API
-2. Model: `nomic-embed-text`
-3. Returns 768-dimensional vector
-4. Attach vector to chunk metadata
-
-**Branch B: Graph Extraction**
-```python
-# Extract entities and relationships using Ollama LLM
-graph_ds = chunked_ds.map_batches(
-    GraphExtractor,
-    concurrency=10,
-    batch_size=5
-)
-```
-
-**What happens in `GraphExtractor`:**
-1. Construct prompt with legal schema
-2. Call Ollama LLM (`llama3`) with `format: json`
-3. Parse JSON response for entities and relationships
-4. Return nodes (Cases, Judges, Principles) and edges (CITES, OVERRULES)
+**Branch B: Graph Extraction** *(only when `--enable-graph` is set)*
+- Calls `extract_graph(batch)` → Ollama LLM API (`llama3`, `format: json`)
+- Returns `(chunks_with_graph, graph_failures)`
 
 ### Step 4: Indexing
 
 **Vector Indexing (Qdrant):**
 ```python
-vector_ds.write_datasource(QdrantIndexer())
+indexed = qdrant_indexer.write(sub)   # returns actual count written
+stats["vectors_indexed"] += indexed
 ```
 - Batch upsert to `kenya_law_reports` collection
-- Each vector has: id, vector (768d), metadata (case_name, citation, court)
+- Each vector has: id, vector (768d), metadata (case_name, citation, court, chunk_hash)
 - Enables semantic search: "Find cases about adverse possession"
 
 **Graph Indexing (Neo4j):**
 ```python
-graph_ds.write_datasource(Neo4jIndexer())
+indexed = neo4j_indexer.write(sub)    # returns actual count written
+stats["graph_indexed"] += indexed
 ```
 - MERGE nodes (Cases, Judges, Principles, Statutes)
 - CREATE relationships (CITES, OVERRULES, DISTINGUISHES)
@@ -496,14 +479,12 @@ graph_ds.write_datasource(Neo4jIndexer())
    ollama ps
    ```
 
-2. **Increase Ray Concurrency:**
-   ```python
-   # In main.py, adjust concurrency based on CPU/GPU resources
-   vector_ds = chunked_ds.map_batches(
-       BatchEmbedder,
-       concurrency=10,  # Increase if you have more resources
-       batch_size=100
-   )
+2. **Increase Worker Concurrency:**
+   ```bash
+   export MAX_WORKERS=8              # parse + download concurrency
+   export EMBED_BATCH_SIZE=100       # embedding batch size
+   # Or pass via CLI:
+   python main.py <bucket> <prefix> --max-workers 8
    ```
 
 3. **Use Faster Embedding Models:**
@@ -514,9 +495,9 @@ graph_ds.write_datasource(Neo4jIndexer())
    ```
 
 4. **Skip Graph Extraction for Speed:**
-   ```python
-   # In main.py, comment out graph extraction for faster ingestion
-   # graph_ds.write_datasource(Neo4jIndexer())  # Disable this line
+   ```bash
+   # Omit --enable-graph (graph extraction is disabled by default)
+   python main.py <bucket> <prefix> --max-workers 8
    ```
 
 ## Troubleshooting
@@ -584,13 +565,9 @@ export OLLAMA_NUM_GPU=0
 
 **Solution:**
 1. **Use GPU**: Ollama automatically uses GPU if available (10x faster)
-2. **Increase Ray concurrency**: More workers = more parallel Ollama calls
-   ```python
-   vector_ds = chunked_ds.map_batches(
-       BatchEmbedder,
-       concurrency=10,  # More workers
-       batch_size=50    # Smaller batches
-   )
+2. **Increase worker concurrency**: More workers = more parallel Ollama calls
+   ```bash
+   python main.py <bucket> <prefix> --max-workers 10
    ```
 3. **Use lighter model**: `all-minilm` is 3x faster than `nomic-embed-text`
 
@@ -608,22 +585,6 @@ export OLLAMA_NUM_GPU=0
    ```python
    # In extractor_graph.py, errors are logged to console
    ```
-
-### Issue: Ray Init Error
-
-**Error:**
-```
-ray.exceptions.RaySystemError: System error: ray.init() called twice
-```
-
-**Solution:**
-```bash
-# Stop existing Ray cluster
-ray stop
-
-# Restart ingestion
-python pipelines/ingestion/main.py <bucket> <prefix>
-```
 
 ## Monitoring & Observability
 

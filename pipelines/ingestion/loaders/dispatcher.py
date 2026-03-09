@@ -1,4 +1,11 @@
 # pipelines/ingestion/loaders/dispatcher.py
+"""
+Loader dispatcher: maps file extensions to the correct parse function.
+
+Public API:
+    get_loader(filename) -> Callable  -- returns the right parser for a file
+    SUPPORTED_EXTENSIONS              -- frozenset of accepted extensions
+"""
 import logging
 from typing import Callable, Tuple
 

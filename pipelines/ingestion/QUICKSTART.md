@@ -55,9 +55,10 @@ python testExample/minio_ingestion.py
 # Option B: Ingest from specific bucket (basic)
 python pipelines/ingestion/main.py <bucket_name> <prefix>
 
-# Option C: With production options (NEW in v1.1.0)
+# Option C: With production options
 python pipelines/ingestion/main.py <bucket_name> <prefix> \
   --max-workers 8 \
+  --file-batch-size 20 \
   --enable-graph \
   --log-level DEBUG
 
@@ -169,13 +170,11 @@ export OLLAMA_EMBED_MODEL=all-minilm
 ```
 
 ### Increase Parallelism
-```python
-# In main.py, increase concurrency:
-vector_ds = chunked_ds.map_batches(
-    BatchEmbedder,
-    concurrency=10,  # Increase this
-    batch_size=100
-)
+```bash
+# Increase parse + download workers (env var or CLI)
+export MAX_WORKERS=8
+# Or pass via CLI:
+python main.py <bucket> <prefix> --max-workers 8
 ```
 
 ---
@@ -196,13 +195,6 @@ ollama pull llama3:8b  # Instead of default
 
 # Or use CPU only
 export OLLAMA_NUM_GPU=0
-```
-
-### Ray Init Error
-```bash
-# Error: ray.init() called twice
-# Solution: Stop existing Ray cluster
-ray stop
 ```
 
 ### Slow Processing
@@ -230,6 +222,8 @@ export OLLAMA_LLM_MODEL=mistral
 ---
 
 ## 🎯 What Gets Indexed
+
+**Supported file formats:** `.pdf`, `.docx`, `.html`, `.htm`, `.txt`
 
 ### Vector Database (Qdrant)
 - **Collection**: `kenya_law_reports`
@@ -259,6 +253,7 @@ export OLLAMA_LLM_MODEL=mistral
 - [ ] Models downloaded (`ollama list`)
 - [ ] Python dependencies installed (`pip install -r requirements.txt`)
 - [ ] Infrastructure running (`docker ps`)
+- [ ] Qdrant collection created (`python create_qdrant_collection.py`)
 - [ ] Test ingestion successful
 - [ ] Data verified in Qdrant (`curl http://localhost:6333/collections/kenya_law_reports`)
 - [ ] Graph verified in Neo4j (browser: http://localhost:7474)
