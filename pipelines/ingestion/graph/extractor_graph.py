@@ -24,13 +24,18 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 
-from pipelines.ingestion.graph.schema_graph import GraphSchema
+from pipelines.ingestion.graph.schema_graph import GraphSchema, VALID_NODE_LABELS, VALID_RELATION_TYPES as _SCHEMA_RELATION_TYPES
 
 logger = logging.getLogger(__name__)
 
 # JSON schema for constrained decoding via Ollama's format field.
 # Guarantees the LLM always returns {"nodes": [...], "edges": [...]} structure,
 # even for short or non-legal chunks that would otherwise produce explanatory text.
+# Enum constraints on `type` fields force the model to only produce valid schema
+# values, eliminating "Skipping edge with unknown relationship type" warnings.
+_NODE_TYPE_ENUM = list(VALID_NODE_LABELS.__args__)
+_RELATION_TYPE_ENUM = list(_SCHEMA_RELATION_TYPES.__args__)
+
 GRAPH_OUTPUT_SCHEMA = {
     "type": "object",
     "properties": {
@@ -40,7 +45,7 @@ GRAPH_OUTPUT_SCHEMA = {
                 "type": "object",
                 "properties": {
                     "id": {"type": "string"},
-                    "type": {"type": "string"}
+                    "type": {"type": "string", "enum": _NODE_TYPE_ENUM}
                 },
                 "required": ["id", "type"]
             }
@@ -52,7 +57,7 @@ GRAPH_OUTPUT_SCHEMA = {
                 "properties": {
                     "source": {"type": "string"},
                     "target": {"type": "string"},
-                    "type": {"type": "string"}
+                    "type": {"type": "string", "enum": _RELATION_TYPE_ENUM}
                 },
                 "required": ["source", "target", "type"]
             }
