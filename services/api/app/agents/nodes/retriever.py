@@ -9,8 +9,9 @@ Performs two retrieval strategies in parallel and merges the results:
    one-hop neighbourhood expansion to surface structural relationships
    (case citations, legal principles, etc.).
 
-The two result sets are deduplicated via ``set()`` before being stored
-in ``state["documents"]`` for the responder node to synthesise.
+The two result sets are deduplicated via :func:`_dedup` (content-aware,
+ignores ``[Source: ...]`` suffix differences) before being stored in
+``state["documents"]`` for the responder node to synthesise.
 
 Example:
     For query ``"adverse possession continuous possession Kenya"``:
@@ -43,19 +44,46 @@ LIMIT 5
 """
 
 
+def _dedup(docs: list[str]) -> list[str]:
+    """Deduplicate documents by text content, ignoring ``[Source: ...]`` suffix.
+
+    Raw ``set()`` deduplication fails when the same text appears with different
+    source attributions (e.g. two ingestion runs produce identical chunks from
+    different filenames).  This helper strips the suffix before comparison but
+    preserves the original string (including source) in the output.
+
+    Args:
+        docs: List of document strings, optionally ending with
+            ``" [Source: <filename>]"``.
+
+    Returns:
+        Deduplicated list preserving insertion order and original strings.
+    """
+    seen: set[str] = set()
+    result: list[str] = []
+    for doc in docs:
+        key = doc.split(" [Source:")[0].strip().lower()
+        if key not in seen:
+            seen.add(key)
+            result.append(doc)
+    return result
+
+
 async def retrieve_node(state: AgentState) -> dict:
     """Embed the query and run vector + graph search in parallel.
 
     Steps:
-        1. Embed ``state["current_query"]`` via Ollama
-           (``nomic-embed-text``).
+        1. Reuse ``state["query_vector"]`` if present (set by the chat route
+           during the semantic cache check), otherwise embed fresh via Ollama.
         2. Launch Qdrant ANN search and Neo4j fulltext search
            concurrently with ``asyncio.gather``.
-        3. Merge and deduplicate results.
+        3. Merge and deduplicate results via :func:`_dedup`.
         4. Return the combined document list.
 
     Args:
         state: Current agent state.  Must contain ``"current_query"``.
+            If ``"query_vector"`` is a non-empty list, the embed call is
+            skipped entirely.
 
     Returns:
         A partial state dict with key:
@@ -72,14 +100,20 @@ async def retrieve_node(state: AgentState) -> dict:
     logger.info("Retriever node started", extra={"node": "retriever"})
     node_start = time.perf_counter()
 
-    # Step 1: Embed query (sequential — Qdrant needs the vector first)
-    embed_start = time.perf_counter()
-    query_vector: list[float] = await embeddings_client.embed_query(query)
-    embed_ms = round((time.perf_counter() - embed_start) * 1000, 2)
-    logger.debug(
-        "Query embedded",
-        extra={"node": "retriever", "duration_ms": embed_ms},
-    )
+    # Step 1: Reuse cached vector from state, or embed fresh
+    cached_vector: list[float] = state.get("query_vector") or []
+    embed_ms = 0.0
+    if cached_vector:
+        query_vector = cached_vector
+        logger.debug("Retriever reusing cached query vector", extra={"node": "retriever"})
+    else:
+        embed_start = time.perf_counter()
+        query_vector = await embeddings_client.embed_query(query)
+        embed_ms = round((time.perf_counter() - embed_start) * 1000, 2)
+        logger.debug(
+            "Query embedded",
+            extra={"node": "retriever", "duration_ms": embed_ms},
+        )
 
     # Step 2: Parallel retrieval ──────────────────────────────────────
 
@@ -120,8 +154,8 @@ async def retrieve_node(state: AgentState) -> dict:
     )
     retrieval_ms = round((time.perf_counter() - retrieval_start) * 1000, 2)
 
-    # Step 3: Merge and deduplicate
-    combined: list[str] = list(set(vector_docs + graph_docs))
+    # Step 3: Merge with content-aware deduplication
+    combined: list[str] = _dedup(vector_docs + graph_docs)
     total_ms = round((time.perf_counter() - node_start) * 1000, 2)
 
     # Track retrieval counts in Prometheus
