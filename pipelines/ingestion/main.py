@@ -546,7 +546,7 @@ def main(
     max_workers: Optional[int] = None,
     enable_graph: Optional[bool] = None,
     file_batch_size: Optional[int] = None,
-) -> int:
+) -> Tuple[int, Dict[str, Any]]:
     """
     Main ingestion workflow with production-grade error handling.
 
@@ -564,15 +564,17 @@ def main(
         file_batch_size: Files processed per memory batch (1-500, default from FILE_BATCH_SIZE env or 20)
 
     Returns:
-        Exit code: 0 for success, 1 for failure
+        Tuple of (exit_code, stats_dict). Exit code 0 for success, 1 for failure.
+        stats_dict keys: files_seen, files_downloaded, files_processed, files_failed,
+        chunks_created, vectors_indexed, vectors_failed, graph_indexed, graph_failed.
 
     Raises:
         ValueError: If required parameters are invalid
         Exception: For critical failures that prevent pipeline execution
 
     Example:
-        >>> main("legal-documents", "legal/kenya_law/", max_workers=4, enable_graph=False)
-        0
+        >>> exit_code, stats = main("legal-documents", "legal/kenya_law/", max_workers=4)
+        >>> print(exit_code, stats["vectors_indexed"])
     """
     # Install signal handlers for graceful shutdown
     signal.signal(signal.SIGINT, signal_handler)
@@ -589,7 +591,7 @@ def main(
         config = validate_config()
     except Exception as e:
         logger.error(f"Configuration validation failed: {e}")
-        return 1
+        return 1, {}
 
     # Override config with provided arguments
     if max_workers is not None:
@@ -673,7 +675,7 @@ def main(
 
         if batch_num == 0:
             logger.warning("No supported files found under the given prefix.")
-            return 0
+            return 0, stats
 
         # 3. Summary
         print(f"\n{'='*60}")
@@ -693,14 +695,14 @@ def main(
             print(f"  Graph empty:           {stats['graph_failed']}")
         print(f"{'='*60}\n")
 
-        return 0 if stats['files_processed'] > 0 else 1
+        return (0 if stats['files_processed'] > 0 else 1), stats
 
     except KeyboardInterrupt:
         logger.warning("Received keyboard interrupt, shutting down...")
-        return 130  # Standard exit code for SIGINT
+        return 130, stats  # Standard exit code for SIGINT
     except Exception as e:
         logger.error(f"Fatal error in ingestion pipeline: {e}", exc_info=True)
-        return 1
+        return 1, {}
 
 
 if __name__ == "__main__":
@@ -782,7 +784,7 @@ Environment Variables:
 
     # Run pipeline
     try:
-        exit_code = main(
+        exit_code, _ = main(
             bucket_name=args.bucket_name,
             prefix=args.prefix,
             max_workers=args.max_workers,

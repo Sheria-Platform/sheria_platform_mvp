@@ -304,6 +304,116 @@ curl http://192.168.214.21:6333/collections
 curl http://192.168.214.21:9000/minio/health/live
 ```
 
+## API Server
+
+The ingestion pipeline ships with a lightweight FastAPI server (`server.py`) that lets other
+services trigger ingestion and poll job status over HTTP — no shell access required.
+
+### Starting the Server
+
+```bash
+# From the repo root
+uvicorn pipelines.ingestion.server:app --host 0.0.0.0 --port 8001
+
+# Or run directly
+python -m pipelines.ingestion.server
+
+# With auto-reload during development
+INGEST_RELOAD=true python -m pipelines.ingestion.server
+```
+
+Interactive API docs are available at **http://localhost:8001/docs** once the server is running.
+
+### Authentication (optional)
+
+Set the `INGEST_API_KEY` environment variable to enable a simple API-key guard.
+All non-health endpoints then require an `X-API-Key: <key>` header.
+
+```bash
+export INGEST_API_KEY="change-me-in-production"
+```
+
+Leave it unset (default) to disable authentication for internal/trusted networks.
+
+### Endpoints
+
+#### `GET /health` — Liveness check
+
+```bash
+curl http://localhost:8001/health
+# {"status": "ok"}
+```
+
+#### `POST /ingest/trigger` — Trigger ingestion for an existing MinIO prefix
+
+```bash
+curl -X POST http://localhost:8001/ingest/trigger \
+  -H "Content-Type: application/json" \
+  -d '{
+    "bucket_name": "srtmanager",
+    "prefix": "kenya_law_data/case",
+    "max_workers": 4,
+    "enable_graph": false
+  }'
+# Returns 202 with job_id immediately; ingestion runs in the background.
+```
+
+Request body fields:
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `bucket_name` | string | yes | MinIO bucket |
+| `prefix` | string | yes | Object key prefix |
+| `max_workers` | int (1–32) | no | Parallel workers |
+| `enable_graph` | bool | no | Enable Neo4j graph extraction |
+| `file_batch_size` | int (1–500) | no | Files per memory batch |
+
+#### `POST /ingest/upload` — Upload a file → MinIO → ingest
+
+```bash
+curl -X POST http://localhost:8001/ingest/upload \
+  -F "file=@test_data/sample.pdf" \
+  -F "bucket_name=api-uploads" \
+  -F "enable_graph=false"
+# Returns 202 with job_id; file is stored in MinIO and ingested in the background.
+```
+
+Supported file types: `.pdf`, `.docx`, `.html`, `.htm`, `.txt`
+
+#### `GET /ingest/jobs/{job_id}` — Poll job status
+
+```bash
+curl http://localhost:8001/ingest/jobs/<job_id>
+```
+
+Response fields:
+
+| Field | Description |
+|-------|-------------|
+| `status` | `pending` \| `running` \| `done` \| `failed` |
+| `stats` | Final pipeline stats (null while running) |
+| `duration_seconds` | Wall-clock time for the job |
+| `error` | Error message on failure |
+
+#### `GET /ingest/jobs` — List all jobs (most-recent first, max 100)
+
+```bash
+curl http://localhost:8001/ingest/jobs
+```
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `INGEST_API_KEY` | `""` (disabled) | Optional API key for the `X-API-Key` header |
+| `INGEST_HOST` | `0.0.0.0` | Bind address |
+| `INGEST_PORT` | `8001` | Listen port |
+| `INGEST_RELOAD` | `false` | Enable uvicorn auto-reload (development only) |
+
+All MinIO / Qdrant / Neo4j / Ollama variables from `.env.example` apply to the server too.
+
+---
+
 ## Running the Ingestion Pipeline
 
 ### Step 1: Test Infrastructure Connectivity
