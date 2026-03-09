@@ -37,7 +37,8 @@ from pipelines.ingestion.embedding.embedding_compute import BatchEmbedder
 from pipelines.ingestion.graph.extractor_graph import GraphExtractor
 from pipelines.ingestion.indexing.neo4j_indexing import Neo4jIndexer
 from pipelines.ingestion.indexing.qdrant_indexing import QdrantIndexer
-from pipelines.ingestion.loaders.pdf_loader import parse_pdf_bytes
+from pipelines.ingestion.loaders.dispatcher import get_loader, SUPPORTED_EXTENSIONS
+from pipelines.ingestion.chunking.metadata_chunking import enrich_metadata
 
 # Load environment variables from .env file if present
 try:
@@ -179,8 +180,9 @@ def process_single_file(file_info: Tuple[str, bytes], config: Dict[str, Any]) ->
 
         logger.info(f"Processing: {filename} ({file_size_mb:.2f} MB)")
 
-        # 1. Parse PDF
-        text, metadata = parse_pdf_bytes(file_bytes, filename)
+        # 1. Dispatch to the correct loader by file extension
+        loader = get_loader(filename)
+        text, metadata = loader(file_bytes, filename)
         logger.info(f"  Parsed {filename}: {len(text)} chars")
 
         # Validate extracted text
@@ -202,6 +204,7 @@ def process_single_file(file_info: Tuple[str, bytes], config: Dict[str, Any]) ->
             chunk["metadata"].update(metadata)
             chunk["metadata"]["source_file"] = filename
             chunk["metadata"].update(extract_path_metadata(filename))
+            chunk["metadata"] = enrich_metadata(chunk["metadata"], chunk["text"])
 
         return chunks, None
 
@@ -396,16 +399,17 @@ def _iter_file_batches(
     Yields:
         List of (object_name, file_bytes) tuples, at most batch_size entries
     """
-    # Phase 1: collect all PDF names (names are small — listing is metadata-only)
-    all_pdf_names: List[str] = []
+    # Phase 1: collect all document names (names are small — listing is metadata-only)
+    all_doc_names: List[str] = []
     for obj in client.list_objects(bucket_name, prefix=prefix, recursive=True):
         if _shutdown_requested:
             return
         stats["files_seen"] += 1
-        if obj.object_name.lower().endswith(".pdf"):
-            all_pdf_names.append(obj.object_name)
+        ext = ("." + obj.object_name.lower().rsplit(".", 1)[-1]) if "." in obj.object_name else ""
+        if ext in SUPPORTED_EXTENSIONS:
+            all_doc_names.append(obj.object_name)
         else:
-            logger.debug(f"Skipping non-PDF: {obj.object_name}")
+            logger.debug(f"Skipping unsupported file type ({ext}): {obj.object_name}")
 
     def _download(name: str) -> Tuple[str, bytes]:
         resp = client.get_object(bucket_name, name)
@@ -416,10 +420,10 @@ def _iter_file_batches(
     # Phase 2: download in parallel batches
     max_workers = config["max_workers"]
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
-        for i in range(0, len(all_pdf_names), batch_size):
+        for i in range(0, len(all_doc_names), batch_size):
             if _shutdown_requested:
                 break
-            batch_names = all_pdf_names[i:i + batch_size]
+            batch_names = all_doc_names[i:i + batch_size]
             futures = {pool.submit(_download, name): name for name in batch_names}
             batch_results: List[Tuple[str, bytes]] = []
             for future in as_completed(futures):
@@ -668,7 +672,7 @@ def main(
                 extractor.close()
 
         if batch_num == 0:
-            logger.warning("No PDF files found under the given prefix.")
+            logger.warning("No supported files found under the given prefix.")
             return 0
 
         # 3. Summary
