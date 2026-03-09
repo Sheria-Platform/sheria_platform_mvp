@@ -576,9 +576,11 @@ def main(
         >>> exit_code, stats = main("legal-documents", "legal/kenya_law/", max_workers=4)
         >>> print(exit_code, stats["vectors_indexed"])
     """
-    # Install signal handlers for graceful shutdown
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
+    # Install signal handlers for graceful shutdown (only valid in main thread)
+    import threading
+    if threading.current_thread() is threading.main_thread():
+        signal.signal(signal.SIGINT, signal_handler)
+        signal.signal(signal.SIGTERM, signal_handler)
 
     # Validate inputs
     if not bucket_name or not isinstance(bucket_name, str):

@@ -6,7 +6,7 @@
   <title>Sheria Ingestion Dashboard</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
   <link rel="stylesheet" href="/static/style.css">
-  <script src="https://unpkg.com/htmx.org@1.9.13/dist/htmx.min.js" defer></script>
+  <script src="/static/htmx.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.x/dist/cdn.min.js"></script>
 </head>
 <body>
@@ -28,11 +28,12 @@
       <!-- Upload panel -->
       <section>
         <h2>Upload File</h2>
-        <form hx-post="/ui/upload"
+        <form method="post"
+              hx-post="/ui/upload"
               hx-encoding="multipart/form-data"
               hx-target="#jobs-tbody"
-              hx-swap="afterbegin"
-              x-data="dropZone()">
+              hx-swap="afterbegin">
+          <div x-data="dropZone()">
           <div class="drop-zone"
                :class="{'drop-zone--active': dragging}"
                x-on:dragover.prevent="dragging=true"
@@ -44,6 +45,7 @@
           <input type="file" name="file" x-ref="fileInput" style="display:none"
                  x-on:change="fileName=$event.target.files[0]?.name"
                  accept="{{ supported_extensions|join(',') }}" required>
+          </div>
           <input type="text" name="bucket_name" value="api-uploads" placeholder="Bucket" required>
           <label>
             <input type="checkbox" name="enable_graph" value="true">
