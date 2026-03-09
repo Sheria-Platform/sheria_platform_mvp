@@ -19,9 +19,9 @@ import time
 from collections import defaultdict
 from typing import Any, Dict, List
 
-VALID_RELATION_TYPES = frozenset({
-    "CITES", "OVERRULES", "DISTINGUISHES", "APPLIES", "RELATED",
-})
+from pipelines.ingestion.graph.schema_graph import VALID_RELATION_TYPES as _SCHEMA_RELATION_TYPES
+
+VALID_RELATION_TYPES = frozenset(_SCHEMA_RELATION_TYPES.__args__)
 
 from neo4j import GraphDatabase
 from neo4j.exceptions import ServiceUnavailable, TransientError
