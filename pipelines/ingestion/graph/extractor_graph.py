@@ -244,10 +244,15 @@ Input Text:
 {truncated_text}"""
 
                     # 2. Call Ollama LLM
+                    # Note: "think": false disables Qwen3 chain-of-thought at the API level.
+                    # "format": "json" is intentionally omitted — it conflicts with Qwen3
+                    # thinking suppression and produces empty responses. JSON parsing is
+                    # handled robustly in _extract_json_from_response instead.
                     response = self.client.post(
                         self.llm_endpoint,
                         json={
                             "model": self.model,
+                            "think": False,
                             "messages": [
                                 {
                                     "role": "system",
@@ -263,7 +268,6 @@ Input Text:
                                 "temperature": self.temperature,
                                 "num_predict": self.max_tokens,
                             },
-                            "format": "json"  # Request JSON response format
                         },
                     )
                     response.raise_for_status()

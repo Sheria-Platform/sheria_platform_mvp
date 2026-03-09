@@ -86,21 +86,29 @@ class BatchEmbedder:
         last_error = None
         for attempt in range(self.max_retries):
             try:
-                response = await client.post(
-                    self.endpoint,
-                    json={"model": self.model, "input": text[:8192]},
-                )
+                # /api/embed (Ollama >= 0.1.26) uses "input"
+                # /api/embeddings (older Ollama) uses "prompt"
+                use_new_api = "/api/embed" in self.endpoint and "/api/embeddings" not in self.endpoint
+                payload = {
+                    "model": self.model,
+                    "input" if use_new_api else "prompt": text[:8192],
+                }
+                response = await client.post(self.endpoint, json=payload)
                 response.raise_for_status()
                 response_data = response.json()
 
-                if "embeddings" not in response_data:
-                    raise ValueError("Invalid response: missing 'embeddings' field")
+                # New API: {"embeddings": [[...float...]]}
+                # Old API: {"embedding": [...float...]}
+                if "embeddings" in response_data:
+                    embeddings_array = response_data["embeddings"]
+                    if not embeddings_array or not isinstance(embeddings_array, list):
+                        raise ValueError(f"Invalid embeddings format: {type(embeddings_array)}")
+                    embedding = embeddings_array[0]
+                elif "embedding" in response_data:
+                    embedding = response_data["embedding"]
+                else:
+                    raise ValueError("Invalid response: missing 'embeddings' or 'embedding' field")
 
-                embeddings_array = response_data["embeddings"]
-                if not embeddings_array or not isinstance(embeddings_array, list):
-                    raise ValueError(f"Invalid embeddings format: {type(embeddings_array)}")
-
-                embedding = embeddings_array[0]
                 if not embedding or not isinstance(embedding, list):
                     raise ValueError(f"Invalid embedding vector: {type(embedding)}")
 
