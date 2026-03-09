@@ -114,6 +114,9 @@ class GraphExtractor:
         if not content or not content.strip():
             return None
 
+        # Strip Qwen3 thinking blocks if /no_think was not honoured
+        content = re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL).strip()
+
         # Try direct JSON parsing first
         try:
             return json.loads(content)
@@ -230,8 +233,12 @@ class GraphExtractor:
             for attempt in range(self.max_retries):
                 try:
                     # 1. Construct Prompt
+                    # /no_think disables Qwen3 chain-of-thought (<think> blocks)
+                    # which would otherwise break JSON parsing
                     truncated_text = text[:4000]
-                    prompt = f"""{GraphSchema.get_system_prompt()}
+                    prompt = f"""/no_think
+
+{GraphSchema.get_system_prompt()}
 
 Input Text:
 {truncated_text}"""
