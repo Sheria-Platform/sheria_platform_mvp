@@ -31,19 +31,43 @@ from services.api.app.clients.ollama_client import ollama_client
 logger = logging.getLogger(__name__)
 
 _SYSTEM_PROMPT = """
-You are a RAG Planning Agent.
-Analyze the User Query and Conversation History.
+You are a Judicial Research Planning Agent for Kenya's Sheria Platform.
+You assist judges, magistrates, registrars, and court staff with legal research queries.
 
-Decide the next step:
-1. If the user greets (Hello/Hi), output "direct_answer".
-2. If the user asks a specific question requiring data, output "retrieve".
-3. If the user asks for math/code, output "tool_use".
+Analyze the user's query and conversation history. Decide the next action:
 
-Output JSON format ONLY:
+1. "direct_answer"  — Greetings, simple clarifications, or questions answerable
+                       without retrieving documents (e.g. "Hello", "What can you
+                       help me with?", "Thank you").
+
+2. "retrieve"       — Any legal research question requiring case law, statutes,
+                       or court records:
+                       - Case law search ("What is the test for adverse possession?")
+                       - Statutory interpretation ("What does Section 26 of the
+                         Land Registration Act provide?")
+                       - Precedent lookup ("Find Court of Appeal cases on vicarious
+                         liability in medical negligence")
+                       - Judgment drafting assistance or citation validation
+
+3. "tool_use"       — Requests requiring computation or structured external data:
+                       - Case duration prediction or delay risk assessment
+                       - Judge workload analytics
+                       - Document authenticity verification (court orders, title deeds)
+                       - Mathematical or statistical calculations
+
+When writing "refined_query":
+- Resolve coreferences using conversation history ("that case" → full case name and citation)
+- Preserve Kenya Law citation format exactly: [Year] KESC / KECA / KEHC Number
+- Preserve legal Latin terms verbatim (mens rea, ratio decidendi, obiter dicta, locus standi)
+- Include court name and jurisdiction tier when mentioned
+- Include date ranges when legally relevant to the search
+
+Output JSON ONLY — no prose, no markdown:
 {
     "action": "retrieve" | "direct_answer" | "tool_use",
-    "refined_query": "The standalone search query",
-    "reasoning": "Why you chose this action"
+    "refined_query": "Standalone, self-contained legal search query",
+    "legal_domain": "land_law|criminal|family|constitutional|commercial|procedural|other",
+    "reasoning": "Brief explanation of routing decision"
 }
 """
 
@@ -84,10 +108,12 @@ async def planner_node(state: AgentState) -> dict:
     )
 
     try:
+        # Send last 6 messages (3 turns) so the planner can resolve coreferences
+        recent_messages = state["messages"][-6:]
         response_text = await ollama_client.chat_completion(
             messages=[
                 {"role": "system", "content": _SYSTEM_PROMPT},
-                {"role": "user", "content": user_query},
+                *recent_messages,
             ],
             temperature=0.0,  # deterministic planning
             json_mode=True,   # constrain output to valid JSON
@@ -95,11 +121,17 @@ async def planner_node(state: AgentState) -> dict:
 
         plan: dict = json.loads(response_text)
         action: str = plan.get("action", "retrieve")
+        legal_domain: str = plan.get("legal_domain", "other")
         duration_ms = round((time.perf_counter() - start) * 1000, 2)
 
         logger.info(
             "Planner node completed",
-            extra={"node": "planner", "action": action, "duration_ms": duration_ms},
+            extra={
+                "node": "planner",
+                "action": action,
+                "legal_domain": legal_domain,
+                "duration_ms": duration_ms,
+            },
         )
 
         return {
