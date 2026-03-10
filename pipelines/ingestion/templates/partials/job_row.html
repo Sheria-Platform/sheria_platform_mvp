@@ -1,0 +1,43 @@
+{% if job is none %}
+<tr class="row-error"><td colspan="6">
+  <span class="badge badge-failed">error</span> {{ error }}
+</td></tr>
+{% else %}
+  {% set badge = {'pending':'badge-pending','running':'badge-running','done':'badge-done','failed':'badge-failed'} %}
+  {% set expandable = job.status in ('done', 'failed') %}
+
+<tr {% if expandable %}onclick="toggleStats(this)" style="cursor:pointer"{% endif %}>
+  <td><code title="{{ job.job_id }}">{{ job.job_id[:8] }}…</code></td>
+  <td>
+    <span class="badge {{ badge.get(job.status, 'badge-pending') }}">
+      {% if job.status == 'running' %}<span class="pulse-dot"></span>{% endif %}
+      {{ job.status }}
+    </span>
+  </td>
+  <td>{{ job.bucket_name }}</td>
+  <td title="{{ job.prefix }}">{{ job.prefix[:24] }}{% if job.prefix|length > 24 %}…{% endif %}</td>
+  <td>{{ job_age(job.created_at) }}</td>
+  <td>
+    {% if job.duration_seconds is not none %}
+      {% set m = (job.duration_seconds // 60)|int %}
+      {% set s = (job.duration_seconds % 60)|int %}
+      {{ (m ~ 'm ') if m else '' }}{{ s }}s
+    {% else %}—{% endif %}
+  </td>
+</tr>
+
+  {% if expandable %}
+<tr class="stats-row" hidden>
+  <td colspan="6">
+    {% if job.error %}<p class="error-text">{{ job.error }}</p>{% endif %}
+    {% if job.stats %}
+    <dl class="stats-grid">
+      {% for k, v in job.stats.items() %}
+        <dt>{{ k.replace('_', ' ') }}</dt><dd>{{ v }}</dd>
+      {% endfor %}
+    </dl>
+    {% endif %}
+  </td>
+</tr>
+  {% endif %}
+{% endif %}

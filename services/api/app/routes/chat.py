@@ -83,7 +83,7 @@ async def chat_stream(
 
     # 2. Semantic Cache Check (Fast Path)
     cache_start = time.perf_counter()
-    cached_ans = await cache.get_cached_response(req.message)
+    cached_ans, query_vector = await cache.get_cached_response(req.message)
     cache_duration_ms = round((time.perf_counter() - cache_start) * 1000, 2)
 
     if cached_ans:
@@ -120,7 +120,14 @@ async def chat_stream(
 
     # 4. Initialize Agent State (LangGraph)
     initial_state = AgentState(
-        messages=history_dicts, current_query=req.message, documents=[], plan=[]
+        messages=history_dicts,
+        current_query=req.message,
+        documents=[],
+        plan=[],
+        action="",
+        tool_choice="",
+        tool_input="",
+        query_vector=query_vector or [],  # reuse embedding from cache check
     )
 
     # 5. Define Generator for Streaming Response

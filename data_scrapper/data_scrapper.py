@@ -256,7 +256,7 @@ def normalize_case_data(doc: dict) -> dict:
 # ==================== SCRAPING FUNCTIONS ====================
 def search_cases(session: requests.Session, search_term: str, page: int = 1) -> dict:
     """Search for cases using a specific term"""
-    url = "https://new.kenyalaw.org/search/api/documents/"
+    url = "https://new.kenyalaw.org/search/"
     params = {
         "search": search_term,
         "page": page,

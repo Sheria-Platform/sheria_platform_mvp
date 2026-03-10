@@ -13,7 +13,7 @@ Environment Variables:
     LLM_MAX_RETRIES: Maximum retry attempts (default: 3)
     LLM_RETRY_DELAY: Initial retry delay in seconds (default: 2)
     LLM_TEMPERATURE: LLM temperature for deterministic output (default: 0.0)
-    LLM_MAX_TOKENS: Maximum tokens for generation (default: 1024)
+    LLM_MAX_TOKENS: Maximum tokens for generation (default: 4096)
 """
 import json
 import logging
@@ -24,9 +24,47 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 
-from pipelines.ingestion.graph.schema_graph import GraphSchema
+from pipelines.ingestion.graph.schema_graph import GraphSchema, VALID_NODE_LABELS, VALID_RELATION_TYPES as _SCHEMA_RELATION_TYPES
 
 logger = logging.getLogger(__name__)
+
+# JSON schema for constrained decoding via Ollama's format field.
+# Guarantees the LLM always returns {"nodes": [...], "edges": [...]} structure,
+# even for short or non-legal chunks that would otherwise produce explanatory text.
+# Enum constraints on `type` fields force the model to only produce valid schema
+# values, eliminating "Skipping edge with unknown relationship type" warnings.
+_NODE_TYPE_ENUM = list(VALID_NODE_LABELS.__args__)
+_RELATION_TYPE_ENUM = list(_SCHEMA_RELATION_TYPES.__args__)
+
+GRAPH_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "nodes": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string"},
+                    "type": {"type": "string", "enum": _NODE_TYPE_ENUM}
+                },
+                "required": ["id", "type"]
+            }
+        },
+        "edges": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "source": {"type": "string"},
+                    "target": {"type": "string"},
+                    "type": {"type": "string", "enum": _RELATION_TYPE_ENUM}
+                },
+                "required": ["source", "target", "type"]
+            }
+        }
+    },
+    "required": ["nodes", "edges"]
+}
 
 
 class GraphExtractor:
@@ -80,7 +118,7 @@ class GraphExtractor:
         self.max_retries = int(os.getenv("LLM_MAX_RETRIES", "3"))
         self.retry_delay = float(os.getenv("LLM_RETRY_DELAY", "2"))
         self.temperature = float(os.getenv("LLM_TEMPERATURE", "0.0"))
-        self.max_tokens = int(os.getenv("LLM_MAX_TOKENS", "1024"))
+        self.max_tokens = int(os.getenv("LLM_MAX_TOKENS", "4096"))
 
         # Validate configuration
         if not self.llm_endpoint or not self.llm_endpoint.startswith("http"):
@@ -114,6 +152,9 @@ class GraphExtractor:
         if not content or not content.strip():
             return None
 
+        # Strip Qwen3 thinking blocks if /no_think was not honoured
+        content = re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL).strip()
+
         # Try direct JSON parsing first
         try:
             return json.loads(content)
@@ -136,8 +177,8 @@ class GraphExtractor:
             except (json.JSONDecodeError, AttributeError):
                 continue
 
-        # Log failure for debugging
-        logger.debug(f"Failed to parse JSON. Content preview: {content[:200]}")
+        # Log failure for diagnosing any remaining edge cases
+        logger.warning(f"Failed to parse JSON from LLM response. Preview: {content[:300]!r}")
         return None
 
     def _validate_graph_data(self, graph_data: Dict[str, Any]) -> Tuple[List[dict], List[dict]]:
@@ -230,17 +271,26 @@ class GraphExtractor:
             for attempt in range(self.max_retries):
                 try:
                     # 1. Construct Prompt
-                    prompt = f"""{GraphSchema.get_system_prompt()}
+                    # /no_think disables Qwen3 chain-of-thought (<think> blocks)
+                    # which would otherwise break JSON parsing
+                    truncated_text = text[:4000]
+                    prompt = f"""/no_think
+
+{GraphSchema.get_system_prompt()}
 
 Input Text:
-{text[:4000]}  # Truncate to avoid token limits
-"""
+{truncated_text}"""
 
                     # 2. Call Ollama LLM
+                    # "think": false disables Qwen3 chain-of-thought at the API level.
+                    # "format": GRAPH_OUTPUT_SCHEMA uses constrained decoding to guarantee
+                    # the output always matches the declared nodes/edges structure, even for
+                    # short or non-legal chunks that would otherwise return explanatory text.
                     response = self.client.post(
                         self.llm_endpoint,
                         json={
                             "model": self.model,
+                            "think": False,
                             "messages": [
                                 {
                                     "role": "system",
@@ -252,11 +302,11 @@ Input Text:
                                 }
                             ],
                             "stream": False,
+                            "format": GRAPH_OUTPUT_SCHEMA,
                             "options": {
                                 "temperature": self.temperature,
                                 "num_predict": self.max_tokens,
                             },
-                            "format": "json"  # Request JSON response format
                         },
                     )
                     response.raise_for_status()
@@ -264,6 +314,18 @@ Input Text:
                     # 3. Parse JSON Output
                     response_data = response.json()
                     content = response_data.get("message", {}).get("content", "")
+
+                    # Detect token limit truncation — retrying produces the same result
+                    done_reason = response_data.get("done_reason", "")
+                    if done_reason == "length":
+                        logger.error(
+                            f"LLM truncated response for text {idx} due to token limit "
+                            f"(num_predict={self.max_tokens}). Increase LLM_MAX_TOKENS. "
+                            f"Content length: {len(content)} chars."
+                        )
+                        nodes_list.append([])
+                        edges_list.append([])
+                        break  # No point retrying — same truncation will occur
 
                     if not content or not content.strip():
                         logger.warning(f"Empty response from LLM for text {idx} (attempt {attempt + 1}/{self.max_retries})")

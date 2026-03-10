@@ -59,3 +59,5 @@ class AgentState(TypedDict):
     # Tool node inputs
     tool_choice: str
     tool_input: str
+    # Embedding computed at cache-check time; reused by retriever to avoid re-embedding
+    query_vector: list[float]

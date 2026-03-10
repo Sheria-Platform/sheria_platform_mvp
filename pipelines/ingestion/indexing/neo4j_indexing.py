@@ -16,7 +16,12 @@ Environment Variables:
 import logging
 import os
 import time
+from collections import defaultdict
 from typing import Any, Dict, List
+
+from pipelines.ingestion.graph.schema_graph import VALID_RELATION_TYPES as _SCHEMA_RELATION_TYPES
+
+VALID_RELATION_TYPES = frozenset(_SCHEMA_RELATION_TYPES.__args__)
 
 from neo4j import GraphDatabase
 from neo4j.exceptions import ServiceUnavailable, TransientError
@@ -235,23 +240,30 @@ class Neo4jIndexer:
                 logger.error(f"Failed to merge nodes: {e}")
                 raise
 
-        # 2. Merge Edges
+        # 2. Merge Edges — one Cypher per relationship type for native index use
         if edges:
-            # Match existing source/target nodes and create relationship if missing
-            # NOTE: This assumes nodes already exist - edges without nodes will be skipped
-            cypher_edges = """
-            UNWIND $edges AS e
-            MATCH (source:Entity {name: e.source})
-            MATCH (target:Entity {name: e.target})
-            MERGE (source)-[r:RELATED {type: e.type}]->(target)
-            SET r.updated_at = timestamp()
-            """
-            try:
-                result = tx.run(cypher_edges, edges=edges)
-                result.consume()  # Ensure query completes
-            except Exception as e:
-                logger.warning(f"Failed to merge some edges (may be missing nodes): {e}")
-                # Don't raise - some edges may reference nodes that don't exist
+            by_type = defaultdict(list)
+            for e in edges:
+                rel_type = e.get("type", "").upper()
+                if rel_type in VALID_RELATION_TYPES:
+                    by_type[rel_type].append(e)
+                else:
+                    logger.warning(f"Skipping edge with unknown relationship type: {rel_type!r}")
+
+            for rel_type, typed_edges in by_type.items():
+                cypher = f"""
+                UNWIND $edges AS e
+                MATCH (source:Entity {{name: e.source}})
+                MATCH (target:Entity {{name: e.target}})
+                MERGE (source)-[r:{rel_type}]->(target)
+                SET r.updated_at = timestamp()
+                """
+                try:
+                    result = tx.run(cypher, edges=typed_edges)
+                    result.consume()
+                except Exception as e:
+                    logger.warning(f"Failed to merge {rel_type} edges (may be missing nodes): {e}")
+                    # Don't raise - some edges may reference nodes that don't exist
 
     def close(self) -> None:
         """

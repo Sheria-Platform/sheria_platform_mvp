@@ -99,6 +99,11 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
 
     # ------------------------------------------------------------------ #
+    # Semantic Cache                                                         #
+    # ------------------------------------------------------------------ #
+    SEMANTIC_CACHE_MAX_AGE_DAYS: int = 30  # cache entries older than this are ignored
+
+    # ------------------------------------------------------------------ #
     # Observability                                                          #
     # ------------------------------------------------------------------ #
     OTEL_EXPORTER_OTLP_ENDPOINT: str | None = None

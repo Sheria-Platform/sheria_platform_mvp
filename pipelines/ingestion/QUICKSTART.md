@@ -1,6 +1,6 @@
-# Ingestion Pipeline - Quick Start Guide
+# Ingestion Pipeline — Quick Start Guide
 
-## 🚀 5-Minute Setup
+## 5-Minute Setup
 
 ### Step 1: Install Ollama
 
@@ -15,13 +15,13 @@ ollama serve
 ### Step 2: Pull Required Models
 
 ```bash
-# Embedding model (required) - ~275MB
+# Embedding model (required) — ~275 MB
 ollama pull nomic-embed-text
 
-# LLM for graph extraction (required) - ~4.7GB
+# LLM for graph extraction (required if --enable-graph) — ~4.7 GB
 ollama pull llama3
 
-# Verify installation
+# Verify
 ollama list
 ```
 
@@ -32,239 +32,246 @@ cd pipelines/ingestion
 pip install -r requirements.txt
 ```
 
+Key additions in v1.2.0: `jinja2>=3.1.0` (required for the Web Dashboard).
+
 ### Step 4: Start Local Infrastructure
 
 ```bash
 # From project root
 make up
 
-# This starts:
-# - Qdrant (port 6333)
-# - Neo4j (port 7474/7687)
-# - MinIO (port 9000/9001)
-# - PostgreSQL (port 5432)
-# - Redis (port 6379)
+# Starts: Qdrant (6333), Neo4j (7474/7687), MinIO (9000/9001), PostgreSQL (5432), Redis (6379)
 ```
 
-### Step 5: Run Ingestion
+### Step 5: Start the Ingestion Server
 
 ```bash
-# Option A: Test with sample data
-python testExample/minio_ingestion.py
+# From repo root
+uvicorn pipelines.ingestion.server:app --host 0.0.0.0 --port 8001 --reload
+```
 
-# Option B: Ingest from specific bucket (basic)
+Then open <http://localhost:8001/> in your browser — the Web Dashboard loads immediately.
+
+---
+
+## Using the Web Dashboard
+
+The dashboard is served directly from the FastAPI server (no Node.js, no build step).
+It uses [htmx 1.9](https://htmx.org/) for server-driven updates,
+[Alpine.js 3.14](https://alpinejs.dev/) for drag-and-drop interactions, and
+[Pico CSS v2](https://picocss.com/) for styling — all loaded via CDN.
+
+### Upload a File
+
+1. Open <http://localhost:8001/>
+2. In the **Upload File** panel, drag a PDF/DOCX/HTML/TXT onto the drop zone, or click to browse
+3. Set the target MinIO bucket (default: `api-uploads`)
+4. Optionally enable graph extraction
+5. Click **Upload & Ingest**
+
+A new job row appears immediately at the top of the Jobs table. The status badge
+cycles: `pending` → `running` → `done` / `failed`.
+
+### Trigger Ingestion for an Existing MinIO Prefix
+
+1. In the **Trigger Ingestion** panel, enter your bucket name and prefix
+2. Optionally set worker count and batch size
+3. Click **Trigger Ingestion**
+
+Use this when files are already in MinIO (e.g. after a bulk upload via the scripts).
+
+### Monitor Jobs
+
+The **Jobs** table auto-refreshes every 3 seconds via htmx polling — no manual refresh needed.
+
+- A blue pulsing dot indicates a running job
+- Click a `done` or `failed` row to expand it and see pipeline stats or the error message
+- The server health indicator in the header turns red if the server stops responding
+
+---
+
+## CLI Usage (Alternative to the Dashboard)
+
+```bash
+# Basic — embeddings only (fast)
 python pipelines/ingestion/main.py <bucket_name> <prefix>
 
-# Option C: With production options (NEW in v1.1.0)
+# Full — with graph extraction (slow, optional)
+python pipelines/ingestion/main.py <bucket_name> <prefix> --enable-graph
+
+# All options
 python pipelines/ingestion/main.py <bucket_name> <prefix> \
   --max-workers 8 \
+  --file-batch-size 20 \
   --enable-graph \
   --log-level DEBUG
 
-# Example: Kenya Law Reports
+# Kenya Law Reports example
 python pipelines/ingestion/main.py kenya-law-reports supreme-court/
 ```
 
-**New Features:** Graceful shutdown (Ctrl+C), automatic retry, error tracking. See [CONFIGURATION_GUIDE.md](CONFIGURATION_GUIDE.md) for 41+ config options.
+| Option | Default | Description |
+| --- | --- | --- |
+| `--max-workers N` | 4 | Parallel download/parse workers |
+| `--enable-graph` | off | Enable Neo4j graph extraction |
+| `--file-batch-size N` | 10 | Files per worker batch |
+| `--log-level` | INFO | DEBUG / INFO / WARNING / ERROR |
 
 ---
 
-## 📋 Common Commands
+## JSON API (for programmatic access)
 
-### Ollama Management
+The same server that hosts the dashboard exposes JSON endpoints at `/ingest/*`.
+Optionally protect them with `INGEST_API_KEY`.
 
 ```bash
-# List downloaded models
-ollama list
+# Trigger ingestion
+curl -X POST http://localhost:8001/ingest/trigger \
+  -H "Content-Type: application/json" \
+  -d '{"bucket_name": "my-bucket", "prefix": "docs/", "max_workers": 4}'
 
-# Pull additional models
-ollama pull mxbai-embed-large    # Better embeddings
-ollama pull llama3.1             # Larger LLM
+# Upload a file
+curl -X POST http://localhost:8001/ingest/upload \
+  -F "file=@judgment.pdf" \
+  -F "bucket_name=api-uploads"
 
-# Remove model to save space
-ollama rm llama3
+# Poll a job
+curl http://localhost:8001/ingest/jobs/<job_id>
 
-# Check Ollama status
-curl http://localhost:11434/api/tags
+# List all jobs
+curl http://localhost:8001/ingest/jobs
+
+# Health check
+curl http://localhost:8001/health
 ```
 
-### Infrastructure Management
+See [README.md](README.md) for full endpoint documentation.
+
+---
+
+## Common Commands
+
+### Infrastructure
 
 ```bash
-# Start all services
-make up
-
-# Stop all services
-make down
-
-# Check service status
-docker ps
-
-# View logs
-docker logs <container_name>
+make up       # Start all Docker services
+make down     # Stop all Docker services
+docker ps     # Check service status
 ```
 
-### Verify Ingestion
+### Ollama
 
 ```bash
-# Check Qdrant collection
+ollama list                          # Installed models
+ollama pull mxbai-embed-large        # Higher quality embeddings
+ollama pull llama3.1                 # Larger LLM
+ollama ps                            # Running models + GPU usage
+```
+
+### Verify Ingestion Results
+
+```bash
+# Qdrant — vector count
 curl http://localhost:6333/collections/kenya_law_reports
 
-# Check Neo4j graph
-# Open browser: http://localhost:7474
-# Username: neo4j
-# Password: password
-# Query: MATCH (n) RETURN n LIMIT 25
+# Neo4j — open browser at http://localhost:7474
+# Username: neo4j / Password: password
+# Cypher: MATCH (n) RETURN labels(n), count(*)
 ```
 
 ---
 
-## 🔧 Configuration
+## Performance Tips
 
-### Environment Variables
+### Use GPU (10x faster)
 
 ```bash
-# Ollama endpoint (default: http://localhost:11434)
-export OLLAMA_HOST=http://localhost:11434
-
-# Embedding model (default: nomic-embed-text)
-export OLLAMA_EMBED_MODEL=nomic-embed-text
-
-# LLM model (default: llama3)
-export OLLAMA_LLM_MODEL=llama3
+ollama ps   # Shows GPU utilisation; Ollama uses GPU automatically if available
 ```
 
-### Config File (`config.yaml`)
+### Faster embedding model
 
-```yaml
-embedding:
-  host: http://localhost:11434
-  model: nomic-embed-text
-  batch_size: 100
-
-llm:
-  host: http://localhost:11434
-  model: llama3
-  temperature: 0.0
-
-vector_db:
-  collection_name: kenya_law_reports
-```
-
----
-
-## ⚡ Performance Tips
-
-### Use GPU (10x Faster)
 ```bash
-# Ollama automatically uses GPU if available
-# Verify GPU usage:
-ollama ps
-```
-
-### Faster Embedding Model
-```bash
-ollama pull all-minilm  # 3x faster than nomic-embed-text
+ollama pull all-minilm              # 3x faster than nomic-embed-text
 export OLLAMA_EMBED_MODEL=all-minilm
 ```
 
-### Increase Parallelism
-```python
-# In main.py, increase concurrency:
-vector_ds = chunked_ds.map_batches(
-    BatchEmbedder,
-    concurrency=10,  # Increase this
-    batch_size=100
-)
+### More parallelism
+
+```bash
+export MAX_WORKERS=8
+# or via CLI:
+python pipelines/ingestion/main.py <bucket> <prefix> --max-workers 8
+```
+
+### Skip graph extraction for initial ingest
+
+```bash
+# Graph extraction adds ~30s per document; disable for the first pass
+python pipelines/ingestion/main.py <bucket> <prefix>   # no --enable-graph
 ```
 
 ---
 
-## 🐛 Troubleshooting
+## Troubleshooting
 
-### Ollama Not Running
-```bash
-# Error: Connection refused
-# Solution: Start Ollama
-ollama serve
-```
-
-### Out of Memory
-```bash
-# Use smaller LLM
-ollama pull llama3:8b  # Instead of default
-
-# Or use CPU only
-export OLLAMA_NUM_GPU=0
-```
-
-### Ray Init Error
-```bash
-# Error: ray.init() called twice
-# Solution: Stop existing Ray cluster
-ray stop
-```
-
-### Slow Processing
-```bash
-# Check GPU usage
-ollama ps
-
-# Use lighter models
-export OLLAMA_EMBED_MODEL=all-minilm
-export OLLAMA_LLM_MODEL=mistral
-```
+| Problem | Solution |
+| --- | --- |
+| `Connection refused` on Ollama | Run `ollama serve` |
+| Dashboard shows "Server unreachable" | Server is down or firewall blocking port 8001 |
+| `Unsupported file type` in upload | Only `.pdf`, `.docx`, `.html`, `.htm`, `.txt` accepted |
+| Job stuck at `pending` | Check thread pool — max 4 concurrent jobs by default |
+| `CUDA out of memory` | Use `ollama pull llama3:8b` or set `OLLAMA_NUM_GPU=0` |
+| Slow embeddings | Enable GPU (`ollama ps`) or switch to `all-minilm` |
+| Graph extraction returns `{}` | Try `export OLLAMA_LLM_MODEL=qwen2.5` (better JSON output) |
+| `jinja2` import error | Run `pip install jinja2>=3.1.0` |
 
 ---
 
-## 📊 Expected Performance
+## Expected Performance
 
-**Single Document (10-page judgment):**
-- CPU: ~40 seconds
-- GPU: ~15 seconds
-
-**Batch of 100 Documents:**
-- With Ray (5 workers): ~20 minutes
-- Sequential: ~60 minutes
+| Workload | CPU | GPU |
+| --- | --- | --- |
+| Single 10-page judgment (embeddings only) | ~10s | ~4s |
+| Single 10-page judgment (+ graph) | ~40s | ~15s |
+| 100 documents with 5 workers | ~20 min | ~8 min |
 
 ---
 
-## 🎯 What Gets Indexed
+## What Gets Indexed
+
+**Supported formats:** `.pdf` `.docx` `.html` `.htm` `.txt`
 
 ### Vector Database (Qdrant)
-- **Collection**: `kenya_law_reports`
-- **Vectors**: 768-dimensional embeddings
-- **Metadata**: case_name, citation, court, date, chunk_text
-- **Use**: Semantic search ("Find cases about adverse possession")
+
+- Collection: `kenya_law_reports`
+- 768-dimensional embeddings (nomic-embed-text)
+- Metadata: `case_name`, `citation`, `court`, `date`, `chunk_text`
+- Use: semantic search ("Find cases about adverse possession")
 
 ### Graph Database (Neo4j)
-- **Nodes**: Cases, Judges, Legal Principles, Statutes
-- **Relationships**: CITES, OVERRULES, DISTINGUISHES, APPLIES
-- **Use**: Citation queries ("Show cases citing Muiruri v. Republic")
+
+- Nodes: Cases, Judges, Legal Principles, Statutes
+- Relationships: CITES, OVERRULES, DISTINGUISHES, APPLIES
+- Use: citation queries ("Show cases citing Muiruri v. Republic")
 
 ---
 
-## 📚 Learn More
-
-- [Full Documentation](README.md)
-- [Architecture Deep Dive](https://freedium-mirror.cfd/building-a-scalable-production-grade-agentic-rag-pipeline-1168dcd36260)
-- [Ollama Docs](https://ollama.com/)
-- [Qdrant Guide](https://qdrant.tech/documentation/)
-
----
-
-## ✅ Checklist
+## Setup Checklist
 
 - [ ] Ollama installed and running (`ollama serve`)
 - [ ] Models downloaded (`ollama list`)
-- [ ] Python dependencies installed (`pip install -r requirements.txt`)
+- [ ] Python dependencies installed — including `jinja2>=3.1.0` (`pip install -r requirements.txt`)
 - [ ] Infrastructure running (`docker ps`)
-- [ ] Test ingestion successful
+- [ ] Qdrant collection created (`python create_qdrant_collection.py`)
+- [ ] Server started (`uvicorn pipelines.ingestion.server:app --port 8001`)
+- [ ] Dashboard loads at <http://localhost:8001/>
+- [ ] Test upload or trigger succeeds — job appears in Jobs table
 - [ ] Data verified in Qdrant (`curl http://localhost:6333/collections/kenya_law_reports`)
-- [ ] Graph verified in Neo4j (browser: http://localhost:7474)
+- [ ] Graph verified in Neo4j (<http://localhost:7474>)
 
 ---
 
-**Ready to ingest!** 🚀
+**Ready to ingest!**
 
-For detailed documentation, see [README.md](README.md)
+For detailed documentation see [README.md](README.md).

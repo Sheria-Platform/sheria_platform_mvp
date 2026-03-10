@@ -209,7 +209,7 @@ class QdrantIndexer:
                 self.client.upsert(
                     collection_name=self.collection_name,
                     points=points,
-                    wait=True  # Wait for operation to complete
+                    wait=False
                 )
                 logger.debug(f"Successfully indexed {len(points)} points to Qdrant")
                 return len(points)
@@ -251,3 +251,21 @@ class QdrantIndexer:
         """Context manager exit with automatic cleanup."""
         self.close()
         return False
+    
+# from qdrant_client import QdrantClient                                                                                                                         
+# from qdrant_client.http import models                     
+
+# client = QdrantClient(host="192.168.214.21", port=6333)
+
+# # Drop old collection (2560-dim)
+# client.delete_collection("kenya_law_reports")
+
+# # Recreate with nomic-embed-text dimensions (768-dim)
+# client.create_collection(
+#     collection_name="kenya_law_reports",
+#     vectors_config=models.VectorParams(
+#         size=768,
+#         distance=models.Distance.COSINE
+#     )
+# )
+# print("Collection recreated at 768 dimensions")
