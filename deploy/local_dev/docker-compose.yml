@@ -1,0 +1,415 @@
+# =============================================================================
+# deploy/local_dev/docker-compose.yml
+# Sheria Platform — Ollama Dev Cluster
+# =============================================================================
+# Profiles:
+#   cpu  — CPU-only dev (laptop, no GPU); uses smaller models (qwen2.5:3b)
+#   gpu  — Full GPU cluster (staging / workstation); uses qwen3:8b
+#
+# Usage:
+#   cp .env.example .env
+#   docker compose --profile cpu up -d    # CPU dev (laptop)
+#   docker compose --profile gpu up -d    # GPU cluster (workstation/staging)
+#
+# Health check:
+#   curl http://localhost:8080/health      # nginx proxy health
+#   curl http://localhost:11440/api/tags   # ollama-llm direct
+#   curl http://localhost:11433/api/tags   # through proxy (round-robin)
+# =============================================================================
+
+# =============================================================================
+# YAML ANCHORS — shared config blocks (avoid repetition)
+# =============================================================================
+
+# Base config shared by ALL Ollama services
+x-ollama-base: &ollama-base
+  image: ollama/ollama:latest
+  entrypoint: ["/bin/bash", "/scripts/entrypoint.sh"]
+  restart: unless-stopped
+  healthcheck:
+    test: ["CMD-SHELL", "curl -sf http://localhost:11434/api/tags || exit 1"]
+    interval: 30s
+    timeout: 10s
+    retries: 5
+    start_period: 120s  # allow time for initial model pulls
+
+# GPU resource reservation block — merged into GPU-profile services only
+x-gpu-resources: &gpu-resources
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - driver: nvidia
+            count: all     # use all available GPUs, not hardcoded count
+            capabilities: [gpu]
+
+# Common GPU env vars (merged into GPU service environments)
+x-gpu-env: &gpu-env
+  OLLAMA_FLASH_ATTENTION: "1"
+  OLLAMA_ORIGINS: "*"
+
+# Common CPU env vars (merged into CPU service environments)
+x-cpu-env: &cpu-env
+  OLLAMA_NUM_GPU: "0"
+  OLLAMA_ORIGINS: "*"
+
+# Entrypoint script volume mount string (used as a list item in volumes:)
+x-script-mount: &script-mount "./scripts/entrypoint.sh:/scripts/entrypoint.sh:ro"
+
+# =============================================================================
+# VOLUMES — one named volume per role for isolation between node types
+# =============================================================================
+volumes:
+  ollama-llm-data:
+  ollama-llm2-data:
+  ollama-llm3-data:
+  ollama-embed-data:
+  ollama-rerank-data:
+  open-webui-data:
+
+# =============================================================================
+# NETWORK — shared bridge; DNS aliases allow GPU & CPU variants to share names
+# =============================================================================
+networks:
+  ollama-net:
+    driver: bridge
+
+# =============================================================================
+# SERVICES
+# =============================================================================
+services:
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # LLM NODE 1  (ext port: OLLAMA_LLM_EXT_PORT / default 11440)
+  # Serves: qwen3:8b (GPU) | qwen2.5:3b (CPU)
+  # Round-robin: ollama-llm, ollama-llm2, ollama-llm3
+  # ──────────────────────────────────────────────────────────────────────────
+  ollama-llm:
+    <<:
+      - *ollama-base
+      - *gpu-resources
+    container_name: sheria-ollama-llm
+    profiles: [gpu]
+    environment:
+      <<: *gpu-env
+      OLLAMA_HOST: "0.0.0.0:11434"
+      OLLAMA_KEEP_ALIVE: "-1"
+      OLLAMA_NUM_PARALLEL: "4"
+      OLLAMA_MAX_LOADED_MODELS: "1"
+      OLLAMA_MAX_QUEUE: "256"
+      MODELS_TO_PULL: "${OLLAMA_LLM_MODELS:-qwen3:8b}"
+    ports:
+      - "${OLLAMA_LLM_EXT_PORT:-11440}:11434"
+    volumes:
+      - ollama-llm-data:/root/.ollama
+      - *script-mount
+    networks:
+      ollama-net:
+        aliases: [ollama-llm]   # shared DNS alias — nginx uses this name
+
+  ollama-llm-cpu:
+    <<: *ollama-base
+    container_name: sheria-ollama-llm
+    profiles: [cpu]
+    environment:
+      <<: *cpu-env
+      OLLAMA_HOST: "0.0.0.0:11434"
+      OLLAMA_KEEP_ALIVE: "10m"
+      OLLAMA_NUM_PARALLEL: "1"
+      OLLAMA_MAX_LOADED_MODELS: "1"
+      OLLAMA_MAX_QUEUE: "256"
+      MODELS_TO_PULL: "${OLLAMA_LLM_MODELS:-qwen2.5:3b}"
+    ports:
+      - "${OLLAMA_LLM_EXT_PORT:-11440}:11434"
+    volumes:
+      - ollama-llm-data:/root/.ollama
+      - *script-mount
+    networks:
+      ollama-net:
+        aliases: [ollama-llm]   # same alias — only one profile active at a time
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # LLM NODE 2  (ext port: OLLAMA_LLM2_EXT_PORT / default 11443)
+  # ──────────────────────────────────────────────────────────────────────────
+  ollama-llm2:
+    <<:
+      - *ollama-base
+      - *gpu-resources
+    container_name: sheria-ollama-llm2
+    profiles: [gpu]
+    environment:
+      <<: *gpu-env
+      OLLAMA_HOST: "0.0.0.0:11434"
+      OLLAMA_KEEP_ALIVE: "-1"
+      OLLAMA_NUM_PARALLEL: "4"
+      OLLAMA_MAX_LOADED_MODELS: "1"
+      OLLAMA_MAX_QUEUE: "256"
+      MODELS_TO_PULL: "${OLLAMA_LLM_MODELS:-qwen3:8b}"
+    ports:
+      - "${OLLAMA_LLM2_EXT_PORT:-11443}:11434"
+    volumes:
+      - ollama-llm2-data:/root/.ollama
+      - *script-mount
+    networks:
+      ollama-net:
+        aliases: [ollama-llm2]
+
+  ollama-llm2-cpu:
+    <<: *ollama-base
+    container_name: sheria-ollama-llm2
+    profiles: [cpu]
+    environment:
+      <<: *cpu-env
+      OLLAMA_HOST: "0.0.0.0:11434"
+      OLLAMA_KEEP_ALIVE: "10m"
+      OLLAMA_NUM_PARALLEL: "1"
+      OLLAMA_MAX_LOADED_MODELS: "1"
+      OLLAMA_MAX_QUEUE: "256"
+      MODELS_TO_PULL: "${OLLAMA_LLM_MODELS:-qwen2.5:3b}"
+    ports:
+      - "${OLLAMA_LLM2_EXT_PORT:-11443}:11434"
+    volumes:
+      - ollama-llm2-data:/root/.ollama
+      - *script-mount
+    networks:
+      ollama-net:
+        aliases: [ollama-llm2]
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # LLM NODE 3  (ext port: OLLAMA_LLM3_EXT_PORT / default 11444)
+  # ──────────────────────────────────────────────────────────────────────────
+  ollama-llm3:
+    <<:
+      - *ollama-base
+      - *gpu-resources
+    container_name: sheria-ollama-llm3
+    profiles: [gpu]
+    environment:
+      <<: *gpu-env
+      OLLAMA_HOST: "0.0.0.0:11434"
+      OLLAMA_KEEP_ALIVE: "-1"
+      OLLAMA_NUM_PARALLEL: "4"
+      OLLAMA_MAX_LOADED_MODELS: "1"
+      OLLAMA_MAX_QUEUE: "256"
+      MODELS_TO_PULL: "${OLLAMA_LLM_MODELS:-qwen3:8b}"
+    ports:
+      - "${OLLAMA_LLM3_EXT_PORT:-11444}:11434"
+    volumes:
+      - ollama-llm3-data:/root/.ollama
+      - *script-mount
+    networks:
+      ollama-net:
+        aliases: [ollama-llm3]
+
+  ollama-llm3-cpu:
+    <<: *ollama-base
+    container_name: sheria-ollama-llm3
+    profiles: [cpu]
+    environment:
+      <<: *cpu-env
+      OLLAMA_HOST: "0.0.0.0:11434"
+      OLLAMA_KEEP_ALIVE: "10m"
+      OLLAMA_NUM_PARALLEL: "1"
+      OLLAMA_MAX_LOADED_MODELS: "1"
+      OLLAMA_MAX_QUEUE: "256"
+      MODELS_TO_PULL: "${OLLAMA_LLM_MODELS:-qwen2.5:3b}"
+    ports:
+      - "${OLLAMA_LLM3_EXT_PORT:-11444}:11434"
+    volumes:
+      - ollama-llm3-data:/root/.ollama
+      - *script-mount
+    networks:
+      ollama-net:
+        aliases: [ollama-llm3]
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # EMBED NODE  (ext port: OLLAMA_EMBED_EXT_PORT / default 11441)
+  # Serves: nomic-embed-text (both profiles — same model, different parallelism)
+  # High parallelism: ingestion pipeline fires concurrent embed batches
+  # ──────────────────────────────────────────────────────────────────────────
+  ollama-embed:
+    <<:
+      - *ollama-base
+      - *gpu-resources
+    container_name: sheria-ollama-embed
+    profiles: [gpu]
+    environment:
+      <<: *gpu-env
+      OLLAMA_HOST: "0.0.0.0:11434"
+      OLLAMA_KEEP_ALIVE: "-1"
+      OLLAMA_NUM_PARALLEL: "8"
+      OLLAMA_MAX_LOADED_MODELS: "2"
+      OLLAMA_MAX_QUEUE: "1024"
+      MODELS_TO_PULL: "${OLLAMA_EMBED_MODELS:-nomic-embed-text}"
+    ports:
+      - "${OLLAMA_EMBED_EXT_PORT:-11441}:11434"
+    volumes:
+      - ollama-embed-data:/root/.ollama
+      - *script-mount
+    networks:
+      ollama-net:
+        aliases: [ollama-embed]
+
+  ollama-embed-cpu:
+    <<: *ollama-base
+    container_name: sheria-ollama-embed
+    profiles: [cpu]
+    environment:
+      <<: *cpu-env
+      OLLAMA_HOST: "0.0.0.0:11434"
+      OLLAMA_KEEP_ALIVE: "10m"
+      OLLAMA_NUM_PARALLEL: "2"
+      OLLAMA_MAX_LOADED_MODELS: "1"
+      OLLAMA_MAX_QUEUE: "256"
+      MODELS_TO_PULL: "${OLLAMA_EMBED_MODELS:-nomic-embed-text}"
+    ports:
+      - "${OLLAMA_EMBED_EXT_PORT:-11441}:11434"
+    volumes:
+      - ollama-embed-data:/root/.ollama
+      - *script-mount
+    networks:
+      ollama-net:
+        aliases: [ollama-embed]
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # RERANK NODE  (ext port: OLLAMA_RERANK_EXT_PORT / default 11442)
+  # Serves: Qwen3-Reranker-4B (GPU) | qwen2.5:3b (CPU fallback)
+  # Note: Ollama has no native /api/rerank — rerank client uses /api/embeddings
+  # or /api/chat to score candidate pairs.
+  # ──────────────────────────────────────────────────────────────────────────
+  ollama-rerank:
+    <<:
+      - *ollama-base
+      - *gpu-resources
+    container_name: sheria-ollama-rerank
+    profiles: [gpu]
+    environment:
+      <<: *gpu-env
+      OLLAMA_HOST: "0.0.0.0:11434"
+      OLLAMA_KEEP_ALIVE: "-1"
+      OLLAMA_NUM_PARALLEL: "4"
+      OLLAMA_MAX_LOADED_MODELS: "1"
+      OLLAMA_MAX_QUEUE: "512"
+      MODELS_TO_PULL: "${OLLAMA_RERANK_MODELS:-qwen2.5:3b}"
+    ports:
+      - "${OLLAMA_RERANK_EXT_PORT:-11442}:11434"
+    volumes:
+      - ollama-rerank-data:/root/.ollama
+      - *script-mount
+    networks:
+      ollama-net:
+        aliases: [ollama-rerank]
+
+  ollama-rerank-cpu:
+    <<: *ollama-base
+    container_name: sheria-ollama-rerank
+    profiles: [cpu]
+    environment:
+      <<: *cpu-env
+      OLLAMA_HOST: "0.0.0.0:11434"
+      OLLAMA_KEEP_ALIVE: "10m"
+      OLLAMA_NUM_PARALLEL: "1"
+      OLLAMA_MAX_LOADED_MODELS: "1"
+      OLLAMA_MAX_QUEUE: "256"
+      MODELS_TO_PULL: "${OLLAMA_RERANK_MODELS:-qwen2.5:3b}"
+    ports:
+      - "${OLLAMA_RERANK_EXT_PORT:-11442}:11434"
+    volumes:
+      - ollama-rerank-data:/root/.ollama
+      - *script-mount
+    networks:
+      ollama-net:
+        aliases: [ollama-rerank]
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # MODEL PULLER — init container; polls all nodes until models are loaded,
+  # then exits 0. ollama-proxy depends on this completing successfully,
+  # ensuring no requests are routed until all nodes are warm.
+  #
+  # Uses DNS aliases defined above — works regardless of gpu/cpu profile.
+  # ──────────────────────────────────────────────────────────────────────────
+  model-puller:
+    image: alpine:3.20
+    container_name: sheria-model-puller
+    command:
+      - sh
+      - -c
+      - |
+        apk add --no-cache curl > /dev/null 2>&1
+        echo "[model-puller] Waiting for all Ollama nodes to report loaded models..."
+        for svc in \
+          ollama-llm:11434 \
+          ollama-llm2:11434 \
+          ollama-llm3:11434 \
+          ollama-embed:11434 \
+          ollama-rerank:11434; do
+          echo "[model-puller]   polling http://$$svc/api/tags ..."
+          until curl -sf "http://$$svc/api/tags" 2>/dev/null | grep -q '"name"'; do
+            sleep 5
+          done
+          echo "[model-puller]   $$svc: ready"
+        done
+        echo "[model-puller] All nodes healthy — proxy may start."
+    networks:
+      - ollama-net
+    restart: "no"
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # OLLAMA PROXY (nginx)
+  # Ports exposed to host:
+  #   11433 → LLM (round-robin across 3 nodes)
+  #   11436 → Embed
+  #   11437 → Rerank
+  #   8080  → Health / nginx status
+  # ──────────────────────────────────────────────────────────────────────────
+  ollama-proxy:
+    image: nginx:alpine
+    container_name: sheria-ollama-proxy
+    ports:
+      - "${OLLAMA_PROXY_LLM_PORT:-11433}:11433"
+      - "${OLLAMA_PROXY_EMBED_PORT:-11436}:11436"
+      - "${OLLAMA_PROXY_RERANK_PORT:-11437}:11437"
+      - "8080:8080"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    networks:
+      - ollama-net
+    depends_on:
+      model-puller:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # OPEN WEBUI — judicial research interface
+  # Connects to ollama-proxy (not directly to nodes) for load-balanced access
+  # ──────────────────────────────────────────────────────────────────────────
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: sheria-open-webui
+    ports:
+      - "${OPEN_WEBUI_PORT:-3030}:8080"
+    environment:
+      OLLAMA_BASE_URL: "http://ollama-proxy:11433"
+      WEBUI_SECRET_KEY: "${WEBUI_SECRET_KEY:-change-me-to-random-string}"
+      ENABLE_SIGNUP: "true"
+      DEFAULT_USER_ROLE: "user"
+      WEBUI_AUTH: "true"
+      ENABLE_RAG_WEB_SEARCH: "false"
+      WEBUI_NAME: "${WEBUI_NAME:-Sheria Legal Research}"
+      CORS_ALLOW_ORIGIN: "*"
+    volumes:
+      - open-webui-data:/app/backend/data
+    networks:
+      - ollama-net
+    depends_on:
+      ollama-proxy:
+        condition: service_healthy
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    restart: unless-stopped
