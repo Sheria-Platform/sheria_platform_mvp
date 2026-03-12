@@ -13,8 +13,9 @@ Typical flow:
 """
 
 import threading
+import time
 import uuid
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional
 
 import boto3
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -160,11 +161,17 @@ _jobs_lock = threading.Lock()
 class IngestRequest(BaseModel):
     s3_key: str
     file_id: str
+    filename: Optional[str] = None  # original filename for display
 
 
 class JobStatus(BaseModel):
     job_id: str
     status: str  # pending | running | done | failed
+    filename: str = ""
+    s3_key: str = ""
+    started_at: Optional[float] = None   # unix timestamp
+    completed_at: Optional[float] = None
+    duration_s: Optional[float] = None
     stats: dict = {}
     error: str = ""
 
@@ -172,16 +179,27 @@ class JobStatus(BaseModel):
 def _run_ingest(job_id: str, bucket: str, s3_key: str) -> None:
     with _jobs_lock:
         _jobs[job_id]["status"] = "running"
+        _jobs[job_id]["started_at"] = time.time()
     try:
         from pipelines.ingestion.main import main as ingest_main  # lazy import
         exit_code, stats = ingest_main(bucket_name=bucket, prefix=s3_key)
+        completed = time.time()
         with _jobs_lock:
             _jobs[job_id]["status"] = "done" if exit_code == 0 else "failed"
             _jobs[job_id]["stats"] = stats
+            _jobs[job_id]["completed_at"] = completed
+            _jobs[job_id]["duration_s"] = round(
+                completed - (_jobs[job_id].get("started_at") or completed), 1
+            )
     except Exception as exc:
+        completed = time.time()
         with _jobs_lock:
             _jobs[job_id]["status"] = "failed"
             _jobs[job_id]["error"] = str(exc)
+            _jobs[job_id]["completed_at"] = completed
+            _jobs[job_id]["duration_s"] = round(
+                completed - (_jobs[job_id].get("started_at") or completed), 1
+            )
 
 
 @router.post("/ingest", response_model=JobStatus, summary="Trigger ingestion for an uploaded file")
@@ -197,7 +215,16 @@ async def trigger_ingest(
         )
     job_id = str(uuid.uuid4())
     with _jobs_lock:
-        _jobs[job_id] = {"status": "pending", "stats": {}, "error": ""}
+        _jobs[job_id] = {
+            "status": "pending",
+            "filename": req.filename or req.s3_key.rsplit("/", 1)[-1],
+            "s3_key": req.s3_key,
+            "started_at": time.time(),
+            "completed_at": None,
+            "duration_s": None,
+            "stats": {},
+            "error": "",
+        }
 
     t = threading.Thread(
         target=_run_ingest,
@@ -205,7 +232,25 @@ async def trigger_ingest(
         daemon=True,
     )
     t.start()
-    return JobStatus(job_id=job_id, status="pending")
+    return JobStatus(job_id=job_id, status="pending", **{
+        k: _jobs[job_id][k] for k in ("filename", "s3_key", "started_at")
+    })
+
+
+@router.get("/jobs", response_model=List[JobStatus], summary="List all ingestion jobs")
+async def list_jobs(
+    user: dict = Depends(get_current_user),
+) -> List[JobStatus]:
+    with _jobs_lock:
+        snapshot = dict(_jobs)
+    return [
+        JobStatus(job_id=jid, **data)
+        for jid, data in sorted(
+            snapshot.items(),
+            key=lambda x: x[1].get("started_at") or 0,
+            reverse=True,
+        )
+    ]
 
 
 @router.get("/jobs/{job_id}", response_model=JobStatus, summary="Poll ingestion job status")

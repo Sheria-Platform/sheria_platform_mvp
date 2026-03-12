@@ -72,7 +72,11 @@ export function useUpload() {
           "/api/v1/upload/ingest",
           {
             method: "POST",
-            body: JSON.stringify({ s3_key: presign.s3_key, file_id: presign.file_id }),
+            body: JSON.stringify({
+              s3_key: presign.s3_key,
+              file_id: presign.file_id,
+              filename: uploadFile.file.name,
+            }),
           }
         );
 
