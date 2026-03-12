@@ -22,9 +22,11 @@ import logging
 import time
 import uuid
 from contextlib import asynccontextmanager
+import json as _agent_json  # agent log
 from typing import AsyncGenerator
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from prometheus_client import make_asgi_app
 from qdrant_client.http.models import Distance, VectorParams
 from sqlalchemy import text
@@ -93,6 +95,30 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
                 "duration_ms": duration_ms,
             },
         )
+
+        # #region agent log
+        try:
+            _agent_log = {
+                "sessionId": "798f81",
+                "runId": "pre-fix",
+                "hypothesisId": "H1",
+                "location": "services/api/main.py:RequestLoggingMiddleware.dispatch",
+                "message": "request completed",
+                "data": {
+                    "method": request.method,
+                    "path": endpoint,
+                    "status": response.status_code,
+                    "origin": request.headers.get("origin"),
+                },
+                "timestamp": int(time.time() * 1000),
+            }
+            _agent_log_path = "/Users/danielmalungu/Documents/sheria_platform_mvp/.cursor/debug-798f81.log"
+            with open(_agent_log_path, "a", encoding="utf-8") as _agent_f:
+                _agent_f.write(_agent_json.dumps(_agent_log) + "\n")
+        except Exception:
+            # Intentionally swallow all errors from debug logging.
+            pass
+        # #endregion
         return response
 
 
@@ -203,9 +229,21 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 app.add_middleware(RequestLoggingMiddleware)
 
 # ── Route Registration ────────────────────────────────────────────────────
+@app.get("/api/v1/health")
+async def api_v1_health() -> dict[str, str]:
+    # Simple compatibility alias for legacy health checks.
+    return {"status": "ok"}
+
 app.include_router(chat.router, prefix="/api/v1/chat", tags=["Chat"])
 app.include_router(upload.router, prefix="/api/v1/upload", tags=["Upload"])
 app.include_router(

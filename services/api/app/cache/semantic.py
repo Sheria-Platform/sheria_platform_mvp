@@ -49,7 +49,7 @@ class SemanticCache:
 
             cutoff = time.time() - (effective_max_age * 86400)
             results = await qdrant_client.client.search(
-                collection_name="semantic_cache",
+                collection_name="kenya_law_reports",
                 query_vector=vector,
                 limit=1,
                 with_payload=True,
@@ -95,7 +95,7 @@ class SemanticCache:
                 vector = await embeddings_client.embed_query(query)
 
             await qdrant_client.client.upsert(
-                collection_name="semantic_cache",
+                collection_name="kenya_law_reports",
                 points=[
                     models.PointStruct(
                         id=str(uuid.uuid4()),
