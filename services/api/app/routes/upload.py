@@ -12,9 +12,11 @@ Typical flow:
     4. Client notifies the ingestion pipeline with ``s3_key``.
 """
 
+import asyncio
 import threading
 import time
 import uuid
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 import boto3
@@ -23,6 +25,7 @@ from pydantic import BaseModel
 
 from services.api.app.auth.jwt import get_current_user
 from services.api.app.config import settings
+from services.api.app.memory.postgres import postgres_memory
 
 router = APIRouter()
 
@@ -152,7 +155,7 @@ async def generate_upload_url(
 
 
 # ---------------------------------------------------------------------------
-# In-memory job store (MVP — restart clears jobs)
+# In-memory job store — live status cache; persisted to PostgreSQL for durability
 # ---------------------------------------------------------------------------
 _jobs: Dict[str, Dict[str, Any]] = {}
 _jobs_lock = threading.Lock()
@@ -176,30 +179,45 @@ class JobStatus(BaseModel):
     error: str = ""
 
 
-def _run_ingest(job_id: str, bucket: str, s3_key: str) -> None:
+def _run_ingest(job_id: str, bucket: str, s3_key: str, user_id: str) -> None:
     with _jobs_lock:
         _jobs[job_id]["status"] = "running"
         _jobs[job_id]["started_at"] = time.time()
+    asyncio.run(postgres_memory.update_ingestion_job(job_id, status="running"))
     try:
         from pipelines.ingestion.main import main as ingest_main  # lazy import
         exit_code, stats = ingest_main(bucket_name=bucket, prefix=s3_key)
         completed = time.time()
+        final_status = "done" if exit_code == 0 else "failed"
         with _jobs_lock:
-            _jobs[job_id]["status"] = "done" if exit_code == 0 else "failed"
+            _jobs[job_id]["status"] = final_status
             _jobs[job_id]["stats"] = stats
             _jobs[job_id]["completed_at"] = completed
             _jobs[job_id]["duration_s"] = round(
                 completed - (_jobs[job_id].get("started_at") or completed), 1
             )
+        asyncio.run(postgres_memory.update_ingestion_job(
+            job_id,
+            status=final_status,
+            completed_at=datetime.utcfromtimestamp(completed),
+            duration_s=_jobs[job_id]["duration_s"],
+            stats=stats,
+        ))
     except Exception as exc:
         completed = time.time()
+        duration = round(completed - (_jobs[job_id].get("started_at") or completed), 1)
         with _jobs_lock:
             _jobs[job_id]["status"] = "failed"
             _jobs[job_id]["error"] = str(exc)
             _jobs[job_id]["completed_at"] = completed
-            _jobs[job_id]["duration_s"] = round(
-                completed - (_jobs[job_id].get("started_at") or completed), 1
-            )
+            _jobs[job_id]["duration_s"] = duration
+        asyncio.run(postgres_memory.update_ingestion_job(
+            job_id,
+            status="failed",
+            completed_at=datetime.utcfromtimestamp(completed),
+            duration_s=duration,
+            error=str(exc),
+        ))
 
 
 @router.post("/ingest", response_model=JobStatus, summary="Trigger ingestion for an uploaded file")
@@ -214,21 +232,32 @@ async def trigger_ingest(
             detail="S3_BUCKET_NAME is not configured.",
         )
     job_id = str(uuid.uuid4())
+    started_ts = time.time()
+    filename = req.filename or req.s3_key.rsplit("/", 1)[-1]
     with _jobs_lock:
         _jobs[job_id] = {
             "status": "pending",
-            "filename": req.filename or req.s3_key.rsplit("/", 1)[-1],
+            "filename": filename,
             "s3_key": req.s3_key,
-            "started_at": time.time(),
+            "user_id": user["id"],
+            "started_at": started_ts,
             "completed_at": None,
             "duration_s": None,
             "stats": {},
             "error": "",
         }
 
+    await postgres_memory.create_ingestion_job(
+        job_id=job_id,
+        user_id=user["id"],
+        filename=filename,
+        s3_key=req.s3_key,
+        started_at=datetime.utcfromtimestamp(started_ts),
+    )
+
     t = threading.Thread(
         target=_run_ingest,
-        args=(job_id, settings.S3_BUCKET_NAME, req.s3_key),
+        args=(job_id, settings.S3_BUCKET_NAME, req.s3_key, user["id"]),
         daemon=True,
     )
     t.start()
@@ -241,16 +270,8 @@ async def trigger_ingest(
 async def list_jobs(
     user: dict = Depends(get_current_user),
 ) -> List[JobStatus]:
-    with _jobs_lock:
-        snapshot = dict(_jobs)
-    return [
-        JobStatus(job_id=jid, **data)
-        for jid, data in sorted(
-            snapshot.items(),
-            key=lambda x: x[1].get("started_at") or 0,
-            reverse=True,
-        )
-    ]
+    rows = await postgres_memory.get_all_ingestion_jobs(user["id"])
+    return [JobStatus(**r) for r in rows]
 
 
 @router.get("/jobs/{job_id}", response_model=JobStatus, summary="Poll ingestion job status")
@@ -258,8 +279,16 @@ async def get_job_status(
     job_id: str,
     user: dict = Depends(get_current_user),
 ) -> JobStatus:
+    # In-memory gives live status for active jobs
     with _jobs_lock:
         job = _jobs.get(job_id)
-    if not job:
+    if job and job.get("user_id") == user["id"]:
+        return JobStatus(
+            job_id=job_id,
+            **{k: v for k, v in job.items() if k != "user_id"},
+        )
+    # Fall back to DB for completed / pre-restart jobs
+    row = await postgres_memory.get_ingestion_job(job_id, user["id"])
+    if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
-    return JobStatus(job_id=job_id, **job)
+    return JobStatus(**row)
