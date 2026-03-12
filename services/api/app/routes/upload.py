@@ -12,7 +12,9 @@ Typical flow:
     4. Client notifies the ingestion pipeline with ``s3_key``.
 """
 
+import threading
 import uuid
+from typing import Any, Dict
 
 import boto3
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -25,7 +27,17 @@ router = APIRouter()
 
 # boto3 presigning is CPU-bound and very fast (~1 ms); a sync client
 # is acceptable here -- no I/O occurs until the client uploads.
-_s3 = boto3.client("s3", region_name=settings.AWS_REGION)
+# When MINIO_SERVER_URL is set (local dev), point boto3 at MinIO.
+if settings.MINIO_SERVER_URL:
+    _s3 = boto3.client(
+        "s3",
+        endpoint_url=settings.MINIO_SERVER_URL,
+        aws_access_key_id=settings.MINIO_ROOT_USER,
+        aws_secret_access_key=settings.MINIO_ROOT_PASSWORD,
+        region_name="us-east-1",
+    )
+else:
+    _s3 = boto3.client("s3", region_name=settings.AWS_REGION)
 
 # Presigned URL validity window in seconds (1 hour)
 _PRESIGNED_URL_TTL = 3600
@@ -105,6 +117,12 @@ async def generate_upload_url(
                 "s3_key": "uploads/judge-001/550e8400....pdf"
             }
     """
+    if not settings.S3_BUCKET_NAME:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="S3_BUCKET_NAME is not configured. Set it in .env.",
+        )
+
     file_id = str(uuid.uuid4())
     extension = (
         req.filename.rsplit(".", 1)[-1] if "." in req.filename else "bin"
@@ -118,10 +136,6 @@ async def generate_upload_url(
                 "Bucket": settings.S3_BUCKET_NAME,
                 "Key": s3_key,
                 "ContentType": req.content_type,
-                "Metadata": {
-                    "original_filename": req.filename,
-                    "user_id": user["id"],
-                },
             },
             ExpiresIn=_PRESIGNED_URL_TTL,
         )
@@ -134,3 +148,73 @@ async def generate_upload_url(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(exc),
         ) from exc
+
+
+# ---------------------------------------------------------------------------
+# In-memory job store (MVP — restart clears jobs)
+# ---------------------------------------------------------------------------
+_jobs: Dict[str, Dict[str, Any]] = {}
+_jobs_lock = threading.Lock()
+
+
+class IngestRequest(BaseModel):
+    s3_key: str
+    file_id: str
+
+
+class JobStatus(BaseModel):
+    job_id: str
+    status: str  # pending | running | done | failed
+    stats: dict = {}
+    error: str = ""
+
+
+def _run_ingest(job_id: str, bucket: str, s3_key: str) -> None:
+    with _jobs_lock:
+        _jobs[job_id]["status"] = "running"
+    try:
+        from pipelines.ingestion.main import main as ingest_main  # lazy import
+        exit_code, stats = ingest_main(bucket_name=bucket, prefix=s3_key)
+        with _jobs_lock:
+            _jobs[job_id]["status"] = "done" if exit_code == 0 else "failed"
+            _jobs[job_id]["stats"] = stats
+    except Exception as exc:
+        with _jobs_lock:
+            _jobs[job_id]["status"] = "failed"
+            _jobs[job_id]["error"] = str(exc)
+
+
+@router.post("/ingest", response_model=JobStatus, summary="Trigger ingestion for an uploaded file")
+async def trigger_ingest(
+    req: IngestRequest,
+    user: dict = Depends(get_current_user),
+) -> JobStatus:
+    """Start the ingestion pipeline for a file that was just uploaded to MinIO."""
+    if not settings.S3_BUCKET_NAME:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="S3_BUCKET_NAME is not configured.",
+        )
+    job_id = str(uuid.uuid4())
+    with _jobs_lock:
+        _jobs[job_id] = {"status": "pending", "stats": {}, "error": ""}
+
+    t = threading.Thread(
+        target=_run_ingest,
+        args=(job_id, settings.S3_BUCKET_NAME, req.s3_key),
+        daemon=True,
+    )
+    t.start()
+    return JobStatus(job_id=job_id, status="pending")
+
+
+@router.get("/jobs/{job_id}", response_model=JobStatus, summary="Poll ingestion job status")
+async def get_job_status(
+    job_id: str,
+    user: dict = Depends(get_current_user),
+) -> JobStatus:
+    with _jobs_lock:
+        job = _jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+    return JobStatus(job_id=job_id, **job)

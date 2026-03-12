@@ -79,10 +79,14 @@ class Settings(BaseSettings):
     NEO4J_PASSWORD: str  # required — sensitive
 
     # ------------------------------------------------------------------ #
-    # AWS S3                                                                #
+    # AWS S3 / MinIO                                                         #
     # ------------------------------------------------------------------ #
     AWS_REGION: str = "us-east-1"
     S3_BUCKET_NAME: str = ""
+    # When set, boto3 is pointed at MinIO instead of AWS
+    MINIO_SERVER_URL: str = ""
+    MINIO_ROOT_USER: str = ""
+    MINIO_ROOT_PASSWORD: str = ""
 
     # ------------------------------------------------------------------ #
     # Ollama (LLM & Embeddings)                                             #
