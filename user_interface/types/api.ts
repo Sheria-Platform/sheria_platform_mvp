@@ -11,4 +11,8 @@ export type {
   UploadPresignResponse,
   HealthResponse,
   ServiceHealth,
+  SessionSummary,
+  MessageRecord,
+  RegisterRequest,
+  PendingUser,
 } from "../src/types/api";

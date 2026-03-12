@@ -89,3 +89,16 @@ async def get_current_user(
 
     except JWTError:
         raise credentials_exception
+
+
+async def require_admin(user: dict = Depends(get_current_user)) -> dict:
+    """FastAPI dependency that additionally requires the ``admin`` role.
+
+    Use this instead of ``get_current_user`` on admin-only endpoints.
+    """
+    if user.get("role") != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required",
+        )
+    return user

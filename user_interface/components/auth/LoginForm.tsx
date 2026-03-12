@@ -2,25 +2,17 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useChatStore } from "@/store/chatStore";
-import { UserRole } from "@/types/api";
-
-const ROLES: { value: UserRole; label: string }[] = [
-  { value: "judge", label: "Judge" },
-  { value: "magistrate", label: "Magistrate" },
-  { value: "registrar", label: "Court Registrar" },
-  { value: "clerk", label: "Judicial Clerk" },
-];
 
 export function LoginForm() {
   const router = useRouter();
   const setUser = useChatStore((s) => s.setUser);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const [role, setRole] = useState<UserRole>("judge");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -36,10 +28,10 @@ export function LoginForm() {
       const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password, role }),
+        body: JSON.stringify({ username, password }),
       });
-      if (!res.ok) throw new Error("Invalid credentials");
       const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Invalid credentials");
       setUser(data.user);
       router.push("/chat");
     } catch (err) {
@@ -80,23 +72,6 @@ export function LoginForm() {
         />
       </div>
 
-      <div className="space-y-2">
-        <Label htmlFor="role">Role</Label>
-        <select
-          id="role"
-          value={role}
-          onChange={(e) => setRole(e.target.value as UserRole)}
-          className="w-full border border-input bg-background rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-          disabled={loading}
-        >
-          {ROLES.map((r) => (
-            <option key={r.value} value={r.value}>
-              {r.label}
-            </option>
-          ))}
-        </select>
-      </div>
-
       {error && (
         <p className="text-sm text-destructive bg-destructive/10 px-3 py-2 rounded-md">
           {error}
@@ -111,6 +86,17 @@ export function LoginForm() {
       >
         {loading ? "Signing in…" : "Sign in"}
       </Button>
+
+      <p className="text-center text-sm text-gray-500">
+        Don&apos;t have an account?{" "}
+        <Link
+          href="/register"
+          className="font-medium hover:underline"
+          style={{ color: "#1a3a6b" }}
+        >
+          Request access
+        </Link>
+      </p>
     </form>
   );
 }

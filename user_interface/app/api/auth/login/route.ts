@@ -1,46 +1,41 @@
 import { NextRequest, NextResponse } from "next/server";
-import { SignJWT } from "jose";
-import { LoginRequest } from "@/types/api";
 
-const SECRET = new TextEncoder().encode(
-  process.env.JWT_SECRET || "sheria-dev-secret-change-in-prod"
-);
+const API_URL = process.env.API_URL || "http://localhost:8000";
 
 export async function POST(req: NextRequest) {
-  const body = (await req.json()) as LoginRequest;
+  const body = await req.json();
 
   if (!body.username || !body.password) {
     return NextResponse.json({ error: "Missing credentials" }, { status: 400 });
   }
 
-  // In production this should call the FastAPI auth endpoint.
-  // For MVP, we create a signed JWT locally.
-  const token = await new SignJWT({
-    sub: body.username,
-    role: body.role || "clerk",
-    username: body.username,
-  })
-    .setProtectedHeader({ alg: "HS256" })
-    .setExpirationTime("8h")
-    .setIssuedAt()
-    .sign(SECRET);
+  let apiRes: Response;
+  try {
+    apiRes = await fetch(`${API_URL}/api/v1/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: body.username, password: body.password }),
+    });
+  } catch {
+    return NextResponse.json({ error: "API unavailable" }, { status: 503 });
+  }
 
-  const user = {
-    id: body.username,
-    username: body.username,
-    role: body.role || "clerk",
-    full_name: body.username,
-    token,
-  };
+  if (!apiRes.ok) {
+    const detail = await apiRes.json().catch(() => ({ detail: "Invalid credentials" }));
+    return NextResponse.json(
+      { error: detail.detail || "Invalid credentials" },
+      { status: apiRes.status }
+    );
+  }
 
-  const res = NextResponse.json({ user, token });
-  res.cookies.set("sheria_auth", JSON.stringify(user), {
-    httpOnly: false, // needs to be readable by js-cookie on client
+  const data = await apiRes.json();
+  const res = NextResponse.json({ user: data.user, token: data.access_token });
+  res.cookies.set("sheria_auth", JSON.stringify(data.user), {
+    httpOnly: false,
     sameSite: "strict",
     secure: process.env.NODE_ENV === "production",
-    maxAge: 60 * 60 * 8, // 8 hours
+    maxAge: 60 * 60 * 8,
     path: "/",
   });
-
   return res;
 }
