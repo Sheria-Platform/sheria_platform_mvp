@@ -13,7 +13,7 @@ chunking:
 embedding:
   # Ollama configuration
   # Host endpoint (can be overridden by OLLAMA_HOST env var)
-  host: http://localhost:11434
+  host: http://192.168.214.21:11436
 
   # Embedding model to use (can be overridden by OLLAMA_EMBED_MODEL env var)
   # Recommended models: nomic-embed-text, mxbai-embed-large, all-minilm
@@ -25,7 +25,7 @@ embedding:
 llm:
   # Ollama LLM configuration for graph extraction
   # Host endpoint (can be overridden by OLLAMA_HOST env var)
-  host: http://localhost:11434
+  host: http://192.168.214.21:11433
 
   # LLM model to use (can be overridden by OLLAMA_LLM_MODEL env var)
   # Recommended models: llama3, llama3.1, mistral, qwen2.5

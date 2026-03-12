@@ -491,19 +491,37 @@ def _process_file_batch(
     if not batch_chunks or _shutdown_requested:
         return
 
-    # Stage B: Graph extraction FIRST — LLM has exclusive CPU access
-    chunks_with_graph = []
-    if config["enable_graph"] and neo4j_indexer and extractor:
-        chunks_with_graph, graph_failures = batch_extract_graph(
-            batch_chunks, config["graph_batch_size"], 3, extractor
-        )
-        stats["graph_failed"] += graph_failures
+    # Stage B: Parallel fork — embed (port 11436) and graph (port 11433) run concurrently.
+    # Dedicated cluster nodes eliminate the resource contention that caused the serial fallback.
+    # BatchEmbedder uses asyncio.run() internally — safe inside a thread (own event loop).
+    # GraphExtractor uses synchronous httpx.Client — no event loop concern.
+    chunks_with_vectors: list = []
+    chunks_with_graph: list = []
 
-    # Stage C: Embeddings SECOND — LLM is now idle, embed model has full CPU
-    chunks_with_vectors, embed_failures = batch_embed(
-        batch_chunks, config["embedding_batch_size"], 3, embedder
-    )
-    stats["vectors_failed"] += embed_failures
+    with ThreadPoolExecutor(max_workers=2) as fork_pool:
+        embed_future = fork_pool.submit(
+            batch_embed, batch_chunks, config["embedding_batch_size"], 3, embedder
+        )
+        graph_future = None
+        if config["enable_graph"] and neo4j_indexer and extractor:
+            graph_future = fork_pool.submit(
+                batch_extract_graph, batch_chunks, config["graph_batch_size"], 3, extractor
+            )
+
+        try:
+            chunks_with_vectors, embed_failures = embed_future.result()
+            stats["vectors_failed"] += embed_failures
+        except Exception as e:
+            logger.error(f"[Batch {batch_num}] Embed fork failed: {e}", exc_info=True)
+            stats["vectors_failed"] += len(batch_chunks)
+
+        if graph_future is not None:
+            try:
+                chunks_with_graph, graph_failures = graph_future.result()
+                stats["graph_failed"] += graph_failures
+            except Exception as e:
+                logger.error(f"[Batch {batch_num}] Graph fork failed: {e}", exc_info=True)
+                stats["graph_failed"] += len(batch_chunks)
 
     # Stage D: Index to Qdrant (sub-batches of 100)
     if chunks_with_vectors and not _shutdown_requested:
