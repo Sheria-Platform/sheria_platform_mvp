@@ -1,8 +1,10 @@
+import Image from "next/image";
+
 const SUGGESTED = [
-  "What is the test for adverse possession in Kenya?",
-  "Show binding precedents on right to fair trial",
-  "Summarise the Mutunga constitutional reforms",
-  "What damages apply in medical negligence cases?",
+  { label: "Adverse possession test", q: "What is the test for adverse possession in Kenya?" },
+  { label: "Right to fair trial", q: "Show binding precedents on the right to fair trial" },
+  { label: "Mutunga reforms", q: "Summarise the Mutunga constitutional reforms" },
+  { label: "Medical negligence", q: "What damages apply in medical negligence cases?" },
 ];
 
 interface EmptyStateProps {
@@ -12,22 +14,31 @@ interface EmptyStateProps {
 export function EmptyState({ onSelect }: EmptyStateProps) {
   return (
     <div className="flex flex-col items-center justify-center h-full text-center px-4">
-      <div className="text-5xl mb-4">⚖️</div>
-      <h2 className="text-xl font-semibold mb-2" style={{ color: "#1a3a6b" }}>
-        Sheria Legal Research
+      <div className="mb-5">
+        <Image
+          src="/sheria-logo.jpg"
+          alt="Sheria Platform"
+          width={160}
+          height={64}
+          className="h-16 w-auto object-contain"
+          priority
+        />
+      </div>
+      <h2 className="text-2xl font-semibold text-gray-800 mb-2">
+        How can I help you today?
       </h2>
       <p className="text-gray-500 text-sm mb-8 max-w-sm">
-        Ask a legal research question. The system searches Kenya Law Reports,
-        binding precedents, and statutes.
+        Search Kenya Law Reports, binding precedents, statutes, and court records.
       </p>
-      <div className="grid gap-2 w-full max-w-lg">
-        {SUGGESTED.map((q) => (
+      <div className="grid grid-cols-2 gap-3 w-full max-w-xl">
+        {SUGGESTED.map(({ label, q }) => (
           <button
             key={q}
             onClick={() => onSelect(q)}
-            className="text-left px-4 py-2.5 rounded-lg border border-gray-200 hover:border-blue-300 hover:bg-blue-50 text-sm text-gray-700 transition-colors"
+            className="text-left px-4 py-3 rounded-xl border border-gray-200 bg-white hover:border-gray-300 hover:shadow-sm text-sm text-gray-700 transition-all"
           >
-            {q}
+            <span className="font-medium text-gray-800 block mb-0.5">{label}</span>
+            <span className="text-xs text-gray-400 line-clamp-2">{q}</span>
           </button>
         ))}
       </div>
