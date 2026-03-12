@@ -115,7 +115,7 @@ services:
       <<: *cpu-env
       OLLAMA_HOST: "0.0.0.0:11434"
       OLLAMA_KEEP_ALIVE: "10m"
-      OLLAMA_NUM_PARALLEL: "1"
+      OLLAMA_NUM_PARALLEL: "1"   # CPU: keep at 1 — higher values cause instability (memory exhaustion + context switching on shared CPU)
       OLLAMA_MAX_LOADED_MODELS: "1"
       OLLAMA_MAX_QUEUE: "256"
       MODELS_TO_PULL: "${OLLAMA_LLM_MODELS:-qwen2.5:3b}"
@@ -162,7 +162,7 @@ services:
       <<: *cpu-env
       OLLAMA_HOST: "0.0.0.0:11434"
       OLLAMA_KEEP_ALIVE: "10m"
-      OLLAMA_NUM_PARALLEL: "1"
+      OLLAMA_NUM_PARALLEL: "1"   # CPU: keep at 1 — higher values cause instability (memory exhaustion + context switching on shared CPU)
       OLLAMA_MAX_LOADED_MODELS: "1"
       OLLAMA_MAX_QUEUE: "256"
       MODELS_TO_PULL: "${OLLAMA_LLM_MODELS:-qwen2.5:3b}"
@@ -209,7 +209,7 @@ services:
       <<: *cpu-env
       OLLAMA_HOST: "0.0.0.0:11434"
       OLLAMA_KEEP_ALIVE: "10m"
-      OLLAMA_NUM_PARALLEL: "1"
+      OLLAMA_NUM_PARALLEL: "1"   # CPU: keep at 1 — higher values cause instability (memory exhaustion + context switching on shared CPU)
       OLLAMA_MAX_LOADED_MODELS: "1"
       OLLAMA_MAX_QUEUE: "256"
       MODELS_TO_PULL: "${OLLAMA_LLM_MODELS:-qwen2.5:3b}"
@@ -308,7 +308,7 @@ services:
       <<: *cpu-env
       OLLAMA_HOST: "0.0.0.0:11434"
       OLLAMA_KEEP_ALIVE: "10m"
-      OLLAMA_NUM_PARALLEL: "1"
+      OLLAMA_NUM_PARALLEL: "1"   # CPU: keep at 1 — higher values cause instability (memory exhaustion + context switching on shared CPU)
       OLLAMA_MAX_LOADED_MODELS: "1"
       OLLAMA_MAX_QUEUE: "256"
       MODELS_TO_PULL: "${OLLAMA_RERANK_MODELS:-qwen2.5:3b}"

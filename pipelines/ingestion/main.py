@@ -491,21 +491,21 @@ def _process_file_batch(
     if not batch_chunks or _shutdown_requested:
         return
 
-    # Stage B+D (Fork A ‖ Fork B): embed and graph-extract concurrently
-    graph_future = None
-    with ThreadPoolExecutor(max_workers=2) as fork:
-        embed_future = fork.submit(
-            batch_embed, batch_chunks, config["embedding_batch_size"], 3, embedder
+    # Stage B: Graph extraction FIRST — LLM has exclusive CPU access
+    chunks_with_graph = []
+    if config["enable_graph"] and neo4j_indexer and extractor:
+        chunks_with_graph, graph_failures = batch_extract_graph(
+            batch_chunks, config["graph_batch_size"], 3, extractor
         )
-        if config["enable_graph"] and neo4j_indexer and extractor:
-            graph_future = fork.submit(
-                batch_extract_graph, batch_chunks, config["graph_batch_size"], 3, extractor
-            )
+        stats["graph_failed"] += graph_failures
 
-    chunks_with_vectors, embed_failures = embed_future.result()
+    # Stage C: Embeddings SECOND — LLM is now idle, embed model has full CPU
+    chunks_with_vectors, embed_failures = batch_embed(
+        batch_chunks, config["embedding_batch_size"], 3, embedder
+    )
     stats["vectors_failed"] += embed_failures
 
-    # Stage C: Index to Qdrant (sub-batches of 100)
+    # Stage D: Index to Qdrant (sub-batches of 100)
     if chunks_with_vectors and not _shutdown_requested:
         for i in range(0, len(chunks_with_vectors), 100):
             if _shutdown_requested:
@@ -521,10 +521,8 @@ def _process_file_batch(
                     if attempt == 2:
                         logger.error(f"[Batch {batch_num}] Failed to index sub-batch to Qdrant after 3 attempts")
 
-    # Stage E: Index graph results to Neo4j (if graph fork ran)
-    if graph_future and not _shutdown_requested:
-        chunks_with_graph, graph_failures = graph_future.result()
-        stats["graph_failed"] += graph_failures
+    # Stage E: Index graph results to Neo4j
+    if chunks_with_graph and not _shutdown_requested:
         for i in range(0, len(chunks_with_graph), 100):
             if _shutdown_requested:
                 break
