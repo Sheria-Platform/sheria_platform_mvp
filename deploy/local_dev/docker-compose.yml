@@ -336,7 +336,11 @@ services:
       - -c
       - |
         apk add --no-cache curl > /dev/null 2>&1
-        echo "[model-puller] Waiting for all Ollama nodes to report loaded models..."
+        # Maximum time (seconds) to wait for all nodes before giving up.
+        # Large models (qwen3:8b ~5 GB) can take 20+ minutes on a slow link.
+        MAX_WAIT=${MODEL_PULL_TIMEOUT:-2400}
+        DEADLINE=$(( $(date +%s) + MAX_WAIT ))
+        echo "[model-puller] Waiting for Ollama nodes (timeout ${MAX_WAIT}s)..."
         for svc in \
           ollama-llm:11434 \
           ollama-llm2:11434 \
@@ -344,10 +348,17 @@ services:
           ollama-embed:11434 \
           ollama-rerank:11434; do
           echo "[model-puller]   polling http://$$svc/api/tags ..."
-          until curl -sf "http://$$svc/api/tags" 2>/dev/null | grep -q '"name"'; do
+          while true; do
+            if curl -sf --max-time 10 "http://$$svc/api/tags" 2>/dev/null | grep -q '"name"'; then
+              echo "[model-puller]   $$svc: ready"
+              break
+            fi
+            if [ "$(date +%s)" -ge "$$DEADLINE" ]; then
+              echo "[model-puller] TIMEOUT: $$svc not ready after ${MAX_WAIT}s. Check node logs."
+              exit 1
+            fi
             sleep 5
           done
-          echo "[model-puller]   $$svc: ready"
         done
         echo "[model-puller] All nodes healthy — proxy may start."
     networks:
