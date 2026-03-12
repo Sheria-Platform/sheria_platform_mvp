@@ -65,3 +65,18 @@ export interface ServiceHealth {
   latency_ms?: number;
   message?: string;
 }
+
+export interface SessionSummary {
+  session_id: string;
+  started_at: string;
+  last_activity: string;
+  message_count: number;
+  preview: string;
+}
+
+export interface MessageRecord {
+  id: number;
+  role: "user" | "assistant";
+  content: string;
+  created_at: string;
+}

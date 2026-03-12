@@ -42,7 +42,7 @@ from services.api.app.clients.ollama_client import ollama_client
 from services.api.app.clients.qdrant import qdrant_client
 from services.api.app.logging import bind_context
 from services.api.app.memory.postgres import Base, engine
-from services.api.app.routes import chat, feedback, health, upload
+from services.api.app.routes import chat, feedback, health, history, upload
 
 logger = logging.getLogger(__name__)
 
@@ -250,6 +250,7 @@ app.include_router(
     feedback.router, prefix="/api/v1/feedback", tags=["Feedback"]
 )
 app.include_router(health.router, prefix="/health", tags=["Health"])
+app.include_router(history.router, prefix="/api/v1/history", tags=["History"])
 
 # ── Prometheus Metrics Endpoint ───────────────────────────────────────────
 # Mounted as a sub-application so prometheus_client handles content
