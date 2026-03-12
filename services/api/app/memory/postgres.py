@@ -18,7 +18,7 @@ Example:
 from datetime import datetime
 from typing import Sequence
 
-from sqlalchemy import JSON, Column, DateTime, Integer, String, Text, select
+from sqlalchemy import JSON, Column, DateTime, Float, Integer, String, Text, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
@@ -51,6 +51,24 @@ class ChatHistory(Base):
     content = Column(Text, nullable=False)
     metadata_ = Column(JSON, default={}, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class IngestionJob(Base):
+    """ORM model for the ``ingestion_jobs`` table."""
+
+    __tablename__ = "ingestion_jobs"
+
+    job_id       = Column(String, primary_key=True)
+    user_id      = Column(String, index=True, nullable=False)
+    status       = Column(String(20), nullable=False, default="pending")
+    filename     = Column(String, nullable=False, default="")
+    s3_key       = Column(String, nullable=False, default="")
+    started_at   = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+    duration_s   = Column(Float, nullable=True)
+    stats        = Column(JSON, default={})
+    error        = Column(Text, nullable=False, default="")
+    created_at   = Column(DateTime, default=datetime.utcnow)
 
 
 # Async engine -- ``echo=False`` suppresses SQL statement logging
@@ -143,6 +161,171 @@ class PostgresMemory:
             # Reverse to restore chronological (oldest -> newest) order
             rows = result.scalars().all()
             return list(reversed(rows))
+
+
+    async def get_user_sessions(self, user_id: str, limit: int = 50) -> list[dict]:
+        """Return sessions for a user, newest-first.
+
+        Each dict contains:
+            session_id, started_at, last_activity, message_count, preview.
+
+        ``preview`` is the content of the first user message, truncated to
+        120 characters.
+        """
+        sql = text("""
+            WITH first_user_msg AS (
+                SELECT
+                    session_id,
+                    content,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY session_id ORDER BY created_at ASC
+                    ) AS rn
+                FROM chat_history
+                WHERE user_id = :user_id AND role = 'user'
+            )
+            SELECT
+                ch.session_id,
+                MIN(ch.created_at)  AS started_at,
+                MAX(ch.created_at)  AS last_activity,
+                COUNT(*)            AS message_count,
+                MAX(fum.content)    AS preview
+            FROM chat_history ch
+            LEFT JOIN first_user_msg fum
+                ON fum.session_id = ch.session_id AND fum.rn = 1
+            WHERE ch.user_id = :user_id
+            GROUP BY ch.session_id
+            ORDER BY MAX(ch.created_at) DESC
+            LIMIT :limit
+        """)
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(sql, {"user_id": user_id, "limit": limit})
+            rows = result.mappings().all()
+            return [
+                {
+                    "session_id": r["session_id"],
+                    "started_at": r["started_at"].isoformat() if r["started_at"] else None,
+                    "last_activity": r["last_activity"].isoformat() if r["last_activity"] else None,
+                    "message_count": r["message_count"],
+                    "preview": (r["preview"] or "")[:120],
+                }
+                for r in rows
+            ]
+
+    async def get_session_messages(self, session_id: str, user_id: str) -> list[dict]:
+        """Return all messages for a session in chronological order.
+
+        Validates ownership: returns [] if the session belongs to a different user.
+        """
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(ChatHistory)
+                .where(
+                    ChatHistory.session_id == session_id,
+                    ChatHistory.user_id == user_id,
+                )
+                .order_by(ChatHistory.created_at.asc())
+            )
+            rows = result.scalars().all()
+            return [
+                {
+                    "id": r.id,
+                    "role": r.role,
+                    "content": r.content,
+                    "created_at": r.created_at.isoformat() if r.created_at else None,
+                }
+                for r in rows
+            ]
+
+
+    # ------------------------------------------------------------------
+    # Ingestion job persistence
+    # ------------------------------------------------------------------
+
+    async def create_ingestion_job(
+        self,
+        job_id: str,
+        user_id: str,
+        filename: str,
+        s3_key: str,
+        started_at: datetime,
+    ) -> None:
+        """Insert a new ingestion job row with ``pending`` status."""
+        async with AsyncSessionLocal() as session:
+            async with session.begin():
+                session.add(IngestionJob(
+                    job_id=job_id,
+                    user_id=user_id,
+                    status="pending",
+                    filename=filename,
+                    s3_key=s3_key,
+                    started_at=started_at,
+                ))
+
+    async def update_ingestion_job(
+        self,
+        job_id: str,
+        status: str,
+        completed_at: datetime | None = None,
+        duration_s: float | None = None,
+        stats: dict | None = None,
+        error: str | None = None,
+    ) -> None:
+        """Update mutable fields on an existing ingestion job row."""
+        values: dict = {"status": status}
+        if completed_at is not None:
+            values["completed_at"] = completed_at
+        if duration_s is not None:
+            values["duration_s"] = duration_s
+        if stats is not None:
+            values["stats"] = stats
+        if error is not None:
+            values["error"] = error
+        async with AsyncSessionLocal() as session:
+            async with session.begin():
+                await session.execute(
+                    update(IngestionJob)
+                    .where(IngestionJob.job_id == job_id)
+                    .values(**values)
+                )
+
+    async def get_all_ingestion_jobs(self, user_id: str, limit: int = 100) -> list[dict]:
+        """Return all ingestion jobs for a user, newest-first."""
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(IngestionJob)
+                .where(IngestionJob.user_id == user_id)
+                .order_by(IngestionJob.created_at.desc())
+                .limit(limit)
+            )
+            rows = result.scalars().all()
+            return [_job_to_dict(r) for r in rows]
+
+    async def get_ingestion_job(self, job_id: str, user_id: str) -> dict | None:
+        """Return a single job dict, or ``None`` if not found / wrong user."""
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(IngestionJob).where(
+                    IngestionJob.job_id == job_id,
+                    IngestionJob.user_id == user_id,
+                )
+            )
+            row = result.scalar_one_or_none()
+            return _job_to_dict(row) if row else None
+
+
+def _job_to_dict(row: IngestionJob) -> dict:
+    """Serialise an ``IngestionJob`` ORM row to a plain dict."""
+    return {
+        "job_id":       row.job_id,
+        "status":       row.status,
+        "filename":     row.filename,
+        "s3_key":       row.s3_key,
+        "started_at":   row.started_at.timestamp() if row.started_at else None,
+        "completed_at": row.completed_at.timestamp() if row.completed_at else None,
+        "duration_s":   row.duration_s,
+        "stats":        row.stats or {},
+        "error":        row.error or "",
+    }
 
 
 # Global singleton -- stateless; no lifecycle management required

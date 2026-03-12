@@ -34,13 +34,17 @@ export function HealthDashboard() {
         <StatusBadge status={health.status} />
         <span className="text-sm text-gray-500">
           Last updated:{" "}
-          {new Date(health.timestamp).toLocaleTimeString("en-KE")}
+          {health.timestamp
+            ? new Date(health.timestamp).toLocaleTimeString("en-KE")
+            : new Date().toLocaleTimeString("en-KE")}
         </span>
-        <span className="text-xs text-gray-400 ml-auto">v{health.version}</span>
+        {health.version && (
+          <span className="text-xs text-gray-400 ml-auto">v{health.version}</span>
+        )}
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        {Object.entries(health.services).map(([name, svc]) => (
+        {Object.entries(health.services ?? {}).map(([name, svc]) => (
           <ServiceCard key={name} name={name} health={svc} />
         ))}
       </div>

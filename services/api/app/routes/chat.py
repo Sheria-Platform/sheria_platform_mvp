@@ -22,6 +22,7 @@ from services.api.app.clients.ollama_client import ollama_client as global_llm
 from services.api.app.logging import bind_context
 from services.api.app.memory.postgres import PostgresMemory
 from services.api.app.memory.postgres import postgres_memory as global_memory
+import json as _agent_json  # agent log
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -95,7 +96,7 @@ async def chat_stream(
 
         async def stream_cache():
             yield json.dumps(
-                {"type": "answer", "content": cached_ans, "session_id": session_id}
+                {"event": "answer", "content": cached_ans, "session_id": session_id}
             ) + "\n"
 
         background_tasks.add_task(
@@ -135,6 +136,27 @@ async def chat_stream(
         final_answer = ""
         node_start = time.perf_counter()
 
+        # #region agent log
+        try:
+            _agent_log = {
+                "sessionId": "798f81",
+                "runId": "pre-fix",
+                "hypothesisId": "H2",
+                "location": "services/api/app/routes/chat.py:event_generator",
+                "message": "chat stream generator started",
+                "data": {
+                    "session_id": session_id,
+                    "user_id": user_id,
+                },
+                "timestamp": int(time.time() * 1000),
+            }
+            _agent_log_path = "/Users/danielmalungu/Documents/sheria_platform_mvp/.cursor/debug-798f81.log"
+            with open(_agent_log_path, "a", encoding="utf-8") as _agent_f:
+                _agent_f.write(_agent_json.dumps(_agent_log) + "\n")
+        except Exception:
+            pass
+        # #endregion
+
         try:
             async for event in agent_app.astream(
                 initial_state, config={"configurable": {"llm": llm, "user_id": user_id}}
@@ -151,13 +173,12 @@ async def chat_stream(
                 # Reset timer for the next node
                 node_start = time.perf_counter()
 
-                # Emit Status Update
+                # Emit Status Update (NDJSON event for frontend)
                 yield json.dumps(
                     {
-                        "type": "status",
-                        "node": node_name,
+                        "event": "status",
+                        "step": node_name,
                         "session_id": session_id,
-                        "info": f"Completed step: {node_name}",
                     }
                 ) + "\n"
 
@@ -167,9 +188,31 @@ async def chat_stream(
                         ai_msg = node_data["messages"][-1]
                         final_answer = ai_msg.get("content", "")
 
+                        # #region agent log
+                        try:
+                            _agent_log = {
+                                "sessionId": "798f81",
+                                "runId": "pre-fix",
+                                "hypothesisId": "H2",
+                                "location": "services/api/app/routes/chat.py:event_generator",
+                                "message": "answer yielded",
+                                "data": {
+                                    "session_id": session_id,
+                                    "user_id": user_id,
+                                    "answer_length": len(final_answer),
+                                },
+                                "timestamp": int(time.time() * 1000),
+                            }
+                            _agent_log_path = "/Users/danielmalungu/Documents/sheria_platform_mvp/.cursor/debug-798f81.log"
+                            with open(_agent_log_path, "a", encoding="utf-8") as _agent_f:
+                                _agent_f.write(_agent_json.dumps(_agent_log) + "\n")
+                        except Exception:
+                            pass
+                        # #endregion
+
                         yield json.dumps(
                             {
-                                "type": "answer",
+                                "event": "answer",
                                 "content": final_answer,
                                 "session_id": session_id,
                             }
@@ -189,7 +232,10 @@ async def chat_stream(
         except Exception as e:
             logger.error("Error in chat stream: %s", e, exc_info=True)
             yield json.dumps(
-                {"type": "error", "content": "An internal error occurred."}
+                {
+                    "event": "error",
+                    "content": "An internal error occurred.",
+                }
             ) + "\n"
 
     return StreamingResponse(event_generator(), media_type="application/x-ndjson")

@@ -20,7 +20,7 @@ export function MessageList({ messages, sessionId }: MessageListProps) {
 
   return (
     <ScrollArea className="flex-1 overflow-y-auto">
-      <div className="py-4 space-y-2">
+      <div className="py-4 space-y-2 max-w-3xl mx-auto px-4">
         {messages.map((msg) =>
           msg.role === "user" ? (
             <UserMessage key={msg.id} message={msg} />
