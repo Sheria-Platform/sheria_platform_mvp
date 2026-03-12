@@ -23,9 +23,11 @@ echo "[entrypoint] Starting Ollama server..."
 ollama serve &
 OLLAMA_PID=$!
 
-# Wait for the Ollama REST API to accept connections
+# Wait for the Ollama daemon to be ready to serve requests.
+# curl/wget are not available in the ollama image; use the ollama CLI itself.
+# `ollama list` exits 0 once the daemon responds — same check the healthcheck uses.
 echo "[entrypoint] Waiting for Ollama API to be ready..."
-until curl -sf --max-time 5 http://localhost:11434/api/tags > /dev/null 2>&1; do
+until ollama list > /dev/null 2>&1; do
     sleep 1
 done
 echo "[entrypoint] Ollama API is ready."
@@ -57,14 +59,10 @@ if [ -n "${MODELS_TO_PULL:-}" ]; then
         fi
 
         echo "[entrypoint] Warming up model: $model (loading into memory)"
-        # --max-time 60: prevents the streaming generate request from hanging
-        # the entrypoint forever if Ollama does not close the connection.
+        # Pipe a single prompt so ollama exits after one response.
         # || true: warmup failure is non-fatal; the model is already pulled and
-        # will load on first real request.
-        curl -sf --max-time 60 http://localhost:11434/api/generate \
-            -H "Content-Type: application/json" \
-            -d "{\"model\":\"${model}\",\"keep_alive\":-1}" \
-            > /dev/null \
+        # will load on first real request.  OLLAMA_KEEP_ALIVE keeps it resident.
+        echo "hi" | timeout 180 ollama run "${model}" > /dev/null 2>&1 \
             || echo "[entrypoint] Warmup request failed (non-fatal, continuing)"
 
         echo "[entrypoint] Model ready: $model"

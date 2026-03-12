@@ -27,7 +27,7 @@ x-ollama-base: &ollama-base
   entrypoint: ["/bin/bash", "/scripts/entrypoint.sh"]
   restart: unless-stopped
   healthcheck:
-    test: ["CMD-SHELL", "curl -sf http://localhost:11434/api/tags || exit 1"]
+    test: ["CMD-SHELL", "ollama list || exit 1"]
     interval: 30s
     timeout: 10s
     retries: 5
@@ -340,7 +340,7 @@ services:
         # Large models (qwen3:8b ~5 GB) can take 20+ minutes on a slow link.
         MAX_WAIT=${MODEL_PULL_TIMEOUT:-2400}
         DEADLINE=$(( $(date +%s) + MAX_WAIT ))
-        echo "[model-puller] Waiting for Ollama nodes (timeout ${MAX_WAIT}s)..."
+        echo "[model-puller] Waiting for Ollama nodes (timeout $${MAX_WAIT}s)..."
         for svc in \
           ollama-llm:11434 \
           ollama-llm2:11434 \
@@ -354,7 +354,7 @@ services:
               break
             fi
             if [ "$(date +%s)" -ge "$$DEADLINE" ]; then
-              echo "[model-puller] TIMEOUT: $$svc not ready after ${MAX_WAIT}s. Check node logs."
+              echo "[model-puller] TIMEOUT: $$svc not ready after $$MAX_WAIT s. Check node logs."
               exit 1
             fi
             sleep 5
@@ -389,7 +389,7 @@ services:
       model-puller:
         condition: service_completed_successfully
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:8080/health || exit 1"]
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:8080/health || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 3

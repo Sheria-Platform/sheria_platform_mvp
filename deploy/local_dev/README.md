@@ -32,8 +32,8 @@ pipeline fires parallel LLM + embed calls, so 3 nodes = 3 in-flight generations.
 
 **nginx proxy** load-balances across them — your API and WebUI talk only to proxy ports.
 
-**model-puller** polls every node until models appear in `/api/tags` before the proxy starts,
-eliminating the "service up but model not loaded" race condition.
+**model-puller** polls every node via `/api/tags` until models appear before the proxy
+starts, eliminating the "service up but model not loaded" race condition.
 
 ---
 
@@ -47,14 +47,14 @@ eliminating the "service up but model not loaded" race condition.
 | nvidia-container-toolkit | not needed | required |
 | NVIDIA GPU (VRAM) | not needed | ≥ 8 GB per LLM node |
 
-Install nvidia-container-toolkit on Ubuntu/Debian:
+Install nvidia-container-toolkit on Rocky OS / RHEL:
 
 ```bash
-distribution=$(. /etc/os-release; echo $ID$VERSION_ID)
-curl -s -L https://nvidia.github.io/libnvidia-container/gpgkey | sudo apt-key add -
-curl -s -L https://nvidia.github.io/libnvidia-container/$distribution/libnvidia-container.list \
-  | sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
-sudo apt update && sudo apt install -y nvidia-container-toolkit
+# Enable NVIDIA container toolkit repo
+curl -s -L https://nvidia.github.io/libnvidia-container/stable/rpm/nvidia-container-toolkit.repo \
+  | sudo tee /etc/yum.repos.d/nvidia-container-toolkit.repo
+sudo dnf install -y nvidia-container-toolkit
+sudo nvidia-ctk runtime configure --runtime=docker
 sudo systemctl restart docker
 ```
 
@@ -100,13 +100,13 @@ docker logs -f sheria-ollama-llm      # see model pull + warm-up on node 1
 
 ```bash
 # Proxy health
-curl http://localhost:8080/health
+curl http://127.0.0.1:8080/health
 # → OK
 
-# Models loaded on all 3 LLM nodes
-curl http://localhost:8080/probe/llm
-curl http://localhost:8080/probe/embed
-curl http://localhost:8080/probe/rerank
+# Confirm models loaded on all backends
+curl http://127.0.0.1:8080/probe/llm
+curl http://127.0.0.1:8080/probe/embed
+curl http://127.0.0.1:8080/probe/rerank
 
 # Open WebUI
 open http://localhost:3030
@@ -115,19 +115,26 @@ open http://localhost:3030
 ### 4. Send a test request
 
 ```bash
-# Through the proxy (routes round-robin across all 3 LLM nodes)
+# LLM — through the proxy (routes round-robin across all 3 LLM nodes)
+# CPU profile default model: qwen2.5:3b
+# GPU profile default model: qwen3:8b
 curl http://localhost:11433/api/chat \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "qwen2.5:3b",
+    "model": "qwen3:8b",
     "messages": [{"role": "user", "content": "Hello"}],
     "stream": false
   }'
 
-# Embeddings
-curl http://localhost:11436/api/embeddings \
+# Embeddings — /api/embed (preferred) or /api/embeddings (alias)
+curl http://localhost:11436/api/embed \
   -H "Content-Type: application/json" \
-  -d '{"model": "nomic-embed-text", "prompt": "adverse possession test"}'
+  -d '{"model": "nomic-embed-text", "input": "adverse possession test"}'
+
+# Rerank (embed-based similarity scoring)
+curl http://localhost:11437/api/embed \
+  -H "Content-Type: application/json" \
+  -d '{"model": "qwen3:8b", "input": "query to score"}'
 ```
 
 ---
@@ -138,10 +145,10 @@ curl http://localhost:11436/api/embeddings \
 
 | Port | Endpoint | Load balancing |
 |------|----------|----------------|
-| **11433** | LLM (`/api/chat`, `/api/generate`) | Round-robin: llm + llm2 + llm3 |
-| **11436** | Embeddings (`/api/embeddings`, `/api/embed`) | Least-connections: embed node |
-| **11437** | Rerank (`/api/embeddings`, `/api/chat`) | Least-connections: rerank node |
-| **8080** | Health + status | — |
+| **11433** | LLM (`/api/chat`, `/api/generate`, `/api/`) | Round-robin: llm + llm2 + llm3 |
+| **11436** | Embeddings (`/api/embed`, `/api/embeddings`) | Least-connections: embed node |
+| **11437** | Rerank (`/api/embed`, `/api/embeddings`, `/api/chat`) | Least-connections: rerank node |
+| **8080**  | Health + status | — |
 
 ### Direct node ports (debugging only — bypasses proxy)
 
@@ -150,19 +157,77 @@ curl http://localhost:11436/api/embeddings \
 | 11440 | LLM node 1 | `sheria-ollama-llm` |
 | 11443 | LLM node 2 | `sheria-ollama-llm2` |
 | 11444 | LLM node 3 | `sheria-ollama-llm3` |
-| 11441 | Embed node | `sheria-ollama-embed` |
+| 11441 | Embed node  | `sheria-ollama-embed` |
 | 11442 | Rerank node | `sheria-ollama-rerank` |
-| 3030  | Open WebUI | `sheria-open-webui` |
+| 3030  | Open WebUI  | `sheria-open-webui` |
 
 ### Health endpoints (port 8080)
 
 | Path | Description |
 |------|-------------|
-| `/health` | Returns `200 OK` — used by Docker healthcheck |
+| `/health` | Returns `200 OK` — used by Docker healthcheck and monitoring |
 | `/nginx_status` | nginx connection metrics (LAN access only) |
-| `/probe/llm` | Proxies to `ollama-llm:11434/api/tags` |
-| `/probe/embed` | Proxies to `ollama-embed:11434/api/tags` |
-| `/probe/rerank` | Proxies to `ollama-rerank:11434/api/tags` |
+| `/probe/llm` | Proxies to `ollama-llm/api/tags` — confirms LLM node is alive |
+| `/probe/embed` | Proxies to `ollama-embed/api/tags` — confirms embed node is alive |
+| `/probe/rerank` | Proxies to `ollama-rerank/api/tags` — confirms rerank node is alive |
+
+Probe endpoint format (example with host IP `192.168.50.243`):
+```
+http://192.168.50.243:8080/probe/embed
+http://192.168.50.243:8080/probe/llm
+http://192.168.50.243:8080/probe/rerank
+```
+
+---
+
+## External Endpoints (LAN Access)
+
+When accessing from another machine or the ingestion pipeline, use the host machine IP.
+Replace `192.168.50.243` with your actual machine IP if different.
+
+```env
+OLLAMA_LLM_ENDPOINT=http://192.168.50.243:11433/api/chat
+OLLAMA_GENERATE_ENDPOINT=http://192.168.50.243:11433/api/generate
+OLLAMA_EMBED_ENDPOINT=http://192.168.50.243:11436/api/embed
+OLLAMA_RERANK_ENDPOINT=http://192.168.50.243:11437/api/embed
+OLLAMA_TAGS_ENDPOINT=http://192.168.50.243:11433/api/tags
+```
+
+> **Note:** Port `11434` is internal to the Docker network only. All external access
+> must go through the proxy ports above (11433 / 11436 / 11437).
+
+---
+
+## Rocky OS Firewall
+
+Open the required ports with `firewalld` before accessing from other machines:
+
+```bash
+# ── User-facing ──────────────────────────────────────────────────
+sudo firewall-cmd --permanent --add-port=3030/tcp   # Open WebUI
+sudo firewall-cmd --permanent --add-port=8080/tcp   # Nginx health + probes
+
+# ── Ollama Proxy (API clients should use these) ───────────────────
+sudo firewall-cmd --permanent --add-port=11433/tcp  # LLM round-robin
+sudo firewall-cmd --permanent --add-port=11436/tcp  # Embed
+sudo firewall-cmd --permanent --add-port=11437/tcp  # Rerank
+
+# ── Direct node ports (debug / bypass proxy) ──────────────────────
+sudo firewall-cmd --permanent --add-port=11440/tcp  # LLM node 1
+sudo firewall-cmd --permanent --add-port=11441/tcp  # Embed node
+sudo firewall-cmd --permanent --add-port=11442/tcp  # Rerank node
+sudo firewall-cmd --permanent --add-port=11443/tcp  # LLM node 2
+sudo firewall-cmd --permanent --add-port=11444/tcp  # LLM node 3
+
+sudo firewall-cmd --reload
+sudo firewall-cmd --list-ports   # verify
+```
+
+To restrict direct node ports to a trusted subnet only:
+```bash
+sudo firewall-cmd --permanent --add-rich-rule='rule family="ipv4" source address="192.168.50.0/24" port port="11440-11444" protocol="tcp" accept'
+sudo firewall-cmd --reload
+```
 
 ---
 
@@ -179,7 +244,7 @@ OLLAMA_RERANK_MODELS=qwen2.5:3b
 # GPU recommended
 OLLAMA_LLM_MODELS=qwen3:8b
 OLLAMA_EMBED_MODELS=nomic-embed-text
-OLLAMA_RERANK_MODELS=qwen2.5:3b
+OLLAMA_RERANK_MODELS=qwen3:8b
 ```
 
 To pull multiple models into a single node (loaded on demand, one active at a time):
@@ -202,17 +267,19 @@ Understanding this helps debug slow or stuck starts:
 ```
 t=0   All Ollama nodes start → entrypoint.sh runs in each container
       ├── ollama serve starts in background
-      ├── Waits for /api/tags to respond
+      ├── Waits for daemon: `ollama list` (same check as the healthcheck)
       ├── Pulls MODELS_TO_PULL (may download from Ollama Hub)
-      └── Warms up model: pins it in memory with keep_alive=-1
+      └── Warms up model: `echo "hi" | timeout 180 ollama run <model>`
+          pins model in memory; OLLAMA_KEEP_ALIVE env var keeps it resident
 
 t=0   model-puller starts (parallel with Ollama nodes)
-      └── Polls every node's /api/tags until a "name" key appears
+      └── Polls every node's /api/tags via curl until a "name" key appears
           (confirms model is loaded, not just API up)
 
 t=X   model-puller exits 0 → Docker triggers ollama-proxy to start
 
-t=X   ollama-proxy (nginx) starts → healthcheck on /health
+t=X   ollama-proxy (nginx) starts → healthcheck on http://127.0.0.1:8080/health
+      (uses 127.0.0.1 explicitly — localhost resolves to IPv6 inside the container)
 
 t=X   open-webui starts → connects to ollama-proxy:11433
 ```
@@ -222,20 +289,35 @@ which node it's waiting on, then check that node's logs.
 
 ---
 
-## Connecting from the Sheria API
+## Connecting from the Sheria API / Ingestion Pipeline
 
-The FastAPI service in `services/api/` connects to the proxy, not individual nodes.
-Ensure these are set in `services/api/.env` (or the root `.env`):
+Set these in `pipelines/ingestion/.env` (or `services/api/.env`):
 
+**Local (API running on the same host):**
 ```env
-RAY_LLM_ENDPOINT=http://localhost:11433    # or ollama-proxy:11433 inside Docker
-RAY_EMBED_ENDPOINT=http://localhost:11436
+OLLAMA_LLM_ENDPOINT=http://localhost:11433/api/chat
+OLLAMA_GENERATE_ENDPOINT=http://localhost:11433/api/generate
+OLLAMA_EMBED_ENDPOINT=http://localhost:11436/api/embed
+OLLAMA_RERANK_ENDPOINT=http://localhost:11437/api/embed
+OLLAMA_TAGS_ENDPOINT=http://localhost:11433/api/tags
 ```
 
-If running the API inside Docker on the same `ollama-net` network, use service names:
+**Remote / LAN (API on a different machine, cluster on 192.168.50.243):**
 ```env
-RAY_LLM_ENDPOINT=http://ollama-proxy:11433
-RAY_EMBED_ENDPOINT=http://ollama-proxy:11436
+OLLAMA_LLM_ENDPOINT=http://192.168.50.243:11433/api/chat
+OLLAMA_GENERATE_ENDPOINT=http://192.168.50.243:11433/api/generate
+OLLAMA_EMBED_ENDPOINT=http://192.168.50.243:11436/api/embed
+OLLAMA_RERANK_ENDPOINT=http://192.168.50.243:11437/api/embed
+OLLAMA_TAGS_ENDPOINT=http://192.168.50.243:11433/api/tags
+```
+
+**Inside Docker on the same `ollama-net` network:**
+```env
+OLLAMA_LLM_ENDPOINT=http://ollama-proxy:11433/api/chat
+OLLAMA_GENERATE_ENDPOINT=http://ollama-proxy:11433/api/generate
+OLLAMA_EMBED_ENDPOINT=http://ollama-proxy:11436/api/embed
+OLLAMA_RERANK_ENDPOINT=http://ollama-proxy:11437/api/embed
+OLLAMA_TAGS_ENDPOINT=http://ollama-proxy:11433/api/tags
 ```
 
 ---
@@ -260,8 +342,10 @@ curl -s http://localhost:11440/api/tags | python3 -m json.tool  # node 1
 curl -s http://localhost:11443/api/tags | python3 -m json.tool  # node 2
 curl -s http://localhost:11444/api/tags | python3 -m json.tool  # node 3
 
-# List all models in a node (compact)
-curl -s http://localhost:11440/api/tags | grep -o '"name":"[^"]*"'
+# Or use the proxy probes (compact output)
+curl -s http://localhost:8080/probe/llm
+curl -s http://localhost:8080/probe/embed
+curl -s http://localhost:8080/probe/rerank
 
 # Delete a model from a node
 curl -X DELETE http://localhost:11440/api/delete \
@@ -280,14 +364,28 @@ docker logs sheria-model-puller
 
 It prints which nodes it's waiting on. Check that node's logs:
 ```bash
-docker logs sheria-ollama-llm   # GPU
-docker logs sheria-ollama-llm   # CPU (same container name, different service)
+docker logs sheria-ollama-llm
 ```
 
 Common causes:
 - Model download is slow — wait, or check internet connectivity inside container
 - `MODELS_TO_PULL` is set to a model name that doesn't exist on Ollama Hub
 - Node container exited — `docker ps -a | grep sheria-ollama` to check status
+
+### Proxy healthcheck failing
+
+The nginx healthcheck uses `http://127.0.0.1:8080/health` (not `localhost`) because
+Alpine Linux resolves `localhost` to `::1` (IPv6) but nginx only listens on IPv4.
+If you see the proxy stuck in `unhealthy`, confirm the fix is in place:
+
+```bash
+docker inspect sheria-ollama-proxy --format '{{.State.Health.Status}}'
+# Should be: healthy
+
+# Manual test inside the container
+docker exec sheria-ollama-proxy wget -q -O- http://127.0.0.1:8080/health
+# → OK
+```
 
 ### GPU profile fails to start
 
@@ -328,7 +426,7 @@ deploy/local_dev/
 ├── nginx.conf                 # proxy config — upstreams, timeouts, health endpoints
 ├── .env.example               # all configurable variables with defaults
 ├── scripts/
-│   └── entrypoint.sh          # each Ollama node: serve → pull → warm up → wait
+│   └── entrypoint.sh          # each Ollama node: serve → ollama list → pull → warm up → wait
 └── README.md                  # this file
 ```
 
