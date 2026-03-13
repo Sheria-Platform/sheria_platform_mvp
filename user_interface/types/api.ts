@@ -15,4 +15,5 @@ export type {
   MessageRecord,
   RegisterRequest,
   PendingUser,
+  ActiveUser,
 } from "../src/types/api";

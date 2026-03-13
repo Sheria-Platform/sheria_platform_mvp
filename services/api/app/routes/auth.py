@@ -21,6 +21,7 @@ from pydantic import BaseModel
 from services.api.app.auth.jwt import get_current_user, require_admin
 from services.api.app.config import settings
 from services.api.app.memory.postgres import postgres_memory
+from services.api.app.utils.email import send_activation_email
 
 router = APIRouter()
 
@@ -74,6 +75,16 @@ class ActivateRequest(BaseModel):
 
 class ApproveRequest(BaseModel):
     role: str
+
+
+class UpdateStatusRequest(BaseModel):
+    status: str  # "active" or "suspended"
+
+
+_SAFE_STATUS_TRANSITIONS: dict[str, set[str]] = {
+    "active":    {"suspended"},
+    "suspended": {"active"},
+}
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────
@@ -179,19 +190,84 @@ async def approve_user(
     req: ApproveRequest,
     admin: dict = Depends(require_admin),
 ) -> dict:
-    """Approve a pending user, assign their role, and return an activation token."""
+    """Approve a pending user, assign their role, and email an activation link."""
     if req.role not in _VALID_ROLES:
         raise HTTPException(status_code=400, detail="Invalid role")
 
     activation_token = str(uuid.uuid4())
+    activation_link = f"/activate?token={activation_token}"
+
     await postgres_memory.approve_user(
         user_id=user_id,
         role=req.role,
         activation_token=activation_token,
         approved_by=admin["id"],
     )
+
+    # Fire-and-forget: email failure never blocks or fails the HTTP response
+    user = await postgres_memory.get_user_by_id(user_id)
+    if user:
+        asyncio.create_task(
+            send_activation_email(
+                to_address=user["email"],
+                full_name=user["full_name"],
+                activation_link=activation_link,
+            )
+        )
+
     return {
-        "message": "User approved. Share the activation link with the user.",
+        "message": "User approved. An activation link has been sent to the user's email.",
         "activation_token": activation_token,
-        "activation_link": f"/activate?token={activation_token}",
+        "activation_link": activation_link,
     }
+
+
+@router.get("/users")
+async def list_users(
+    status: str | None = None,
+    admin: dict = Depends(require_admin),
+) -> list[dict]:
+    """List all user accounts with an optional ``?status=`` filter. Admin only.
+
+    Args:
+        status: Optional filter — ``"pending"``, ``"approved"``,
+            ``"active"``, or ``"suspended"``.  Omit to return all users.
+    """
+    users = await postgres_memory.get_users(status=status)
+    return [
+        {k: v for k, v in u.items() if k not in ("hashed_password", "activation_token")}
+        for u in users
+    ]
+
+
+@router.post("/users/{user_id}/status")
+async def update_user_status(
+    user_id: str,
+    req: UpdateStatusRequest,
+    admin: dict = Depends(require_admin),
+) -> dict:
+    """Suspend or reactivate a user account. Admin only.
+
+    Valid transitions: ``active → suspended``, ``suspended → active``.
+    All other target statuses or invalid transitions return 400.
+    """
+    if req.status not in ("active", "suspended"):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid target status. Must be 'active' or 'suspended'.",
+        )
+
+    user = await postgres_memory.get_user_by_id(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    current = user["status"]
+    if req.status not in _SAFE_STATUS_TRANSITIONS.get(current, set()):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot transition from '{current}' to '{req.status}'.",
+        )
+
+    await postgres_memory.update_user_status(user_id, req.status)
+    return {"message": f"User status updated to '{req.status}'. "
+                       f"{'User can no longer log in.' if req.status == 'suspended' else 'User can now log in.'}"}
