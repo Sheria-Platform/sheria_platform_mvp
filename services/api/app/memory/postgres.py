@@ -19,7 +19,7 @@ import uuid
 from datetime import datetime
 from typing import Sequence
 
-from sqlalchemy import JSON, Boolean, Column, DateTime, Float, Integer, String, Text, select, text, update
+from sqlalchemy import JSON, Column, DateTime, Float, Integer, String, Text, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
@@ -346,6 +346,12 @@ class PostgresMemory:
         role: str,
         staff_number: str | None = None,
     ) -> None:
+        """Insert a new user row with status ``pending``.
+
+        Called when judicial staff submit a registration request.  The
+        account cannot be used until an administrator approves it and the
+        user activates it via the emailed link.
+        """
         async with AsyncSessionLocal() as session:
             async with session.begin():
                 session.add(User(
@@ -359,6 +365,10 @@ class PostgresMemory:
                 ))
 
     async def get_user_by_username(self, username: str) -> dict | None:
+        """Return a user dict by username, or ``None`` if not found.
+
+        Used during login and registration uniqueness checks.
+        """
         async with AsyncSessionLocal() as session:
             result = await session.execute(
                 select(User).where(User.username == username)
@@ -367,6 +377,10 @@ class PostgresMemory:
             return _user_to_dict(row) if row else None
 
     async def get_user_by_email(self, email: str) -> dict | None:
+        """Return a user dict by email address, or ``None`` if not found.
+
+        Used during registration to enforce email uniqueness.
+        """
         async with AsyncSessionLocal() as session:
             result = await session.execute(
                 select(User).where(User.email == email)
@@ -375,6 +389,7 @@ class PostgresMemory:
             return _user_to_dict(row) if row else None
 
     async def get_user_by_id(self, user_id: str) -> dict | None:
+        """Return a user dict by primary-key UUID, or ``None`` if not found."""
         async with AsyncSessionLocal() as session:
             result = await session.execute(
                 select(User).where(User.id == user_id)
@@ -383,6 +398,11 @@ class PostgresMemory:
             return _user_to_dict(row) if row else None
 
     async def get_user_by_activation_token(self, token: str) -> dict | None:
+        """Return a user in ``approved`` status matching the one-time token.
+
+        Returns ``None`` if the token is unknown or the account has already
+        been activated (status transitions away from ``approved`` on use).
+        """
         async with AsyncSessionLocal() as session:
             result = await session.execute(
                 select(User).where(
@@ -394,6 +414,10 @@ class PostgresMemory:
             return _user_to_dict(row) if row else None
 
     async def get_pending_users(self) -> list[dict]:
+        """Return all users with status ``pending``, newest-first.
+
+        Called by the admin approval endpoint to list unreviewed requests.
+        """
         async with AsyncSessionLocal() as session:
             result = await session.execute(
                 select(User)
@@ -410,6 +434,12 @@ class PostgresMemory:
         activation_token: str,
         approved_by: str,
     ) -> None:
+        """Transition a user from ``pending`` to ``approved`` and store the
+        one-time ``activation_token``.
+
+        The administrator may override the role requested during registration.
+        The token is later consumed by ``activate_user``.
+        """
         async with AsyncSessionLocal() as session:
             async with session.begin():
                 await session.execute(
@@ -424,6 +454,11 @@ class PostgresMemory:
                 )
 
     async def activate_user(self, user_id: str, hashed_password: str) -> None:
+        """Set the user's bcrypt password hash, mark status ``active``, and
+        consume the one-time activation token.
+
+        After this call the user can log in via ``POST /api/v1/auth/login``.
+        """
         async with AsyncSessionLocal() as session:
             async with session.begin():
                 await session.execute(

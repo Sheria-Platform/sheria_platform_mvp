@@ -9,6 +9,7 @@ Registration workflow:
     4. Staff logs in via POST /login → receives JWT
 """
 
+import asyncio
 import uuid
 from datetime import datetime, timedelta
 
@@ -17,7 +18,7 @@ from jose import jwt
 from passlib.context import CryptContext
 from pydantic import BaseModel
 
-from services.api.app.auth.jwt import get_current_user
+from services.api.app.auth.jwt import get_current_user, require_admin
 from services.api.app.config import settings
 from services.api.app.memory.postgres import postgres_memory
 
@@ -47,15 +48,6 @@ def _create_token(user_id: str, username: str, role: str, court: str) -> str:
         "exp": expire,
     }
     return jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
-
-
-def _require_admin(user: dict = Depends(get_current_user)) -> dict:
-    if user.get("role") != "admin":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Admin access required",
-        )
-    return user
 
 
 # ── Request / Response models ─────────────────────────────────────────────
@@ -94,9 +86,13 @@ async def register(req: RegisterRequest) -> dict:
             status_code=400,
             detail=f"Invalid role. Choose from: {', '.join(sorted(_REQUESTABLE_ROLES))}",
         )
-    if await postgres_memory.get_user_by_username(req.username):
+    existing_username, existing_email = await asyncio.gather(
+        postgres_memory.get_user_by_username(req.username),
+        postgres_memory.get_user_by_email(req.email),
+    )
+    if existing_username:
         raise HTTPException(status_code=400, detail="Username already taken")
-    if await postgres_memory.get_user_by_email(req.email):
+    if existing_email:
         raise HTTPException(status_code=400, detail="Email already registered")
 
     await postgres_memory.create_user(
@@ -167,7 +163,7 @@ async def activate(req: ActivateRequest) -> dict:
 
 
 @router.get("/pending")
-async def list_pending(admin: dict = Depends(_require_admin)) -> list[dict]:
+async def list_pending(admin: dict = Depends(require_admin)) -> list[dict]:
     """List all pending registration requests. Admin only."""
     users = await postgres_memory.get_pending_users()
     # Strip sensitive fields before returning
@@ -181,7 +177,7 @@ async def list_pending(admin: dict = Depends(_require_admin)) -> list[dict]:
 async def approve_user(
     user_id: str,
     req: ApproveRequest,
-    admin: dict = Depends(_require_admin),
+    admin: dict = Depends(require_admin),
 ) -> dict:
     """Approve a pending user, assign their role, and return an activation token."""
     if req.role not in _VALID_ROLES:

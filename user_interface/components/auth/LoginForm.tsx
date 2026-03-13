@@ -6,8 +6,15 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { FormError } from "@/components/auth/FormError";
 import { useChatStore } from "@/store/chatStore";
 
+/**
+ * Login form component.
+ *
+ * Posts credentials to `/api/auth/login` (Next.js route that proxies to
+ * FastAPI), sets the `sheria_auth` cookie, and redirects to `/chat`.
+ */
 export function LoginForm() {
   const router = useRouter();
   const setUser = useChatStore((s) => s.setUser);
@@ -72,11 +79,7 @@ export function LoginForm() {
         />
       </div>
 
-      {error && (
-        <p className="text-sm text-destructive bg-destructive/10 px-3 py-2 rounded-md">
-          {error}
-        </p>
-      )}
+      <FormError message={error} />
 
       <Button
         type="submit"
