@@ -555,6 +555,48 @@ class PostgresMemory:
                 )
                 return result.rowcount > 0
 
+    async def seed_admin(
+        self,
+        username: str,
+        email: str,
+        full_name: str,
+        hashed_password: str,
+    ) -> bool:
+        """Create the default admin account if no admin user exists yet.
+
+        Idempotent — safe to call on every startup.  Does nothing if any
+        user with ``role="admin"`` already exists in the database.
+
+        Args:
+            username: Login username for the admin account.
+            email: Email address for the admin account.
+            full_name: Display name shown in the UI.
+            hashed_password: Bcrypt hash of the initial password.
+
+        Returns:
+            ``True`` if the admin was created, ``False`` if one already exists.
+        """
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(User).where(User.role == "admin").limit(1)
+            )
+            if result.scalar_one_or_none() is not None:
+                return False
+
+        async with AsyncSessionLocal() as session:
+            async with session.begin():
+                session.add(User(
+                    username=username,
+                    email=email,
+                    full_name=full_name,
+                    hashed_password=hashed_password,
+                    role="admin",
+                    court_station="Judiciary Headquarters",
+                    status="active",
+                    activated_at=datetime.utcnow(),
+                ))
+        return True
+
 
 def _job_to_dict(row: IngestionJob) -> dict:
     """Serialise an ``IngestionJob`` ORM row to a plain dict."""

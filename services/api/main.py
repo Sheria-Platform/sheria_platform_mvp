@@ -39,8 +39,9 @@ from services.api.app.cache.redis import redis_client
 from services.api.app.clients.neo4j import neo4j_client
 from services.api.app.clients.ollama_client import ollama_client
 from services.api.app.clients.qdrant import qdrant_client
+from services.api.app.config import settings
 from services.api.app.logging import bind_context
-from services.api.app.memory.postgres import Base, engine
+from services.api.app.memory.postgres import Base, engine, postgres_memory
 from services.api.app.routes import auth, chat, feedback, health, history, upload
 
 logger = logging.getLogger(__name__)
@@ -159,6 +160,33 @@ async def _create_db_tables() -> None:
         await conn.run_sync(Base.metadata.create_all)
 
 
+async def _seed_admin() -> None:
+    """Create the default admin account on first boot if none exists.
+
+    Credentials are read from ``ADMIN_*`` environment variables so they
+    can be rotated without code changes.  The seed is skipped when any
+    admin already exists, making it safe to call on every startup.
+    """
+    from passlib.context import CryptContext  # local import — avoid top-level dep
+
+    pwd = CryptContext(schemes=["bcrypt"], deprecated="auto")
+    hashed = pwd.hash(settings.ADMIN_PASSWORD)
+
+    created = await postgres_memory.seed_admin(
+        username=settings.ADMIN_USERNAME,
+        email=settings.ADMIN_EMAIL,
+        full_name=settings.ADMIN_FULL_NAME,
+        hashed_password=hashed,
+    )
+    if created:
+        logger.info(
+            "Default admin account created",
+            extra={"username": settings.ADMIN_USERNAME},
+        )
+    else:
+        logger.info("Admin account already exists — skipping seed")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Manage startup and shutdown of all shared service clients.
@@ -186,6 +214,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # ── Startup ──────────────────────────────────────────────────────
     logger.info("Initializing clients...")
     await _create_db_tables()
+    await _seed_admin()
     neo4j_client.connect()
     await redis_client.connect()
     await qdrant_client.connect()
