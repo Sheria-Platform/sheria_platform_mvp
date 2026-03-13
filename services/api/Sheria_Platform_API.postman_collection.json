@@ -131,6 +131,30 @@
               "_postman_previewlanguage": "json"
             }
           ]
+        },
+        {
+          "name": "Legacy Health Check (Compatibility Alias)",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/health",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "health"]
+            },
+            "description": "Compatibility alias for `/health/liveness`. Returns `{\"status\": \"ok\"}` while the server process is alive.\n\nDefined in `services/api/main.py` as a thin wrapper. Useful for clients that expect the health endpoint under the versioned `/api/v1/` prefix."
+          },
+          "response": [
+            {
+              "name": "200 OK – server alive",
+              "status": "OK",
+              "code": 200,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"status\": \"ok\"\n}",
+              "_postman_previewlanguage": "json"
+            }
+          ]
         }
       ]
     },
@@ -358,6 +382,89 @@
               "code": 403,
               "header": [{ "key": "Content-Type", "value": "application/json" }],
               "body": "{\n  \"detail\": \"Account pending administrator approval\"\n}",
+              "_postman_previewlanguage": "json"
+            }
+          ]
+        },
+        {
+          "name": "List All Users (Admin only)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/users",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "users"],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "active",
+                  "description": "Filter by account status. One of: pending, approved, active, suspended. Omit to return all users.",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Return all user accounts, optionally filtered by `?status=`.\n\n**Requires:** JWT with `role: admin`.\n\nValid status values: `pending`, `approved`, `active`, `suspended`. Omit the query parameter to return every account regardless of status.\n\nSensitive fields (`hashed_password`, `activation_token`) are stripped from the response."
+          },
+          "response": [
+            {
+              "name": "200 OK – user list",
+              "status": "OK",
+              "code": 200,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "[\n  {\n    \"id\": \"550e8400-e29b-41d4-a716-446655440000\",\n    \"username\": \"j.mwangi\",\n    \"email\": \"j.mwangi@judiciary.go.ke\",\n    \"full_name\": \"Hon. Jane Mwangi\",\n    \"role\": \"judge\",\n    \"court_station\": \"Nairobi High Court\",\n    \"staff_number\": \"JSC-12345\",\n    \"status\": \"active\",\n    \"created_at\": \"2026-03-13T08:00:00\",\n    \"activated_at\": \"2026-03-13T09:00:00\"\n  }\n]",
+              "_postman_previewlanguage": "json"
+            },
+            {
+              "name": "403 Forbidden – not an admin",
+              "status": "Forbidden",
+              "code": 403,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"detail\": \"Admin access required\"\n}",
+              "_postman_previewlanguage": "json"
+            }
+          ]
+        },
+        {
+          "name": "Update User Status (Admin only)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"suspended\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/users/{{pending_user_id}}/status",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "users", "{{pending_user_id}}", "status"]
+            },
+            "description": "Suspend or reactivate a user account.\n\n**Requires:** JWT with `role: admin`.\n\nValid transitions only:\n- `active → suspended` — user immediately cannot log in\n- `suspended → active` — user can log in again\n\nAll other target values or invalid transitions return **400**."
+          },
+          "response": [
+            {
+              "name": "200 OK – status updated",
+              "status": "OK",
+              "code": 200,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"message\": \"User status updated to 'suspended'. User can no longer log in.\"\n}",
+              "_postman_previewlanguage": "json"
+            },
+            {
+              "name": "400 Bad Request – invalid transition",
+              "status": "Bad Request",
+              "code": 400,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"detail\": \"Cannot transition from 'pending' to 'suspended'.\"\n}",
+              "_postman_previewlanguage": "json"
+            },
+            {
+              "name": "404 Not Found – user not found",
+              "status": "Not Found",
+              "code": 404,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"detail\": \"User not found\"\n}",
               "_postman_previewlanguage": "json"
             }
           ]
