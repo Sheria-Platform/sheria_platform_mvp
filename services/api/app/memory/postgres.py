@@ -92,6 +92,20 @@ class User(Base):
     activated_at     = Column(DateTime, nullable=True)
 
 
+class Feedback(Base):
+    """ORM model for the ``feedback`` table — user ratings for assistant responses."""
+
+    __tablename__ = "feedback"
+
+    id         = Column(Integer, primary_key=True, autoincrement=True)
+    session_id = Column(String, nullable=False)
+    user_id    = Column(String, nullable=False)
+    message_id = Column(Integer, nullable=False)
+    score      = Column(Integer, nullable=False)
+    comment    = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
 # Async engine -- ``echo=False`` suppresses SQL statement logging
 engine = create_async_engine(
     settings.DATABASE_URL,
@@ -471,6 +485,75 @@ class PostgresMemory:
                         activated_at=datetime.utcnow(),
                     )
                 )
+
+    # ------------------------------------------------------------------
+    # Feedback persistence
+    # ------------------------------------------------------------------
+
+    async def record_feedback(
+        self,
+        session_id: str,
+        user_id: str,
+        message_id: int,
+        score: int,
+        comment: str | None,
+    ) -> None:
+        """Persist a user rating for an assistant response.
+
+        Args:
+            session_id: Conversation thread the rated message belongs to.
+            user_id: Authenticated user submitting the rating.
+            message_id: Primary-key ID of the ``ChatHistory`` row being rated.
+            score: ``1`` for positive, ``-1`` for negative.
+            comment: Optional free-text explanation.
+        """
+        async with AsyncSessionLocal() as session:
+            async with session.begin():
+                session.add(Feedback(
+                    session_id=session_id,
+                    user_id=user_id,
+                    message_id=message_id,
+                    score=score,
+                    comment=comment,
+                ))
+
+    # ------------------------------------------------------------------
+    # User status management
+    # ------------------------------------------------------------------
+
+    async def get_users(self, status: str | None = None) -> list[dict]:
+        """Return all users, optionally filtered by status, newest-first.
+
+        Args:
+            status: Optional status filter (``"pending"``, ``"active"``,
+                ``"suspended"``, ``"approved"``).  ``None`` returns all users.
+        """
+        async with AsyncSessionLocal() as session:
+            query = select(User).order_by(User.created_at.desc())
+            if status is not None:
+                query = query.where(User.status == status)
+            result = await session.execute(query)
+            rows = result.scalars().all()
+            return [_user_to_dict(r) for r in rows]
+
+    async def update_user_status(self, user_id: str, new_status: str) -> bool:
+        """Set the ``status`` field on a user row.
+
+        Args:
+            user_id: Primary-key UUID of the user to update.
+            new_status: Target status string (e.g. ``"suspended"`` or ``"active"``).
+
+        Returns:
+            ``True`` if a row was matched and updated, ``False`` if not found.
+        """
+        async with AsyncSessionLocal() as session:
+            async with session.begin():
+                result = await session.execute(
+                    update(User)
+                    .where(User.id == user_id)
+                    .values(status=new_status)
+                )
+                return result.rowcount > 0
 
 
 def _job_to_dict(row: IngestionJob) -> dict:

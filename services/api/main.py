@@ -29,7 +29,6 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from prometheus_client import make_asgi_app
 from qdrant_client.http.models import Distance, VectorParams
-from sqlalchemy import text
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
@@ -152,22 +151,12 @@ async def _create_db_tables() -> None:
     """Create all database tables if they do not already exist.
 
     Runs ``CREATE TABLE IF NOT EXISTS`` for every SQLAlchemy ORM model
-    (``chat_history``) and the raw-SQL ``feedback`` table.  Safe to call
-    on every startup — existing tables are left untouched.
+    registered under ``Base`` (``chat_history``, ``ingestion_jobs``,
+    ``users``, ``feedback``).  Safe to call on every startup — existing
+    tables are left untouched.
     """
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-        await conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS feedback (
-                id         SERIAL PRIMARY KEY,
-                session_id VARCHAR      NOT NULL,
-                user_id    VARCHAR      NOT NULL,
-                message_id INTEGER      NOT NULL,
-                score      INTEGER      NOT NULL,
-                comment    TEXT,
-                created_at TIMESTAMP    DEFAULT NOW()
-            )
-        """))
 
 
 @asynccontextmanager
