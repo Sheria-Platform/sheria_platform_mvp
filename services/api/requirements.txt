@@ -91,6 +91,9 @@ pytest-mock==3.14.0
 websockets==15.0.1
 websocket-client==1.9.0
 
+# PDF parsing (Sheria Verify)
+pypdf>=4.0.0
+
 # Serialization
 orjson==3.11.4
 msgpack==1.1.2

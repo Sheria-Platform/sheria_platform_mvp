@@ -41,7 +41,7 @@ from services.api.app.clients.qdrant import qdrant_client
 from services.api.app.config import settings
 from services.api.app.logging import bind_context
 from services.api.app.memory.postgres import Base, engine, postgres_memory
-from services.api.app.routes import auth, chat, feedback, health, history, legal_research, upload
+from services.api.app.routes import auth, chat, feedback, health, history, legal_research, upload, verify
 
 logger = logging.getLogger(__name__)
 
@@ -258,6 +258,7 @@ app.include_router(
     prefix="/api/v1/legal-research",
     tags=["Legal Research"],
 )
+app.include_router(verify.router, prefix="/api/v1/verify", tags=["Verify"])
 
 # ── Prometheus Metrics Endpoint ───────────────────────────────────────────
 # Mounted as a sub-application so prometheus_client handles content
