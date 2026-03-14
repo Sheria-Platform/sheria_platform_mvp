@@ -9,39 +9,19 @@ from fastapi import APIRouter, BackgroundTasks, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from libs.observability.metrics import CACHE_HITS, NODE_LATENCY
+from libs.observability.metrics import CACHE_HITS
 from services.api.app.agents.graph import agent_app
 from services.api.app.agents.state import AgentState
 from services.api.app.auth.jwt import get_current_user
-
-# Import classes for type hinting
 from services.api.app.cache.semantic import SemanticCache
-from services.api.app.cache.semantic import semantic_cache as global_cache
-from services.api.app.clients.ollama_client import OllamaClient  # Replaces RayLLMClient
-from services.api.app.clients.ollama_client import ollama_client as global_llm
+from services.api.app.clients.ollama_client import OllamaClient
+from services.api.app.dependencies import get_llm_client, get_memory, get_semantic_cache
 from services.api.app.logging import bind_context
 from services.api.app.memory.postgres import PostgresMemory
-from services.api.app.memory.postgres import postgres_memory as global_memory
-import json as _agent_json  # agent log
+from services.api.app.streaming import iter_agent_events
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
-
-# --- Dependency Providers (DI) ---
-# These wrappers allow easy dependency overrides in pytest
-# e.g., app.dependency_overrides[get_llm_client] = MockOllamaClient
-
-
-def get_semantic_cache() -> SemanticCache:
-    return global_cache
-
-
-def get_memory() -> PostgresMemory:
-    return global_memory
-
-
-def get_llm_client() -> OllamaClient:
-    return global_llm
 
 
 # --- Schemas ---
@@ -54,13 +34,11 @@ class ChatRequest(BaseModel):
 
 # --- Routes ---
 
-
 @router.post("/stream")
 async def chat_stream(
     req: ChatRequest,
     background_tasks: BackgroundTasks,
     user: dict = Depends(get_current_user),
-    # Inject dependencies via FastAPI Depends
     cache: SemanticCache = Depends(get_semantic_cache),
     memory: PostgresMemory = Depends(get_memory),
     llm: OllamaClient = Depends(get_llm_client),
@@ -134,84 +112,23 @@ async def chat_stream(
     )
 
     # 5. Define Generator for Streaming Response
-    async def event_generator() -> AsyncGenerator[str]:
+    async def event_generator() -> AsyncGenerator[str, None]:
         final_answer = ""
-        node_start = time.perf_counter()
-
-        # #region agent log
-        try:
-            _agent_log = {
-                "sessionId": "798f81",
-                "runId": "pre-fix",
-                "hypothesisId": "H2",
-                "location": "services/api/app/routes/chat.py:event_generator",
-                "message": "chat stream generator started",
-                "data": {
-                    "session_id": session_id,
-                    "user_id": user_id,
-                },
-                "timestamp": int(time.time() * 1000),
-            }
-            _agent_log_path = "/Users/danielmalungu/Documents/sheria_platform_mvp/.cursor/debug-798f81.log"
-            with open(_agent_log_path, "a", encoding="utf-8") as _agent_f:
-                _agent_f.write(_agent_json.dumps(_agent_log) + "\n")
-        except Exception:
-            pass
-        # #endregion
 
         try:
-            async for event in agent_app.astream(
-                initial_state, config={"configurable": {"llm": llm, "user_id": user_id}}
+            async for node_name, node_data, status_json in iter_agent_events(
+                agent_app,
+                initial_state,
+                config={"configurable": {"llm": llm, "user_id": user_id}},
+                session_id=session_id,
             ):
-                node_name = list(event.keys())[0]
-                node_data = event[node_name]
-
-                node_duration_ms = round((time.perf_counter() - node_start) * 1000, 2)
-                NODE_LATENCY.labels(node=node_name).observe(node_duration_ms / 1000)
-                logger.info(
-                    "Agent node completed",
-                    extra={"node": node_name, "duration_ms": node_duration_ms},
-                )
-                # Reset timer for the next node
-                node_start = time.perf_counter()
-
-                # Emit Status Update (NDJSON event for frontend)
-                yield json.dumps(
-                    {
-                        "event": "status",
-                        "step": node_name,
-                        "session_id": session_id,
-                    }
-                ) + "\n"
+                yield status_json
 
                 # Capture Final Answer from Responder Node
                 if node_name == "responder":
                     if "messages" in node_data and node_data["messages"]:
                         ai_msg = node_data["messages"][-1]
                         final_answer = ai_msg.get("content", "")
-
-                        # #region agent log
-                        try:
-                            _agent_log = {
-                                "sessionId": "798f81",
-                                "runId": "pre-fix",
-                                "hypothesisId": "H2",
-                                "location": "services/api/app/routes/chat.py:event_generator",
-                                "message": "answer yielded",
-                                "data": {
-                                    "session_id": session_id,
-                                    "user_id": user_id,
-                                    "answer_length": len(final_answer),
-                                },
-                                "timestamp": int(time.time() * 1000),
-                            }
-                            _agent_log_path = "/Users/danielmalungu/Documents/sheria_platform_mvp/.cursor/debug-798f81.log"
-                            with open(_agent_log_path, "a", encoding="utf-8") as _agent_f:
-                                _agent_f.write(_agent_json.dumps(_agent_log) + "\n")
-                        except Exception:
-                            pass
-                        # #endregion
-
                         yield json.dumps(
                             {
                                 "event": "answer",

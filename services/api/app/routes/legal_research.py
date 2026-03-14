@@ -26,34 +26,18 @@ from fastapi import APIRouter, BackgroundTasks, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from libs.observability.metrics import NODE_LATENCY
 from services.api.app.agents.legal_research_graph import legal_research_app
 from services.api.app.agents.state import AgentState
 from services.api.app.auth.jwt import get_current_user
 from services.api.app.cache.semantic import SemanticCache
-from services.api.app.cache.semantic import semantic_cache as global_cache
 from services.api.app.clients.ollama_client import OllamaClient
-from services.api.app.clients.ollama_client import ollama_client as global_llm
+from services.api.app.dependencies import get_llm_client, get_memory, get_semantic_cache
 from services.api.app.logging import bind_context
 from services.api.app.memory.postgres import PostgresMemory
-from services.api.app.memory.postgres import postgres_memory as global_memory
+from services.api.app.streaming import iter_agent_events
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
-
-
-# --- Dependency Providers (mirrors chat.py for easy test overrides) ---
-
-def get_semantic_cache() -> SemanticCache:
-    return global_cache
-
-
-def get_memory() -> PostgresMemory:
-    return global_memory
-
-
-def get_llm_client() -> OllamaClient:
-    return global_llm
 
 
 # --- Schemas ---
@@ -152,29 +136,16 @@ async def legal_research(
     async def event_generator() -> AsyncGenerator[str, None]:
         final_answer = ""
         final_citations: list[dict] = []
-        node_start = time.perf_counter()
 
         try:
-            async for event in legal_research_app.astream(
+            async for node_name, node_data, status_json in iter_agent_events(
+                legal_research_app,
                 initial_state,
                 config={"configurable": {"llm": llm, "user_id": user_id}},
+                session_id=session_id,
+                metric_prefix="legal_",
             ):
-                node_name = list(event.keys())[0]
-                node_data = event[node_name]
-
-                node_duration_ms = round((time.perf_counter() - node_start) * 1000, 2)
-                NODE_LATENCY.labels(node=f"legal_{node_name}").observe(node_duration_ms / 1000)
-                logger.info(
-                    "Legal research node completed",
-                    extra={"node": node_name, "duration_ms": node_duration_ms},
-                )
-                node_start = time.perf_counter()
-
-                yield json.dumps({
-                    "event": "status",
-                    "step": node_name,
-                    "session_id": session_id,
-                }) + "\n"
+                yield status_json
 
                 # Capture structured citations from retriever
                 if node_name == "retriever":
