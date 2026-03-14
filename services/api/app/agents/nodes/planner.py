@@ -30,6 +30,11 @@ from services.api.app.clients.ollama_client import ollama_client
 
 logger = logging.getLogger(__name__)
 
+# NOTE: HyDE (Hypothetical Document Embeddings) is a planned future enhancement.
+# When implemented, the planner would generate a hypothetical answer to the query
+# and embed it for retrieval instead of embedding the raw query.  The logic belongs
+# here as a post-planning step before the retriever node.
+
 _SYSTEM_PROMPT = """
 You are a Judicial Research Planning Agent for Kenya's Sheria Platform.
 You assist judges, magistrates, registrars, and court staff with legal research queries.
