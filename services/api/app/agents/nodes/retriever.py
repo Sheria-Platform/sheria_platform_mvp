@@ -26,6 +26,8 @@ import asyncio
 import logging
 import time
 
+from qdrant_client.http import models as qdrant_models
+
 from libs.observability.metrics import RETRIEVAL_DOCS
 from services.api.app.agents.state import AgentState
 from services.api.app.clients.neo4j import neo4j_client
@@ -45,16 +47,14 @@ LIMIT 5
 
 
 def _dedup(docs: list[str]) -> list[str]:
-    """Deduplicate documents by text content, ignoring ``[Source: ...]`` suffix.
+    """Deduplicate documents by text content, ignoring trailing bracket annotations.
 
-    Raw ``set()`` deduplication fails when the same text appears with different
-    source attributions (e.g. two ingestion runs produce identical chunks from
-    different filenames).  This helper strips the suffix before comparison but
-    preserves the original string (including source) in the output.
+    Strips any ``" [..."`` suffix before comparison so the same text with
+    different source or citation annotations is still treated as a duplicate.
 
     Args:
         docs: List of document strings, optionally ending with
-            ``" [Source: <filename>]"``.
+            ``" [Source: <filename>]"`` or ``" [Citation: ...]"``.
 
     Returns:
         Deduplicated list preserving insertion order and original strings.
@@ -62,7 +62,7 @@ def _dedup(docs: list[str]) -> list[str]:
     seen: set[str] = set()
     result: list[str] = []
     for doc in docs:
-        key = doc.split(" [Source:")[0].strip().lower()
+        key = doc.split(" [")[0].strip().lower()
         if key not in seen:
             seen.add(key)
             result.append(doc)
@@ -117,21 +117,54 @@ async def retrieve_node(state: AgentState) -> dict:
 
     # Step 2: Parallel retrieval ──────────────────────────────────────
 
-    async def _vector_search() -> list[str]:
-        """Search Qdrant and format results with source attribution."""
-        results = await qdrant_client.search(vector=query_vector, limit=5)
-        docs = []
+    jurisdiction_filter: list[str] = state.get("jurisdiction_filter") or []
+
+    async def _vector_search() -> tuple[list[str], list[dict]]:
+        """Search Qdrant and format results with structured Kenya Law citations.
+
+        Returns:
+            Tuple of (doc_strings, citation_dicts).  doc_strings include the
+            citation metadata inline so the LLM can use it directly.
+            citation_dicts are structured for the API response payload.
+        """
+        # Build payload filter for jurisdiction if specified
+        q_filter = None
+        if jurisdiction_filter:
+            q_filter = qdrant_models.Filter(
+                must=[
+                    qdrant_models.FieldCondition(
+                        key="court_name",
+                        match=qdrant_models.MatchAny(any=jurisdiction_filter),
+                    )
+                ]
+            )
+
+        results = await qdrant_client.search(
+            vector=query_vector, limit=5, query_filter=q_filter
+        )
+        docs: list[str] = []
+        citations: list[dict] = []
         for r in results:
             text = r.payload.get("text", "")
-            # Payload shape varies by ingestion pipeline; try common locations
-            filename = (
-                r.payload.get("metadata", {}).get("filename")
-                or r.payload.get("source")
-                or r.payload.get("filename")
-                or "unknown"
+            citation_code = r.payload.get("citation_code", "")
+            court_name = r.payload.get("court_name", "")
+            year = r.payload.get("year", "")
+            case_slug = r.payload.get("case_slug", "")
+            score = round(r.score, 4)
+
+            # Inline citation for the LLM context
+            docs.append(
+                f"{text} [Citation: {citation_code} | Court: {court_name} | Year: {year}]"
             )
-            docs.append(f"{text} [Source: {filename}]")
-        return docs
+            # Structured citation for the API response
+            citations.append({
+                "citation_code": citation_code,
+                "court_name": court_name,
+                "year": year,
+                "case_slug": case_slug,
+                "score": score,
+            })
+        return docs, citations
 
     async def _graph_search() -> list[str]:
         """Search Neo4j fulltext index for entity relationships."""
@@ -149,7 +182,7 @@ async def retrieve_node(state: AgentState) -> dict:
             return []
 
     retrieval_start = time.perf_counter()
-    vector_docs, graph_docs = await asyncio.gather(
+    (vector_docs, structured_citations), graph_docs = await asyncio.gather(
         _vector_search(), _graph_search()
     )
     retrieval_ms = round((time.perf_counter() - retrieval_start) * 1000, 2)
@@ -170,10 +203,11 @@ async def retrieve_node(state: AgentState) -> dict:
             "vector_docs": len(vector_docs),
             "graph_docs": len(graph_docs),
             "combined_docs": len(combined),
+            "jurisdiction_filter": jurisdiction_filter,
             "embed_ms": embed_ms,
             "retrieval_ms": retrieval_ms,
             "duration_ms": total_ms,
         },
     )
 
-    return {"documents": combined}
+    return {"documents": combined, "citations": structured_citations}

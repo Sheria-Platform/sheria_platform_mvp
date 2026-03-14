@@ -42,12 +42,12 @@ from services.api.app.clients.qdrant import qdrant_client
 from services.api.app.config import settings
 from services.api.app.logging import bind_context
 from services.api.app.memory.postgres import Base, engine, postgres_memory
-from services.api.app.routes import auth, chat, feedback, health, history, upload
+from services.api.app.routes import auth, chat, feedback, health, history, legal_research, upload
 
 logger = logging.getLogger(__name__)
 
 # Dimension produced by nomic-embed-text (must match OLLAMA_EMBEDDING_MODEL)
-_EMBEDDING_DIM = 2560
+_EMBEDDING_DIM = 768
 
 
 # ── Request Logging Middleware ─────────────────────────────────────────────
@@ -167,10 +167,12 @@ async def _seed_admin() -> None:
     can be rotated without code changes.  The seed is skipped when any
     admin already exists, making it safe to call on every startup.
     """
-    from passlib.context import CryptContext  # local import — avoid top-level dep
+    import bcrypt  # use bcrypt directly — passlib 1.7.4 is incompatible with bcrypt>=4
 
-    pwd = CryptContext(schemes=["bcrypt"], deprecated="auto")
-    hashed = pwd.hash(settings.ADMIN_PASSWORD)
+    hashed = bcrypt.hashpw(
+        settings.ADMIN_PASSWORD.encode("utf-8"),
+        bcrypt.gensalt(),
+    ).decode("utf-8")
 
     created = await postgres_memory.seed_admin(
         username=settings.ADMIN_USERNAME,
@@ -249,7 +251,12 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://192.168.100.104:3000",
+        "http://0.0.0.0:3000",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -270,6 +277,11 @@ app.include_router(
 app.include_router(health.router, prefix="/health", tags=["Health"])
 app.include_router(history.router, prefix="/api/v1/history", tags=["History"])
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["Auth"])
+app.include_router(
+    legal_research.router,
+    prefix="/api/v1/legal-research",
+    tags=["Legal Research"],
+)
 
 # ── Prometheus Metrics Endpoint ───────────────────────────────────────────
 # Mounted as a sub-application so prometheus_client handles content

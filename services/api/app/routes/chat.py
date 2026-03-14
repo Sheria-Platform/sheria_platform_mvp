@@ -129,6 +129,8 @@ async def chat_stream(
         tool_choice="",
         tool_input="",
         query_vector=query_vector or [],  # reuse embedding from cache check
+        jurisdiction_filter=[],  # not used by generic chat — legal-research route only
+        citations=[],
     )
 
     # 5. Define Generator for Streaming Response

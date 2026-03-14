@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from jose import jwt
-from passlib.context import CryptContext
+import bcrypt as _bcrypt
 from pydantic import BaseModel
 
 from services.api.app.auth.jwt import get_current_user, require_admin
@@ -25,18 +25,19 @@ from services.api.app.utils.email import send_activation_email
 
 router = APIRouter()
 
-_pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
 _VALID_ROLES = {"judge", "magistrate", "registrar", "clerk", "admin"}
 _REQUESTABLE_ROLES = _VALID_ROLES - {"admin"}
 
 
 def _hash_password(password: str) -> str:
-    return _pwd_context.hash(password)
+    return _bcrypt.hashpw(password.encode("utf-8"), _bcrypt.gensalt()).decode("utf-8")
 
 
 def _verify_password(plain: str, hashed: str) -> bool:
-    return _pwd_context.verify(plain, hashed)
+    try:
+        return _bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
+    except Exception:
+        return False
 
 
 def _create_token(user_id: str, username: str, role: str, court: str) -> str:
