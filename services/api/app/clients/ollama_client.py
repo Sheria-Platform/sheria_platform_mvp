@@ -1,6 +1,5 @@
 # services/api/app/clients/ollama_client.py
-"""
-Ollama LLM Client - Replaces Ray Serve ray_llm.py.
+"""Ollama LLM client.
 
 Provides an async HTTP interface to Ollama's /api/chat endpoint with:
 - Connection pooling (20 keepalive / 50 max connections)
@@ -76,10 +75,7 @@ class OllamaClient:
         max_tokens: int = 1024,
         json_mode: bool = False,
     ) -> str:
-        """
-        Call Ollama /api/chat (non-streaming) and return the assistant text.
-
-        Replaces RayLLMClient.chat_completion().
+        """Call Ollama /api/chat (non-streaming) and return the assistant text.
 
         Args:
             messages:    List of {"role": ..., "content": ...} dicts.

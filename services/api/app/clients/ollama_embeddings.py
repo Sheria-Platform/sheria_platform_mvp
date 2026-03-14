@@ -1,6 +1,5 @@
 # services/api/app/clients/ollama_embeddings.py
-"""
-Ollama Embeddings Client - Replaces Ray Serve ray_embed.py.
+"""Ollama embeddings client.
 
 Wraps Ollama's /api/embed endpoint with:
 - Batch processing (up to 100 texts per request)
@@ -23,12 +22,10 @@ _BATCH_SIZE = 100
 
 
 class OllamaEmbeddingsClient:
-    """
-    Embeddings client backed by Ollama's /api/embed endpoint.
+    """Embeddings client backed by Ollama's /api/embed endpoint.
 
-    Replaces RayEmbedClient from ray_embed.py. Uses per-request httpx
-    clients (no persistent pool needed — embedding calls are infrequent
-    and can reuse Ollama's own connection management).
+    Uses per-request httpx clients (no persistent pool needed — embedding
+    calls are infrequent and Ollama manages its own connections).
     """
 
     def __init__(self) -> None:
@@ -37,10 +34,7 @@ class OllamaEmbeddingsClient:
 
     @exponential_backoff(max_retries=3, base_delay=0.5)
     async def embed_query(self, text: str) -> list[float]:
-        """
-        Embed a single query string and return a float vector.
-
-        Replaces RayEmbedClient.embed_query().
+        """Embed a single query string and return a float vector.
 
         Args:
             text: The query to embed.
@@ -67,10 +61,7 @@ class OllamaEmbeddingsClient:
 
     @exponential_backoff(max_retries=3, base_delay=0.5)
     async def embed_documents(self, texts: list[str]) -> list[list[float]]:
-        """
-        Embed multiple documents, processing in batches of up to 100.
-
-        Replaces RayEmbedClient.embed_documents().
+        """Embed multiple documents, processing in batches of up to 100.
 
         Args:
             texts: Document strings to embed.
