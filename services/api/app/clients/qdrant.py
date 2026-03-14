@@ -73,6 +73,7 @@ class VectorDBClient:
         self,
         vector: list[float],
         limit: int = 5,
+        query_filter: Any | None = None,
     ) -> list[ScoredPoint]:
         """Perform an approximate nearest-neighbour search.
 
@@ -80,6 +81,8 @@ class VectorDBClient:
             vector: The query embedding vector.  Must match the
                 dimension of the indexed collection.
             limit: Maximum number of results to return.
+            query_filter: Optional ``qdrant_client.http.models.Filter``
+                for payload-based pre-filtering (e.g. by court_name).
 
         Returns:
             A list of ``ScoredPoint`` objects sorted by descending
@@ -101,6 +104,7 @@ class VectorDBClient:
             query_vector=vector,
             limit=limit,
             with_payload=True,
+            query_filter=query_filter,
         )
 
 

@@ -61,3 +61,8 @@ class AgentState(TypedDict):
     tool_input: str
     # Embedding computed at cache-check time; reused by retriever to avoid re-embedding
     query_vector: list[float]
+    # Optional court filter for the legal-research route (e.g. ["Supreme Court", "Court of Appeal"])
+    # Empty list means no filter — return results from all courts.
+    jurisdiction_filter: list[str]
+    # Structured citations extracted by the retriever for the legal-research response
+    citations: list[dict]

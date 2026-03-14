@@ -12,8 +12,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
 from services.api.app.auth.jwt import get_current_user
+from services.api.app.dependencies import get_memory
 from services.api.app.memory.postgres import PostgresMemory
-from services.api.app.memory.postgres import postgres_memory as global_memory
 
 router = APIRouter()
 
@@ -33,12 +33,6 @@ class MessageRecord(BaseModel):
     role: str
     content: str
     created_at: str
-
-
-# ── Dependency provider ───────────────────────────────────────────────────────
-
-def get_memory() -> PostgresMemory:
-    return global_memory
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────

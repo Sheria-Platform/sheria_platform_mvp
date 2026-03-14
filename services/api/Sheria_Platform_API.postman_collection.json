@@ -1,8 +1,8 @@
 {
   "info": {
     "name": "Sheria Platform API",
-    "description": "AI-powered judicial intelligence platform for Kenya's court system.\n\nProvides agentic legal research, document verification, and predictive analytics via a streaming RAG pipeline.\n\n## Auth\nAll protected endpoints require a `Bearer` JWT in the `Authorization` header.\n\nSet the `jwt_token` collection variable to avoid repeating it per-request.\n\n## Base URL\nSet the `base_url` collection variable (default: `http://localhost:8000`).",
-    "version": "1.0.0",
+    "description": "AI-powered judicial intelligence platform for Kenya's court system.\n\nProvides agentic legal research, document ingestion, conversation history, and user account management via a streaming RAG pipeline.\n\n## Auth Flow\n1. `POST /auth/register` — staff submits request (status: pending)\n2. `GET /auth/pending` + `POST /auth/approve/{id}` — admin reviews & approves\n3. `POST /auth/activate` — staff sets password via emailed token (status: active)\n4. `POST /auth/login` — returns JWT\n\nSet the `jwt_token` collection variable with the token from the login response to authenticate all protected requests automatically.\n\n## Base URL\nSet `base_url` (default: `http://localhost:8000`).",
+    "version": "2.0.0",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -16,13 +16,49 @@
       "key": "jwt_token",
       "value": "",
       "type": "string",
-      "description": "JWT Bearer token. Obtain by signing a token with your JWT_SECRET_KEY and paste here."
+      "description": "JWT Bearer token. Obtained from POST /auth/login. Paste here to authenticate all requests."
     },
     {
       "key": "session_id",
       "value": "",
       "type": "string",
-      "description": "UUID for an ongoing conversation thread. Auto-populated by the Chat/Stream response."
+      "description": "UUID for an ongoing conversation thread. Auto-populated by the Chat/Stream response test script."
+    },
+    {
+      "key": "activation_token",
+      "value": "",
+      "type": "string",
+      "description": "One-time account activation token. Auto-populated from the POST /auth/approve/{id} response."
+    },
+    {
+      "key": "pending_user_id",
+      "value": "",
+      "type": "string",
+      "description": "ID of a pending user to approve. Set after reviewing GET /auth/pending."
+    },
+    {
+      "key": "upload_url",
+      "value": "",
+      "type": "string",
+      "description": "S3 presigned PUT URL. Auto-populated from POST /upload/generate-presigned-url."
+    },
+    {
+      "key": "s3_key",
+      "value": "",
+      "type": "string",
+      "description": "S3 object key for the uploaded file. Auto-populated from POST /upload/generate-presigned-url."
+    },
+    {
+      "key": "file_id",
+      "value": "",
+      "type": "string",
+      "description": "UUID assigned to an upload. Auto-populated from POST /upload/generate-presigned-url."
+    },
+    {
+      "key": "job_id",
+      "value": "",
+      "type": "string",
+      "description": "Ingestion job UUID. Auto-populated from POST /upload/ingest."
     }
   ],
   "auth": {
@@ -43,6 +79,7 @@
         {
           "name": "Liveness Probe",
           "request": {
+            "auth": { "type": "noauth" },
             "method": "GET",
             "header": [],
             "url": {
@@ -57,9 +94,7 @@
               "name": "200 OK – server alive",
               "status": "OK",
               "code": 200,
-              "header": [
-                { "key": "Content-Type", "value": "application/json" }
-              ],
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
               "body": "{\n  \"status\": \"ok\"\n}",
               "_postman_previewlanguage": "json"
             }
@@ -68,6 +103,7 @@
         {
           "name": "Readiness Probe",
           "request": {
+            "auth": { "type": "noauth" },
             "method": "GET",
             "header": [],
             "url": {
@@ -82,9 +118,7 @@
               "name": "200 OK – all dependencies healthy",
               "status": "OK",
               "code": 200,
-              "header": [
-                { "key": "Content-Type", "value": "application/json" }
-              ],
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
               "body": "{\n  \"redis\": \"up\",\n  \"neo4j\": \"up\"\n}",
               "_postman_previewlanguage": "json"
             },
@@ -92,10 +126,345 @@
               "name": "503 Service Unavailable – dependency down",
               "status": "Service Unavailable",
               "code": 503,
-              "header": [
-                { "key": "Content-Type", "value": "application/json" }
-              ],
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
               "body": "{\n  \"redis\": \"down\",\n  \"neo4j\": \"up\"\n}",
+              "_postman_previewlanguage": "json"
+            }
+          ]
+        },
+        {
+          "name": "Legacy Health Check (Compatibility Alias)",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/health",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "health"]
+            },
+            "description": "Compatibility alias for `/health/liveness`. Returns `{\"status\": \"ok\"}` while the server process is alive.\n\nDefined in `services/api/main.py` as a thin wrapper. Useful for clients that expect the health endpoint under the versioned `/api/v1/` prefix."
+          },
+          "response": [
+            {
+              "name": "200 OK – server alive",
+              "status": "OK",
+              "code": 200,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"status\": \"ok\"\n}",
+              "_postman_previewlanguage": "json"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Auth",
+      "description": "User account lifecycle: registration request → admin approval → activation → login.\n\nEndpoints marked **Admin only** require a JWT with `role: admin`.\n\nPublic endpoints (`/register`, `/activate`, `/login`) do not require a token.",
+      "item": [
+        {
+          "name": "Register (public)",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"j.mwangi\",\n  \"email\": \"j.mwangi@judiciary.go.ke\",\n  \"full_name\": \"Hon. Jane Mwangi\",\n  \"court_station\": \"Nairobi High Court\",\n  \"role\": \"judge\",\n  \"staff_number\": \"JSC-12345\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/register",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "register"]
+            },
+            "description": "Submit a judicial staff registration request.\n\nThe account is created with `status: pending`. It cannot be used until an administrator approves it and the user activates it.\n\nValid roles: `judge`, `magistrate`, `registrar`, `clerk` (not `admin` — admins are created out-of-band)."
+          },
+          "response": [
+            {
+              "name": "201 Created – registration submitted",
+              "status": "Created",
+              "code": 201,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"message\": \"Registration request submitted. An administrator will review it.\"\n}",
+              "_postman_previewlanguage": "json"
+            },
+            {
+              "name": "400 Bad Request – duplicate username",
+              "status": "Bad Request",
+              "code": 400,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"detail\": \"Username already taken\"\n}",
+              "_postman_previewlanguage": "json"
+            },
+            {
+              "name": "400 Bad Request – invalid role",
+              "status": "Bad Request",
+              "code": 400,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"detail\": \"Invalid role. Choose from: clerk, judge, magistrate, registrar\"\n}",
+              "_postman_previewlanguage": "json"
+            }
+          ]
+        },
+        {
+          "name": "List Pending Users (Admin only)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/pending",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "pending"]
+            },
+            "description": "Return all registration requests with `status: pending`, newest-first.\n\n**Requires:** JWT with `role: admin`.\n\nUse the returned `id` field as `pending_user_id` for the approve endpoint."
+          },
+          "response": [
+            {
+              "name": "200 OK – pending users list",
+              "status": "OK",
+              "code": 200,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "[\n  {\n    \"id\": \"550e8400-e29b-41d4-a716-446655440000\",\n    \"username\": \"j.mwangi\",\n    \"email\": \"j.mwangi@judiciary.go.ke\",\n    \"full_name\": \"Hon. Jane Mwangi\",\n    \"role\": \"judge\",\n    \"court_station\": \"Nairobi High Court\",\n    \"staff_number\": \"JSC-12345\",\n    \"status\": \"pending\",\n    \"created_at\": \"2026-03-13T08:00:00\"\n  }\n]",
+              "_postman_previewlanguage": "json"
+            },
+            {
+              "name": "403 Forbidden – not an admin",
+              "status": "Forbidden",
+              "code": 403,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"detail\": \"Admin access required\"\n}",
+              "_postman_previewlanguage": "json"
+            }
+          ]
+        },
+        {
+          "name": "Approve User (Admin only)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const body = pm.response.json();",
+                  "    pm.collectionVariables.set('activation_token', body.activation_token);",
+                  "    console.log('activation_token saved:', body.activation_token);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"role\": \"judge\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/approve/{{pending_user_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "approve", "{{pending_user_id}}"]
+            },
+            "description": "Approve a pending registration request and optionally override the requested role.\n\n**Requires:** JWT with `role: admin`.\n\nReturns a one-time `activation_token` to share with the user out-of-band (email, SMS). The test script automatically saves it to the `activation_token` collection variable.\n\nValid roles: `judge`, `magistrate`, `registrar`, `clerk`, `admin`."
+          },
+          "response": [
+            {
+              "name": "200 OK – user approved",
+              "status": "OK",
+              "code": 200,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"message\": \"User approved. Share the activation link with the user.\",\n  \"activation_token\": \"a1b2c3d4-e5f6-7890-abcd-ef1234567890\",\n  \"activation_link\": \"/activate?token=a1b2c3d4-e5f6-7890-abcd-ef1234567890\"\n}",
+              "_postman_previewlanguage": "json"
+            }
+          ]
+        },
+        {
+          "name": "Activate Account (public)",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{activation_token}}\",\n  \"password\": \"SecurePass123!\",\n  \"confirm_password\": \"SecurePass123!\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/activate",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "activate"]
+            },
+            "description": "Set a password using the one-time activation token from the approval step.\n\nAfter activation the account status becomes `active` and the token is consumed (single-use). The user can then log in via `POST /auth/login`.\n\nPassword requirements: minimum 8 characters."
+          },
+          "response": [
+            {
+              "name": "200 OK – account activated",
+              "status": "OK",
+              "code": 200,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"message\": \"Account activated. You can now sign in.\"\n}",
+              "_postman_previewlanguage": "json"
+            },
+            {
+              "name": "404 Not Found – invalid or expired token",
+              "status": "Not Found",
+              "code": 404,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"detail\": \"Invalid or expired activation token\"\n}",
+              "_postman_previewlanguage": "json"
+            },
+            {
+              "name": "400 Bad Request – passwords do not match",
+              "status": "Bad Request",
+              "code": 400,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"detail\": \"Passwords do not match\"\n}",
+              "_postman_previewlanguage": "json"
+            }
+          ]
+        },
+        {
+          "name": "Login (public)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const body = pm.response.json();",
+                  "    pm.collectionVariables.set('jwt_token', body.access_token);",
+                  "    console.log('jwt_token saved for user:', body.user.username);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"j.mwangi\",\n  \"password\": \"SecurePass123!\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/login",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "login"]
+            },
+            "description": "Authenticate with username and password. Returns a JWT (8-hour expiry).\n\nThe test script automatically saves `access_token` to the `jwt_token` collection variable so all subsequent requests are authenticated.\n\nAccount must have `status: active`. Pending, approved (not yet activated), and suspended accounts receive a descriptive 403 error."
+          },
+          "response": [
+            {
+              "name": "200 OK – login successful",
+              "status": "OK",
+              "code": 200,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"access_token\": \"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...\",\n  \"token_type\": \"bearer\",\n  \"user\": {\n    \"id\": \"550e8400-e29b-41d4-a716-446655440000\",\n    \"username\": \"j.mwangi\",\n    \"role\": \"judge\",\n    \"court\": \"Nairobi High Court\",\n    \"full_name\": \"Hon. Jane Mwangi\",\n    \"token\": \"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...\"\n  }\n}",
+              "_postman_previewlanguage": "json"
+            },
+            {
+              "name": "401 Unauthorized – wrong password",
+              "status": "Unauthorized",
+              "code": 401,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"detail\": \"Invalid credentials\"\n}",
+              "_postman_previewlanguage": "json"
+            },
+            {
+              "name": "403 Forbidden – account pending",
+              "status": "Forbidden",
+              "code": 403,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"detail\": \"Account pending administrator approval\"\n}",
+              "_postman_previewlanguage": "json"
+            }
+          ]
+        },
+        {
+          "name": "List All Users (Admin only)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/users",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "users"],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "active",
+                  "description": "Filter by account status. One of: pending, approved, active, suspended. Omit to return all users.",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Return all user accounts, optionally filtered by `?status=`.\n\n**Requires:** JWT with `role: admin`.\n\nValid status values: `pending`, `approved`, `active`, `suspended`. Omit the query parameter to return every account regardless of status.\n\nSensitive fields (`hashed_password`, `activation_token`) are stripped from the response."
+          },
+          "response": [
+            {
+              "name": "200 OK – user list",
+              "status": "OK",
+              "code": 200,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "[\n  {\n    \"id\": \"550e8400-e29b-41d4-a716-446655440000\",\n    \"username\": \"j.mwangi\",\n    \"email\": \"j.mwangi@judiciary.go.ke\",\n    \"full_name\": \"Hon. Jane Mwangi\",\n    \"role\": \"judge\",\n    \"court_station\": \"Nairobi High Court\",\n    \"staff_number\": \"JSC-12345\",\n    \"status\": \"active\",\n    \"created_at\": \"2026-03-13T08:00:00\",\n    \"activated_at\": \"2026-03-13T09:00:00\"\n  }\n]",
+              "_postman_previewlanguage": "json"
+            },
+            {
+              "name": "403 Forbidden – not an admin",
+              "status": "Forbidden",
+              "code": 403,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"detail\": \"Admin access required\"\n}",
+              "_postman_previewlanguage": "json"
+            }
+          ]
+        },
+        {
+          "name": "Update User Status (Admin only)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"suspended\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/auth/users/{{pending_user_id}}/status",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "auth", "users", "{{pending_user_id}}", "status"]
+            },
+            "description": "Suspend or reactivate a user account.\n\n**Requires:** JWT with `role: admin`.\n\nValid transitions only:\n- `active → suspended` — user immediately cannot log in\n- `suspended → active` — user can log in again\n\nAll other target values or invalid transitions return **400**."
+          },
+          "response": [
+            {
+              "name": "200 OK – status updated",
+              "status": "OK",
+              "code": 200,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"message\": \"User status updated to 'suspended'. User can no longer log in.\"\n}",
+              "_postman_previewlanguage": "json"
+            },
+            {
+              "name": "400 Bad Request – invalid transition",
+              "status": "Bad Request",
+              "code": 400,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"detail\": \"Cannot transition from 'pending' to 'suspended'.\"\n}",
+              "_postman_previewlanguage": "json"
+            },
+            {
+              "name": "404 Not Found – user not found",
+              "status": "Not Found",
+              "code": 404,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"detail\": \"User not found\"\n}",
               "_postman_previewlanguage": "json"
             }
           ]
@@ -104,7 +473,7 @@
     },
     {
       "name": "Chat",
-      "description": "Streaming RAG pipeline endpoint. Responses are NDJSON (`application/x-ndjson`).\n\nEach line is a JSON object with a `type` field:\n- `\"status\"` — intermediate agent node completion event\n- `\"answer\"` — final synthesised response from the Responder node\n- `\"error\"` — unhandled exception during streaming\n\n**Auth required:** Bearer JWT",
+      "description": "Streaming RAG pipeline endpoint. Responses are NDJSON (`application/x-ndjson`).\n\nEach newline-delimited JSON object has an `event` field:\n- `\"status\"` — intermediate agent node completion (planner, retriever, responder)\n- `\"answer\"` — final synthesised response from the Responder node\n- `\"error\"` — unhandled exception during streaming\n\n**Auth required:** Bearer JWT",
       "item": [
         {
           "name": "Stream Chat (New Session)",
@@ -132,54 +501,41 @@
           ],
           "request": {
             "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"message\": \"What is the test for adverse possession in Kenya?\"\n}",
-              "options": {
-                "raw": { "language": "json" }
-              }
+              "options": { "raw": { "language": "json" } }
             },
             "url": {
               "raw": "{{base_url}}/api/v1/chat/stream",
               "host": ["{{base_url}}"],
               "path": ["api", "v1", "chat", "stream"]
             },
-            "description": "Starts a **new** conversation thread. Omit `session_id` to have the server generate one.\n\nThe response is an NDJSON stream. Each newline-delimited JSON object represents either an agent status update or the final answer.\n\nThe post-request test script automatically stores `session_id` in the collection variable for subsequent turns."
+            "description": "Start a **new** conversation thread. Omit `session_id` to have the server generate one.\n\nThe response is an NDJSON stream. Each JSON line represents an agent status update or the final answer.\n\nThe post-request test script automatically stores `session_id` in the collection variable for subsequent turns.\n\n**Cache behaviour:** If a semantically similar query (cosine ≥ 0.95) was answered recently, only an `answer` event is emitted (no `status` events). Otherwise the full planner → retriever → responder pipeline runs."
           },
           "response": [
             {
-              "name": "200 – NDJSON Stream (cache miss path)",
+              "name": "200 – NDJSON Stream (cache miss — full pipeline)",
               "status": "OK",
               "code": 200,
-              "header": [
-                { "key": "Content-Type", "value": "application/x-ndjson" }
-              ],
-              "body": "{\"type\":\"status\",\"node\":\"planner\",\"session_id\":\"550e8400-e29b-41d4-a716-446655440000\",\"info\":\"Completed step: planner\"}\n{\"type\":\"status\",\"node\":\"retriever\",\"session_id\":\"550e8400-e29b-41d4-a716-446655440000\",\"info\":\"Completed step: retriever\"}\n{\"type\":\"status\",\"node\":\"responder\",\"session_id\":\"550e8400-e29b-41d4-a716-446655440000\",\"info\":\"Completed step: responder\"}\n{\"type\":\"answer\",\"content\":\"The test for adverse possession in Kenya requires...\",\"session_id\":\"550e8400-e29b-41d4-a716-446655440000\"}\n",
+              "header": [{ "key": "Content-Type", "value": "application/x-ndjson" }],
+              "body": "{\"event\":\"status\",\"step\":\"planner\",\"session_id\":\"550e8400-e29b-41d4-a716-446655440000\"}\n{\"event\":\"status\",\"step\":\"retriever\",\"session_id\":\"550e8400-e29b-41d4-a716-446655440000\"}\n{\"event\":\"status\",\"step\":\"responder\",\"session_id\":\"550e8400-e29b-41d4-a716-446655440000\"}\n{\"event\":\"answer\",\"content\":\"The test for adverse possession in Kenya requires...\",\"session_id\":\"550e8400-e29b-41d4-a716-446655440000\"}\n",
               "_postman_previewlanguage": "text"
             },
             {
-              "name": "200 – NDJSON Stream (semantic cache hit)",
+              "name": "200 – NDJSON Stream (semantic cache hit — fast path)",
               "status": "OK",
               "code": 200,
-              "header": [
-                { "key": "Content-Type", "value": "application/x-ndjson" }
-              ],
-              "body": "{\"type\":\"answer\",\"content\":\"The test for adverse possession in Kenya requires...\",\"session_id\":\"550e8400-e29b-41d4-a716-446655440000\"}\n",
+              "header": [{ "key": "Content-Type", "value": "application/x-ndjson" }],
+              "body": "{\"event\":\"answer\",\"content\":\"The test for adverse possession in Kenya requires...\",\"session_id\":\"550e8400-e29b-41d4-a716-446655440000\"}\n",
               "_postman_previewlanguage": "text"
             },
             {
               "name": "401 Unauthorized – missing or invalid token",
               "status": "Unauthorized",
               "code": 401,
-              "header": [
-                { "key": "Content-Type", "value": "application/json" }
-              ],
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
               "body": "{\n  \"detail\": \"Could not validate credentials\"\n}",
               "_postman_previewlanguage": "json"
             }
@@ -189,33 +545,86 @@
           "name": "Stream Chat (Continue Session)",
           "request": {
             "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"message\": \"Can you give me a specific case citation for that?\",\n  \"session_id\": \"{{session_id}}\"\n}",
-              "options": {
-                "raw": { "language": "json" }
-              }
+              "options": { "raw": { "language": "json" } }
             },
             "url": {
               "raw": "{{base_url}}/api/v1/chat/stream",
               "host": ["{{base_url}}"],
               "path": ["api", "v1", "chat", "stream"]
             },
-            "description": "Continues an existing conversation by supplying the `session_id` from a previous turn.\n\nThe server loads the last 6 message turns from Postgres to build the context window before running the agent."
+            "description": "Continue an existing conversation by supplying `session_id` from a previous turn.\n\nThe server loads the last **6 message turns** from Postgres to build the context window before running the agent pipeline."
           },
           "response": []
         }
       ]
     },
     {
+      "name": "History",
+      "description": "Retrieve persisted conversation history from PostgreSQL.\n\nAll sessions and messages are scoped to the authenticated user — users cannot access each other's history.\n\n**Auth required:** Bearer JWT",
+      "item": [
+        {
+          "name": "List Sessions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/history/sessions",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "history", "sessions"]
+            },
+            "description": "Return all conversation sessions for the authenticated user, newest-first.\n\nEach entry includes a `preview` (first 120 chars of the first user message) and a `message_count`."
+          },
+          "response": [
+            {
+              "name": "200 OK – session list",
+              "status": "OK",
+              "code": 200,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "[\n  {\n    \"session_id\": \"550e8400-e29b-41d4-a716-446655440000\",\n    \"started_at\": \"2026-03-13T08:00:00\",\n    \"last_activity\": \"2026-03-13T08:12:30\",\n    \"message_count\": 6,\n    \"preview\": \"What is the test for adverse possession in Kenya?\"\n  }\n]",
+              "_postman_previewlanguage": "json"
+            }
+          ]
+        },
+        {
+          "name": "Get Session Messages",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/history/sessions/{{session_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "history", "sessions", "{{session_id}}"]
+            },
+            "description": "Return all messages in a session in chronological order (oldest → newest).\n\nReturns **404** if the session ID does not exist or belongs to a different user."
+          },
+          "response": [
+            {
+              "name": "200 OK – session messages",
+              "status": "OK",
+              "code": 200,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "[\n  {\n    \"id\": 1,\n    \"role\": \"user\",\n    \"content\": \"What is the test for adverse possession in Kenya?\",\n    \"created_at\": \"2026-03-13T08:00:00\"\n  },\n  {\n    \"id\": 2,\n    \"role\": \"assistant\",\n    \"content\": \"The test for adverse possession in Kenya requires...\",\n    \"created_at\": \"2026-03-13T08:00:05\"\n  }\n]",
+              "_postman_previewlanguage": "json"
+            },
+            {
+              "name": "404 Not Found – session missing or access denied",
+              "status": "Not Found",
+              "code": 404,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"detail\": \"Session not found or access denied.\"\n}",
+              "_postman_previewlanguage": "json"
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "Upload",
-      "description": "S3 presigned URL generation for direct client-to-S3 uploads.\n\n**Flow:**\n1. Call `POST /api/v1/upload/generate-presigned-url` → receive `upload_url`, `file_id`, `s3_key`\n2. `PUT` the file binary directly to `upload_url` (client-side, no API proxy)\n3. Pass `s3_key` to the ingestion pipeline\n\n**Auth required:** Bearer JWT",
+      "description": "Document ingestion pipeline: presigned URL generation → client-to-S3 upload → ingestion job → status polling.\n\n**Flow:**\n1. `POST /upload/generate-presigned-url` → receive `upload_url`, `file_id`, `s3_key`\n2. `PUT` file binary to `upload_url` (direct to S3, no API proxy)\n3. `POST /upload/ingest` with `s3_key` and `file_id` → starts background job\n4. `GET /upload/jobs/{job_id}` → poll for `pending → running → done/failed`\n5. `GET /upload/jobs` → view full job history (survives API restarts)\n\n**Auth required:** Bearer JWT",
       "item": [
         {
           "name": "Generate Presigned Upload URL",
@@ -238,55 +647,34 @@
           ],
           "request": {
             "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"filename\": \"judgment_2023.pdf\",\n  \"content_type\": \"application/pdf\"\n}",
-              "options": {
-                "raw": { "language": "json" }
-              }
+              "options": { "raw": { "language": "json" } }
             },
             "url": {
               "raw": "{{base_url}}/api/v1/upload/generate-presigned-url",
               "host": ["{{base_url}}"],
               "path": ["api", "v1", "upload", "generate-presigned-url"]
             },
-            "description": "Generates a time-limited (1 hour) S3 presigned PUT URL.\n\nThe client uses the returned `upload_url` to upload the file binary directly to S3 without routing through the API server — suitable for large PDFs, court recordings, and exhibits.\n\nThe post-request test script saves `upload_url`, `file_id`, and `s3_key` as collection variables."
+            "description": "Generate a time-limited S3 presigned PUT URL (valid 1 hour).\n\nThe client uses the returned `upload_url` to upload the file binary **directly to S3** without routing through the API server — suitable for large PDFs, court recordings, and exhibits.\n\nThe test script saves `upload_url`, `file_id`, and `s3_key` as collection variables for the next steps."
           },
           "response": [
             {
               "name": "200 OK – presigned URL generated",
               "status": "OK",
               "code": 200,
-              "header": [
-                { "key": "Content-Type", "value": "application/json" }
-              ],
-              "body": "{\n  \"upload_url\": \"https://sheria-court-records-dev.s3.amazonaws.com/uploads/judge-001/550e8400-e29b-41d4-a716-446655440000.pdf?X-Amz-Algorithm=AWS4-HMAC-SHA256&...\",\n  \"file_id\": \"550e8400-e29b-41d4-a716-446655440000\",\n  \"s3_key\": \"uploads/judge-001/550e8400-e29b-41d4-a716-446655440000.pdf\"\n}",
-              "_postman_previewlanguage": "json"
-            },
-            {
-              "name": "401 Unauthorized",
-              "status": "Unauthorized",
-              "code": 401,
-              "header": [
-                { "key": "Content-Type", "value": "application/json" }
-              ],
-              "body": "{\n  \"detail\": \"Could not validate credentials\"\n}",
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"upload_url\": \"http://localhost:9000/sheria-court-records-dev/uploads/user-id/550e8400.pdf?X-Amz-Algorithm=...\",\n  \"file_id\": \"550e8400-e29b-41d4-a716-446655440000\",\n  \"s3_key\": \"uploads/user-id/550e8400-e29b-41d4-a716-446655440000.pdf\"\n}",
               "_postman_previewlanguage": "json"
             },
             {
               "name": "500 Internal Server Error – S3 / IAM failure",
               "status": "Internal Server Error",
               "code": 500,
-              "header": [
-                { "key": "Content-Type", "value": "application/json" }
-              ],
-              "body": "{\n  \"detail\": \"An error occurred (AccessDenied) when calling the GeneratePresignedUrl operation: ...\"\n}",
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"detail\": \"An error occurred (AccessDenied) when calling the GeneratePresignedUrl operation\"\n}",
               "_postman_previewlanguage": "json"
             }
           ]
@@ -294,6 +682,7 @@
         {
           "name": "PUT File to S3 (Client-Side Step)",
           "request": {
+            "auth": { "type": "noauth" },
             "method": "PUT",
             "header": [
               {
@@ -304,19 +693,17 @@
             ],
             "body": {
               "mode": "file",
-              "file": {
-                "src": ""
-              }
+              "file": { "src": "" }
             },
             "url": {
               "raw": "{{upload_url}}",
               "host": ["{{upload_url}}"]
             },
-            "description": "Upload the binary file directly to S3 using the presigned URL obtained from the previous step.\n\n**This request does NOT go through the Sheria API** — it goes directly to S3. No `Authorization` header is needed; the presigned URL is self-authenticating.\n\nSet `upload_url` collection variable first by running \"Generate Presigned Upload URL\"."
+            "description": "Upload the binary file **directly to S3/MinIO** using the presigned URL.\n\nThis request does NOT go through the Sheria API — no `Authorization` header is needed; the presigned URL is self-authenticating.\n\nRun step 1 (Generate Presigned URL) first to populate `{{upload_url}}`."
           },
           "response": [
             {
-              "name": "200 OK – file uploaded",
+              "name": "200 OK – file uploaded to S3",
               "status": "OK",
               "code": 200,
               "header": [],
@@ -324,65 +711,149 @@
               "_postman_previewlanguage": "text"
             }
           ]
+        },
+        {
+          "name": "Trigger Ingestion",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const body = pm.response.json();",
+                  "    pm.collectionVariables.set('job_id', body.job_id);",
+                  "    console.log('job_id saved:', body.job_id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"s3_key\": \"{{s3_key}}\",\n  \"file_id\": \"{{file_id}}\",\n  \"filename\": \"judgment_2023.pdf\"\n}",
+              "options": { "raw": { "language": "json" } }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/upload/ingest",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "upload", "ingest"]
+            },
+            "description": "Start the ingestion pipeline for a file that has already been uploaded to S3/MinIO.\n\nCreates an `ingestion_jobs` DB row immediately (`status: pending`) and spawns a background thread that runs the Ray pipeline. The job record **survives API restarts** — use `GET /upload/jobs` after a restart to see all historical jobs.\n\nThe test script saves `job_id` for subsequent polling."
+          },
+          "response": [
+            {
+              "name": "200 OK – ingestion job created",
+              "status": "OK",
+              "code": 200,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"job_id\": \"a1b2c3d4-e5f6-7890-abcd-ef1234567890\",\n  \"status\": \"pending\",\n  \"filename\": \"judgment_2023.pdf\",\n  \"s3_key\": \"uploads/user-id/550e8400.pdf\",\n  \"started_at\": 1710316800.0,\n  \"completed_at\": null,\n  \"duration_s\": null,\n  \"stats\": {},\n  \"error\": \"\"\n}",
+              "_postman_previewlanguage": "json"
+            }
+          ]
+        },
+        {
+          "name": "List All Jobs",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/upload/jobs",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "upload", "jobs"]
+            },
+            "description": "Return all ingestion jobs for the authenticated user, newest-first.\n\nReads from PostgreSQL — full history is available **even after API restarts**. In-memory active jobs are written to DB immediately on creation and on status transitions."
+          },
+          "response": [
+            {
+              "name": "200 OK – job list",
+              "status": "OK",
+              "code": 200,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "[\n  {\n    \"job_id\": \"a1b2c3d4-e5f6-7890-abcd-ef1234567890\",\n    \"status\": \"done\",\n    \"filename\": \"judgment_2023.pdf\",\n    \"s3_key\": \"uploads/user-id/550e8400.pdf\",\n    \"started_at\": 1710316800.0,\n    \"completed_at\": 1710316942.5,\n    \"duration_s\": 142.5,\n    \"stats\": { \"chunks\": 48, \"vectors\": 48, \"nodes\": 12, \"edges\": 31 },\n    \"error\": \"\"\n  }\n]",
+              "_postman_previewlanguage": "json"
+            }
+          ]
+        },
+        {
+          "name": "Poll Job Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/v1/upload/jobs/{{job_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "upload", "jobs", "{{job_id}}"]
+            },
+            "description": "Poll the status of a single ingestion job.\n\n**Live jobs** (status `pending` or `running`) are served from in-memory state for accuracy. **Completed or pre-restart jobs** fall back to PostgreSQL.\n\nStatus lifecycle: `pending → running → done | failed`"
+          },
+          "response": [
+            {
+              "name": "200 OK – job running",
+              "status": "OK",
+              "code": 200,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"job_id\": \"a1b2c3d4-e5f6-7890-abcd-ef1234567890\",\n  \"status\": \"running\",\n  \"filename\": \"judgment_2023.pdf\",\n  \"s3_key\": \"uploads/user-id/550e8400.pdf\",\n  \"started_at\": 1710316800.0,\n  \"completed_at\": null,\n  \"duration_s\": null,\n  \"stats\": {},\n  \"error\": \"\"\n}",
+              "_postman_previewlanguage": "json"
+            },
+            {
+              "name": "200 OK – job done",
+              "status": "OK",
+              "code": 200,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"job_id\": \"a1b2c3d4-e5f6-7890-abcd-ef1234567890\",\n  \"status\": \"done\",\n  \"filename\": \"judgment_2023.pdf\",\n  \"s3_key\": \"uploads/user-id/550e8400.pdf\",\n  \"started_at\": 1710316800.0,\n  \"completed_at\": 1710316942.5,\n  \"duration_s\": 142.5,\n  \"stats\": { \"chunks\": 48, \"vectors\": 48, \"nodes\": 12, \"edges\": 31 },\n  \"error\": \"\"\n}",
+              "_postman_previewlanguage": "json"
+            },
+            {
+              "name": "404 Not Found – job missing or access denied",
+              "status": "Not Found",
+              "code": 404,
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
+              "body": "{\n  \"detail\": \"Job not found\"\n}",
+              "_postman_previewlanguage": "json"
+            }
+          ]
         }
       ]
     },
     {
       "name": "Feedback",
-      "description": "Rate individual assistant responses with a thumbs-up / thumbs-down score and an optional comment.\n\nFeedback is persisted to the `feedback` table in PostgreSQL.\n\n**Auth required:** Bearer JWT",
+      "description": "Rate individual assistant responses with a thumbs-up / thumbs-down score and an optional comment.\n\nFeedback is persisted to the `feedback` table in PostgreSQL and used for model improvement via the judicial feedback loop.\n\n**Auth required:** Bearer JWT",
       "item": [
         {
           "name": "Submit Feedback (Thumbs Up)",
           "request": {
             "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"session_id\": \"{{session_id}}\",\n  \"message_id\": 42,\n  \"score\": 1,\n  \"comment\": \"Very accurate citation of the adverse possession test.\"\n}",
-              "options": {
-                "raw": { "language": "json" }
-              }
+              "options": { "raw": { "language": "json" } }
             },
             "url": {
               "raw": "{{base_url}}/api/v1/feedback/",
               "host": ["{{base_url}}"],
               "path": ["api", "v1", "feedback", ""]
             },
-            "description": "Submit a positive rating (`score: 1`) for an assistant response.\n\n`message_id` is the primary-key ID of the `chat_history` row for the assistant's message."
+            "description": "Submit a positive rating (`score: 1`) for an assistant response.\n\n`message_id` is the primary-key `id` from the `GET /history/sessions/{id}` response for the assistant's message row."
           },
           "response": [
             {
               "name": "200 OK – feedback recorded",
               "status": "OK",
               "code": 200,
-              "header": [
-                { "key": "Content-Type", "value": "application/json" }
-              ],
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
               "body": "{\n  \"status\": \"recorded\"\n}",
               "_postman_previewlanguage": "json"
             },
             {
-              "name": "401 Unauthorized",
-              "status": "Unauthorized",
-              "code": 401,
-              "header": [
-                { "key": "Content-Type", "value": "application/json" }
-              ],
-              "body": "{\n  \"detail\": \"Could not validate credentials\"\n}",
-              "_postman_previewlanguage": "json"
-            },
-            {
-              "name": "500 Internal Server Error – DB write failure",
+              "name": "500 Internal Server Error – feedback table missing",
               "status": "Internal Server Error",
               "code": 500,
-              "header": [
-                { "key": "Content-Type", "value": "application/json" }
-              ],
+              "header": [{ "key": "Content-Type", "value": "application/json" }],
               "body": "{\n  \"detail\": \"relation \\\"feedback\\\" does not exist\"\n}",
               "_postman_previewlanguage": "json"
             }
@@ -392,25 +863,18 @@
           "name": "Submit Feedback (Thumbs Down)",
           "request": {
             "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"session_id\": \"{{session_id}}\",\n  \"message_id\": 43,\n  \"score\": -1,\n  \"comment\": \"The cited case was overruled in 2019.\"\n}",
-              "options": {
-                "raw": { "language": "json" }
-              }
+              "options": { "raw": { "language": "json" } }
             },
             "url": {
               "raw": "{{base_url}}/api/v1/feedback/",
               "host": ["{{base_url}}"],
               "path": ["api", "v1", "feedback", ""]
             },
-            "description": "Submit a negative rating (`score: -1`) with an optional explanatory comment.\n\nComments are used to improve the model via the judicial feedback loop (`eval/feedback/judicial_review.py`)."
+            "description": "Submit a negative rating (`score: -1`) with an explanatory comment.\n\nComments are surfaced in the judicial feedback loop (`eval/feedback/judicial_review.py`) to identify specific failure modes for fine-tuning."
           },
           "response": []
         }

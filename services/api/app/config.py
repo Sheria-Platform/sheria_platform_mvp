@@ -112,6 +112,24 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------ #
     OTEL_EXPORTER_OTLP_ENDPOINT: str | None = None
 
+    # ------------------------------------------------------------------ #
+    # Default Admin Seed                                                    #
+    # ------------------------------------------------------------------ #
+    ADMIN_USERNAME: str = "admin"
+    ADMIN_PASSWORD: str = "Admin1234!"   # change in production
+    ADMIN_EMAIL: str = "admin@judiciary.go.ke"
+    ADMIN_FULL_NAME: str = "System Administrator"
+
+    # ------------------------------------------------------------------ #
+    # SMTP / Email                                                           #
+    # ------------------------------------------------------------------ #
+    SMTP_HOST: str = ""          # empty = email delivery disabled
+    SMTP_PORT: int = 587
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM: str = "noreply@judiciary.go.ke"
+    APP_BASE_URL: str = "http://localhost:3000"
+
     class Config:
         """Pydantic configuration."""
 

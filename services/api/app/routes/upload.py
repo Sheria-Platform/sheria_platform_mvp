@@ -12,12 +12,11 @@ Typical flow:
     4. Client notifies the ingestion pipeline with ``s3_key``.
 """
 
-import asyncio
 import threading
 import time
 import uuid
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import boto3
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -157,14 +156,14 @@ async def generate_upload_url(
 # ---------------------------------------------------------------------------
 # In-memory job store — live status cache; persisted to PostgreSQL for durability
 # ---------------------------------------------------------------------------
-_jobs: Dict[str, Dict[str, Any]] = {}
+_jobs: dict[str, dict[str, Any]] = {}
 _jobs_lock = threading.Lock()
 
 
 class IngestRequest(BaseModel):
     s3_key: str
     file_id: str
-    filename: Optional[str] = None  # original filename for display
+    filename: str | None = None  # original filename for display
 
 
 class JobStatus(BaseModel):
@@ -172,9 +171,9 @@ class JobStatus(BaseModel):
     status: str  # pending | running | done | failed
     filename: str = ""
     s3_key: str = ""
-    started_at: Optional[float] = None   # unix timestamp
-    completed_at: Optional[float] = None
-    duration_s: Optional[float] = None
+    started_at: float | None = None   # unix timestamp
+    completed_at: float | None = None
+    duration_s: float | None = None
     stats: dict = {}
     error: str = ""
 
@@ -266,7 +265,7 @@ async def trigger_ingest(
     })
 
 
-@router.get("/jobs", response_model=List[JobStatus], summary="List all ingestion jobs")
+@router.get("/jobs", response_model=list[JobStatus], summary="List all ingestion jobs")
 async def list_jobs(
     user: dict = Depends(get_current_user),
 ) -> List[JobStatus]:

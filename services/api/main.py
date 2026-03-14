@@ -22,14 +22,12 @@ import logging
 import time
 import uuid
 from contextlib import asynccontextmanager
-import json as _agent_json  # agent log
 from typing import AsyncGenerator
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from prometheus_client import make_asgi_app
 from qdrant_client.http.models import Distance, VectorParams
-from sqlalchemy import text
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
@@ -40,14 +38,15 @@ from services.api.app.cache.redis import redis_client
 from services.api.app.clients.neo4j import neo4j_client
 from services.api.app.clients.ollama_client import ollama_client
 from services.api.app.clients.qdrant import qdrant_client
+from services.api.app.config import settings
 from services.api.app.logging import bind_context
-from services.api.app.memory.postgres import Base, engine
-from services.api.app.routes import chat, feedback, health, history, upload
+from services.api.app.memory.postgres import Base, engine, postgres_memory
+from services.api.app.routes import auth, chat, feedback, health, history, legal_research, upload
 
 logger = logging.getLogger(__name__)
 
 # Dimension produced by nomic-embed-text (must match OLLAMA_EMBEDDING_MODEL)
-_EMBEDDING_DIM = 2560
+_EMBEDDING_DIM = 768
 
 
 # ── Request Logging Middleware ─────────────────────────────────────────────
@@ -96,29 +95,6 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
             },
         )
 
-        # #region agent log
-        try:
-            _agent_log = {
-                "sessionId": "798f81",
-                "runId": "pre-fix",
-                "hypothesisId": "H1",
-                "location": "services/api/main.py:RequestLoggingMiddleware.dispatch",
-                "message": "request completed",
-                "data": {
-                    "method": request.method,
-                    "path": endpoint,
-                    "status": response.status_code,
-                    "origin": request.headers.get("origin"),
-                },
-                "timestamp": int(time.time() * 1000),
-            }
-            _agent_log_path = "/Users/danielmalungu/Documents/sheria_platform_mvp/.cursor/debug-798f81.log"
-            with open(_agent_log_path, "a", encoding="utf-8") as _agent_f:
-                _agent_f.write(_agent_json.dumps(_agent_log) + "\n")
-        except Exception:
-            # Intentionally swallow all errors from debug logging.
-            pass
-        # #endregion
         return response
 
 
@@ -152,22 +128,41 @@ async def _create_db_tables() -> None:
     """Create all database tables if they do not already exist.
 
     Runs ``CREATE TABLE IF NOT EXISTS`` for every SQLAlchemy ORM model
-    (``chat_history``) and the raw-SQL ``feedback`` table.  Safe to call
-    on every startup — existing tables are left untouched.
+    registered under ``Base`` (``chat_history``, ``ingestion_jobs``,
+    ``users``, ``feedback``).  Safe to call on every startup — existing
+    tables are left untouched.
     """
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-        await conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS feedback (
-                id         SERIAL PRIMARY KEY,
-                session_id VARCHAR      NOT NULL,
-                user_id    VARCHAR      NOT NULL,
-                message_id INTEGER      NOT NULL,
-                score      INTEGER      NOT NULL,
-                comment    TEXT,
-                created_at TIMESTAMP    DEFAULT NOW()
-            )
-        """))
+
+
+async def _seed_admin() -> None:
+    """Create the default admin account on first boot if none exists.
+
+    Credentials are read from ``ADMIN_*`` environment variables so they
+    can be rotated without code changes.  The seed is skipped when any
+    admin already exists, making it safe to call on every startup.
+    """
+    import bcrypt  # use bcrypt directly — passlib 1.7.4 is incompatible with bcrypt>=4
+
+    hashed = bcrypt.hashpw(
+        settings.ADMIN_PASSWORD.encode("utf-8"),
+        bcrypt.gensalt(),
+    ).decode("utf-8")
+
+    created = await postgres_memory.seed_admin(
+        username=settings.ADMIN_USERNAME,
+        email=settings.ADMIN_EMAIL,
+        full_name=settings.ADMIN_FULL_NAME,
+        hashed_password=hashed,
+    )
+    if created:
+        logger.info(
+            "Default admin account created",
+            extra={"username": settings.ADMIN_USERNAME},
+        )
+    else:
+        logger.info("Admin account already exists — skipping seed")
 
 
 @asynccontextmanager
@@ -197,6 +192,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # ── Startup ──────────────────────────────────────────────────────
     logger.info("Initializing clients...")
     await _create_db_tables()
+    await _seed_admin()
     neo4j_client.connect()
     await redis_client.connect()
     await qdrant_client.connect()
@@ -231,7 +227,12 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://192.168.100.104:3000",
+        "http://0.0.0.0:3000",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -251,6 +252,12 @@ app.include_router(
 )
 app.include_router(health.router, prefix="/health", tags=["Health"])
 app.include_router(history.router, prefix="/api/v1/history", tags=["History"])
+app.include_router(auth.router, prefix="/api/v1/auth", tags=["Auth"])
+app.include_router(
+    legal_research.router,
+    prefix="/api/v1/legal-research",
+    tags=["Legal Research"],
+)
 
 # ── Prometheus Metrics Endpoint ───────────────────────────────────────────
 # Mounted as a sub-application so prometheus_client handles content

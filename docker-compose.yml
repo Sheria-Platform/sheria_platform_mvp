@@ -183,6 +183,13 @@ services:
       JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
       # Observability
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      # SMTP — routes activation emails to MailHog in dev
+      SMTP_HOST: ${SMTP_HOST:-mailhog}
+      SMTP_PORT: ${SMTP_PORT:-1025}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-noreply@judiciary.go.ke}
+      APP_BASE_URL: ${APP_BASE_URL:-http://localhost:3000}
     depends_on:
       postgres:
         condition: service_healthy
@@ -192,6 +199,8 @@ services:
         condition: service_healthy
       ollama:
         condition: service_healthy
+      mailhog:
+        condition: service_started
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
@@ -239,6 +248,15 @@ services:
       - qdrant
     extra_hosts:
       - host.docker.internal:host-gateway
+    restart: unless-stopped
+
+  # 10. MailHog (Local SMTP for Dev — captures outgoing activation emails)
+  mailhog:
+    image: mailhog/mailhog:v1.0.1
+    container_name: sheria-mailhog
+    ports:
+      - "1025:1025"   # SMTP — point SMTP_HOST=mailhog, SMTP_PORT=1025
+      - "8025:8025"   # Web UI — http://localhost:8025 to inspect emails
     restart: unless-stopped
 
   # 6. Ollama (Local LLMs) server GPU support

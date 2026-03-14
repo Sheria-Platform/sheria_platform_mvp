@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { apiFetch } from "@/lib/api";
 import { HealthResponse } from "@/types/api";
 
 export function useHealth(pollInterval = 30_000) {
@@ -13,11 +14,10 @@ export function useHealth(pollInterval = 30_000) {
 
     const poll = async () => {
       try {
-        const res = await fetch("/api/v1/health", {
+        const data = await apiFetch<HealthResponse>("/api/v1/health", {
+          skipAuth: true,
           headers: { Accept: "application/json" },
         });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
         if (!cancelled) {
           setHealth(data);
           setError(null);

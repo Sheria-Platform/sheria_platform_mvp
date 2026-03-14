@@ -11,7 +11,7 @@ import { Separator } from "@/components/ui/separator";
 import { clearAuth } from "@/lib/auth";
 import { RoleBadge } from "./RoleBadge";
 import { UserRole } from "@/types/api";
-import { MessageSquarePlus, FileText, Activity, LogOut, Layers, History } from "lucide-react";
+import { MessageSquarePlus, FileText, Activity, LogOut, Layers, History, Users } from "lucide-react";
 
 const NAV_ITEMS = [
   { href: "/chat", label: "Legal Research", icon: MessageSquarePlus },
@@ -20,6 +20,8 @@ const NAV_ITEMS = [
   { href: "/jobs", label: "Ingestion Jobs", icon: Layers },
   { href: "/health", label: "System Status", icon: Activity },
 ];
+
+const ADMIN_ITEM = { href: "/admin/users", label: "User Management", icon: Users };
 
 export function AppSidebar() {
   const pathname = usePathname();
@@ -84,6 +86,21 @@ export function AppSidebar() {
             </Link>
           );
         })}
+        {user?.role === "admin" && (
+          <Link href={ADMIN_ITEM.href}>
+            <span
+              className={cn(
+                "flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors cursor-pointer",
+                pathname === ADMIN_ITEM.href
+                  ? "bg-white/15 text-white font-medium"
+                  : "text-gray-400 hover:text-white hover:bg-white/10"
+              )}
+            >
+              <ADMIN_ITEM.icon size={15} />
+              {ADMIN_ITEM.label}
+            </span>
+          </Link>
+        )}
       </nav>
 
       <Separator className="opacity-10 mx-3 my-1" />

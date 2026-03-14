@@ -14,7 +14,8 @@ typing_extensions==4.15.0
 annotated-types==0.7.0
 mypy_extensions==1.1.0
 
-# Async HTTP Clients
+# Async HTTP Clients & Email
+aiosmtplib==3.0.1
 httpx==0.28.1
 httpcore==1.0.9
 h11==0.16.0

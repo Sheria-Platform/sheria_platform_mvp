@@ -15,6 +15,7 @@ Example:
     >>> history = await postgres_memory.get_history("abc-123", limit=6)
 """
 
+import uuid
 from datetime import datetime
 from typing import Sequence
 
@@ -69,6 +70,40 @@ class IngestionJob(Base):
     stats        = Column(JSON, default={})
     error        = Column(Text, nullable=False, default="")
     created_at   = Column(DateTime, default=datetime.utcnow)
+
+
+class User(Base):
+    """ORM model for the ``users`` table — judicial staff accounts."""
+
+    __tablename__ = "users"
+
+    id               = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    username         = Column(String(50), unique=True, nullable=False, index=True)
+    email            = Column(String(120), unique=True, nullable=False, index=True)
+    full_name        = Column(String(200), nullable=False)
+    hashed_password  = Column(String, nullable=True)
+    role             = Column(String(30), nullable=False)
+    court_station    = Column(String(200), nullable=False)
+    staff_number     = Column(String(50), nullable=True)
+    status           = Column(String(20), nullable=False, default="pending")
+    activation_token = Column(String, nullable=True, index=True)
+    approved_by      = Column(String, nullable=True)
+    created_at       = Column(DateTime, default=datetime.utcnow)
+    activated_at     = Column(DateTime, nullable=True)
+
+
+class Feedback(Base):
+    """ORM model for the ``feedback`` table — user ratings for assistant responses."""
+
+    __tablename__ = "feedback"
+
+    id         = Column(Integer, primary_key=True, autoincrement=True)
+    session_id = Column(String, nullable=False)
+    user_id    = Column(String, nullable=False)
+    message_id = Column(Integer, nullable=False)
+    score      = Column(Integer, nullable=False)
+    comment    = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
 
 
 # Async engine -- ``echo=False`` suppresses SQL statement logging
@@ -312,6 +347,256 @@ class PostgresMemory:
             row = result.scalar_one_or_none()
             return _job_to_dict(row) if row else None
 
+    # ------------------------------------------------------------------
+    # User account management
+    # ------------------------------------------------------------------
+
+    async def create_user(
+        self,
+        username: str,
+        email: str,
+        full_name: str,
+        court_station: str,
+        role: str,
+        staff_number: str | None = None,
+    ) -> None:
+        """Insert a new user row with status ``pending``.
+
+        Called when judicial staff submit a registration request.  The
+        account cannot be used until an administrator approves it and the
+        user activates it via the emailed link.
+        """
+        async with AsyncSessionLocal() as session:
+            async with session.begin():
+                session.add(User(
+                    username=username,
+                    email=email,
+                    full_name=full_name,
+                    court_station=court_station,
+                    role=role,
+                    staff_number=staff_number,
+                    status="pending",
+                ))
+
+    async def get_user_by_username(self, username: str) -> dict | None:
+        """Return a user dict by username, or ``None`` if not found.
+
+        Used during login and registration uniqueness checks.
+        """
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(User).where(User.username == username)
+            )
+            row = result.scalar_one_or_none()
+            return _user_to_dict(row) if row else None
+
+    async def get_user_by_email(self, email: str) -> dict | None:
+        """Return a user dict by email address, or ``None`` if not found.
+
+        Used during registration to enforce email uniqueness.
+        """
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(User).where(User.email == email)
+            )
+            row = result.scalar_one_or_none()
+            return _user_to_dict(row) if row else None
+
+    async def get_user_by_id(self, user_id: str) -> dict | None:
+        """Return a user dict by primary-key UUID, or ``None`` if not found."""
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(User).where(User.id == user_id)
+            )
+            row = result.scalar_one_or_none()
+            return _user_to_dict(row) if row else None
+
+    async def get_user_by_activation_token(self, token: str) -> dict | None:
+        """Return a user in ``approved`` status matching the one-time token.
+
+        Returns ``None`` if the token is unknown or the account has already
+        been activated (status transitions away from ``approved`` on use).
+        """
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(User).where(
+                    User.activation_token == token,
+                    User.status == "approved",
+                )
+            )
+            row = result.scalar_one_or_none()
+            return _user_to_dict(row) if row else None
+
+    async def get_pending_users(self) -> list[dict]:
+        """Return all users with status ``pending``, newest-first.
+
+        Called by the admin approval endpoint to list unreviewed requests.
+        """
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(User)
+                .where(User.status == "pending")
+                .order_by(User.created_at.desc())
+            )
+            rows = result.scalars().all()
+            return [_user_to_dict(r) for r in rows]
+
+    async def approve_user(
+        self,
+        user_id: str,
+        role: str,
+        activation_token: str,
+        approved_by: str,
+    ) -> None:
+        """Transition a user from ``pending`` to ``approved`` and store the
+        one-time ``activation_token``.
+
+        The administrator may override the role requested during registration.
+        The token is later consumed by ``activate_user``.
+        """
+        async with AsyncSessionLocal() as session:
+            async with session.begin():
+                await session.execute(
+                    update(User)
+                    .where(User.id == user_id)
+                    .values(
+                        status="approved",
+                        role=role,
+                        activation_token=activation_token,
+                        approved_by=approved_by,
+                    )
+                )
+
+    async def activate_user(self, user_id: str, hashed_password: str) -> None:
+        """Set the user's bcrypt password hash, mark status ``active``, and
+        consume the one-time activation token.
+
+        After this call the user can log in via ``POST /api/v1/auth/login``.
+        """
+        async with AsyncSessionLocal() as session:
+            async with session.begin():
+                await session.execute(
+                    update(User)
+                    .where(User.id == user_id)
+                    .values(
+                        status="active",
+                        hashed_password=hashed_password,
+                        activation_token=None,
+                        activated_at=datetime.utcnow(),
+                    )
+                )
+
+    # ------------------------------------------------------------------
+    # Feedback persistence
+    # ------------------------------------------------------------------
+
+    async def record_feedback(
+        self,
+        session_id: str,
+        user_id: str,
+        message_id: int,
+        score: int,
+        comment: str | None,
+    ) -> None:
+        """Persist a user rating for an assistant response.
+
+        Args:
+            session_id: Conversation thread the rated message belongs to.
+            user_id: Authenticated user submitting the rating.
+            message_id: Primary-key ID of the ``ChatHistory`` row being rated.
+            score: ``1`` for positive, ``-1`` for negative.
+            comment: Optional free-text explanation.
+        """
+        async with AsyncSessionLocal() as session:
+            async with session.begin():
+                session.add(Feedback(
+                    session_id=session_id,
+                    user_id=user_id,
+                    message_id=message_id,
+                    score=score,
+                    comment=comment,
+                ))
+
+    # ------------------------------------------------------------------
+    # User status management
+    # ------------------------------------------------------------------
+
+    async def get_users(self, status: str | None = None) -> list[dict]:
+        """Return all users, optionally filtered by status, newest-first.
+
+        Args:
+            status: Optional status filter (``"pending"``, ``"active"``,
+                ``"suspended"``, ``"approved"``).  ``None`` returns all users.
+        """
+        async with AsyncSessionLocal() as session:
+            query = select(User).order_by(User.created_at.desc())
+            if status is not None:
+                query = query.where(User.status == status)
+            result = await session.execute(query)
+            rows = result.scalars().all()
+            return [_user_to_dict(r) for r in rows]
+
+    async def update_user_status(self, user_id: str, new_status: str) -> bool:
+        """Set the ``status`` field on a user row.
+
+        Args:
+            user_id: Primary-key UUID of the user to update.
+            new_status: Target status string (e.g. ``"suspended"`` or ``"active"``).
+
+        Returns:
+            ``True`` if a row was matched and updated, ``False`` if not found.
+        """
+        async with AsyncSessionLocal() as session:
+            async with session.begin():
+                result = await session.execute(
+                    update(User)
+                    .where(User.id == user_id)
+                    .values(status=new_status)
+                )
+                return result.rowcount > 0
+
+    async def seed_admin(
+        self,
+        username: str,
+        email: str,
+        full_name: str,
+        hashed_password: str,
+    ) -> bool:
+        """Create the default admin account if no admin user exists yet.
+
+        Idempotent — safe to call on every startup.  Does nothing if any
+        user with ``role="admin"`` already exists in the database.
+
+        Args:
+            username: Login username for the admin account.
+            email: Email address for the admin account.
+            full_name: Display name shown in the UI.
+            hashed_password: Bcrypt hash of the initial password.
+
+        Returns:
+            ``True`` if the admin was created, ``False`` if one already exists.
+        """
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(User).where(User.role == "admin").limit(1)
+            )
+            if result.scalar_one_or_none() is not None:
+                return False
+
+        async with AsyncSessionLocal() as session:
+            async with session.begin():
+                session.add(User(
+                    username=username,
+                    email=email,
+                    full_name=full_name,
+                    hashed_password=hashed_password,
+                    role="admin",
+                    court_station="Judiciary Headquarters",
+                    status="active",
+                    activated_at=datetime.utcnow(),
+                ))
+        return True
+
 
 def _job_to_dict(row: IngestionJob) -> dict:
     """Serialise an ``IngestionJob`` ORM row to a plain dict."""
@@ -325,6 +610,24 @@ def _job_to_dict(row: IngestionJob) -> dict:
         "duration_s":   row.duration_s,
         "stats":        row.stats or {},
         "error":        row.error or "",
+    }
+
+
+def _user_to_dict(row: User) -> dict:
+    """Serialise a ``User`` ORM row to a plain dict (excludes hashed_password from most uses)."""
+    return {
+        "id":               row.id,
+        "username":         row.username,
+        "email":            row.email,
+        "full_name":        row.full_name,
+        "role":             row.role,
+        "court_station":    row.court_station,
+        "staff_number":     row.staff_number,
+        "status":           row.status,
+        "hashed_password":  row.hashed_password,
+        "activation_token": row.activation_token,
+        "created_at":       row.created_at.isoformat() if row.created_at else None,
+        "activated_at":     row.activated_at.isoformat() if row.activated_at else None,
     }
 
 

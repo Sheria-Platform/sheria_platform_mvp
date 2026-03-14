@@ -80,3 +80,38 @@ export interface MessageRecord {
   content: string;
   created_at: string;
 }
+
+export interface RegisterRequest {
+  username: string;
+  email: string;
+  full_name: string;
+  court_station: string;
+  role: UserRole;
+  staff_number?: string;
+}
+
+export interface PendingUser {
+  id: string;
+  username: string;
+  email: string;
+  full_name: string;
+  role: UserRole;
+  court_station: string;
+  staff_number?: string;
+  status: "pending" | "approved" | "active" | "suspended";
+  created_at: string;
+}
+
+/** A user returned by GET /api/v1/auth/users (active, suspended, or approved). */
+export interface ActiveUser {
+  id: string;
+  username: string;
+  email: string;
+  full_name: string;
+  role: UserRole;
+  court_station: string;
+  staff_number?: string;
+  status: "approved" | "active" | "suspended";
+  created_at: string;
+  activated_at?: string;
+}
