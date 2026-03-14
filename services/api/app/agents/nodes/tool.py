@@ -1,44 +1,61 @@
 # services/api/app/agents/nodes/tool.py
+"""Agent tool node — dispatches tool calls via a registry.
+
+The registry pattern (OCP) means new tools can be added by appending an entry
+to ``_TOOL_REGISTRY`` without modifying the dispatch logic in ``tool_node``.
+
+To add a new tool:
+    1. Import the function at the top of this module.
+    2. Add an entry: ``"my_tool": my_tool_fn`` in ``_TOOL_REGISTRY``.
+    Both sync and async callables are supported.
+"""
+
+import asyncio
 import logging
+from collections.abc import Callable
 
 from services.api.app.agents.state import AgentState
 from services.api.app.tools.calculator import calculate
 from services.api.app.tools.graph_search import search_graph_tool
 
-# from services.api.app.tools.web_search import web_search (Future)
-
 logger = logging.getLogger(__name__)
+
+# Registry maps tool_name → callable (sync or async) that accepts tool_input str.
+_TOOL_REGISTRY: dict[str, Callable] = {
+    "calculator": calculate,
+    "graph_search": search_graph_tool,
+}
 
 
 async def tool_node(state: AgentState) -> dict:
-    """
-    Executes the tool specified in the plan.
-    """
-    # Get the last message or plan to see what tool to call
-    # In a real implementation, the Planner outputs a structured tool call.
-    # Here we simplify based on the 'plan' field.
+    """Dispatch the tool specified in ``state["tool_choice"]``.
 
+    Looks up the tool in ``_TOOL_REGISTRY`` and calls it with
+    ``state["tool_input"]``.  Supports both sync and async callables.
+    Returns an error message for unknown tools rather than raising,
+    keeping the graph running.
+
+    Args:
+        state: Agent state containing ``"plan"``, ``"tool_choice"``,
+            and ``"tool_input"`` fields.
+
+    Returns:
+        Partial state dict with ``"messages"`` containing the tool result.
+    """
     plan_data = state.get("plan", [])
     if not plan_data:
         return {"messages": [{"role": "system", "content": "No tool selected."}]}
 
-    # Assume Planner passed specific instruction in state (simplified)
-    # Real implementations use OpenAI function calling API or JSON parsing
-    tool_name = state.get("tool_choice", "calculator")
-    tool_input = state.get("tool_input", "0+0")
+    tool_name = state.get("tool_choice", "")
+    tool_input = state.get("tool_input", "")
 
-    result = ""
-
-    if tool_name == "calculator":
-        logger.info(f"Executing Calculator: {tool_input}")
-        result = calculate(tool_input)
-
-    elif tool_name == "graph_search":
-        logger.info(f"Executing Graph Search: {tool_input}")
-        result = await search_graph_tool(tool_input)
-
+    tool_fn = _TOOL_REGISTRY.get(tool_name)
+    if tool_fn is None:
+        result = f"Unknown tool: {tool_name!r}. Available: {list(_TOOL_REGISTRY)}"
+        logger.warning("Unknown tool requested: %s", tool_name)
     else:
-        result = "Unknown tool requested."
+        logger.info("Executing tool %s: %s", tool_name, tool_input)
+        raw = tool_fn(tool_input)
+        result = await raw if asyncio.iscoroutine(raw) else raw
 
-    # Return the observation
     return {"messages": [{"role": "user", "content": f"Tool Output: {result}"}]}
