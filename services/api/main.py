@@ -22,7 +22,6 @@ import logging
 import time
 import uuid
 from contextlib import asynccontextmanager
-import json as _agent_json  # agent log
 from typing import AsyncGenerator
 
 from fastapi import FastAPI
@@ -96,29 +95,6 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
             },
         )
 
-        # #region agent log
-        try:
-            _agent_log = {
-                "sessionId": "798f81",
-                "runId": "pre-fix",
-                "hypothesisId": "H1",
-                "location": "services/api/main.py:RequestLoggingMiddleware.dispatch",
-                "message": "request completed",
-                "data": {
-                    "method": request.method,
-                    "path": endpoint,
-                    "status": response.status_code,
-                    "origin": request.headers.get("origin"),
-                },
-                "timestamp": int(time.time() * 1000),
-            }
-            _agent_log_path = "/Users/danielmalungu/Documents/sheria_platform_mvp/.cursor/debug-798f81.log"
-            with open(_agent_log_path, "a", encoding="utf-8") as _agent_f:
-                _agent_f.write(_agent_json.dumps(_agent_log) + "\n")
-        except Exception:
-            # Intentionally swallow all errors from debug logging.
-            pass
-        # #endregion
         return response
 
 
