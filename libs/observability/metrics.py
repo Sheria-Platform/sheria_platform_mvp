@@ -25,6 +25,10 @@ CACHE_HITS = Counter(
 
 # ── LLM / Token Metrics ────────────────────────────────────────────────────
 
+# TODO: Increment TOKEN_USAGE after each ollama_client.chat_completion() call.
+# Ollama's response includes token counts under data["eval_count"] (completion)
+# and data["prompt_eval_count"] (prompt).  Wire these in OllamaClient once the
+# Ollama token-counting API is stable across model versions.
 TOKEN_USAGE = Counter(
     "rag_llm_tokens_total",
     "Total LLM tokens consumed",
