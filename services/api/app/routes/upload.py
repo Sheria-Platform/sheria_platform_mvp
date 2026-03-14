@@ -12,6 +12,7 @@ Typical flow:
     4. Client notifies the ingestion pipeline with ``s3_key``.
 """
 
+import asyncio
 import threading
 import time
 import uuid
@@ -268,7 +269,7 @@ async def trigger_ingest(
 @router.get("/jobs", response_model=list[JobStatus], summary="List all ingestion jobs")
 async def list_jobs(
     user: dict = Depends(get_current_user),
-) -> List[JobStatus]:
+) -> list[JobStatus]:
     rows = await postgres_memory.get_all_ingestion_jobs(user["id"])
     return [JobStatus(**r) for r in rows]
 
