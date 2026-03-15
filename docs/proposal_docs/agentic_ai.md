@@ -56,4 +56,3 @@ This solution directly fulfills the core objectives:
 *   **Localized & Contextualized LLMs:** Our model is specifically tuned for the Kenyan public sector context.
 *   **Generative & Agentic AI:** Sheria generates predictions and explanations and operates autonomously through a multi-step agentic loop.
 *   **Impact on Governance:** It enhances transparency, efficiency, and citizen engagement in government services.
-

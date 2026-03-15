@@ -356,4 +356,3 @@ MVP Delivery proposed Sprint Milestones and High Level tasks:
 2. **MVP v0.2** – Accurate metadata extraction (≥ 90 % field‑level F1) (Sprint 2).  
 3. **MVP v0.3** – Searchable repository with multilingual summaries (Sprint 3).  
 4. **MVP v1.0** – Fully integrated, secure demo ready for hackathon judges (Sprint 4).
-

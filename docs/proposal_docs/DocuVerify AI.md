@@ -246,4 +246,3 @@ DocuVerify AI represents a transformative application of generative and agentic 
 This solution directly addresses the hackathon's goals of leveraging AI for sustainable development, enhanced governance, and increased citizen engagement through accessible and contextually relevant technology.
 
 ---
-

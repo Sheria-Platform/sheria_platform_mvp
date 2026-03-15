@@ -318,8 +318,8 @@ This solution directly addresses the hackathon's focus on localized, contextuali
 ### **Education**
 
 RULE\_001: High Dropout Risk  
-IF attendance\_rate \< 75%   
-AND grade\_average\_trend \= "declining"   
+IF attendance\_rate \< 75%  
+AND grade\_average\_trend \= "declining"  
 AND parent\_engagement \= "low"  
 THEN dropout\_risk \= "high"  
 CONFIDENCE: 0.85
@@ -356,4 +356,3 @@ CONFIDENCE: 0.88
 * **Kenya Data Protection Act**: https://www.odpc.go.ke/
 
 ---
-

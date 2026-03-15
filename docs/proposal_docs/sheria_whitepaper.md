@@ -439,8 +439,8 @@ Sheria Platform is an integrated AI ecosystem addressing each stage of the gover
 #### **Document Processing Pipeline**
 
 ```
-Upload → Pre-processing → OCR → Text Extraction → 
-NER → LLM Analysis → Metadata Extraction → 
+Upload → Pre-processing → OCR → Text Extraction →
+NER → LLM Analysis → Metadata Extraction →
 Validation → Indexing → Storage
 ```
 
@@ -460,24 +460,24 @@ Validation → Indexing → Storage
 #### **Validation Workflow**
 
 ```
-Request → Document Analysis → Database Queries → 
-Cross-Reference → Fraud Detection → Confidence Scoring → 
+Request → Document Analysis → Database Queries →
+Cross-Reference → Fraud Detection → Confidence Scoring →
 Blockchain Certification → Response
 ```
 
 #### **Conversational Query Flow**
 
 ```
-User Query → Intent Classification → Entity Extraction → 
-Rule Retrieval → Data Retrieval → Reasoning → 
+User Query → Intent Classification → Entity Extraction →
+Rule Retrieval → Data Retrieval → Reasoning →
 Answer Generation → Citation → Response
 ```
 
 #### **Prediction Generation Flow**
 
 ```
-Historical Data → Pattern Analysis → Rule Application → 
-Statistical Modeling → Confidence Assessment → 
+Historical Data → Pattern Analysis → Rule Application →
+Statistical Modeling → Confidence Assessment →
 Explanation Generation → Actionable Recommendations
 ```
 
@@ -679,8 +679,8 @@ Provide a conversational interface that bridges raw data, domain-specific busine
 
 **Rule Input Format:**
 ```
-IF condition_1 AND condition_2 AND ... 
-THEN action/prediction 
+IF condition_1 AND condition_2 AND ...
+THEN action/prediction
 CONFIDENCE: 0.XX
 ```
 
@@ -689,8 +689,8 @@ CONFIDENCE: 0.XX
 *Education:*
 ```
 RULE_EDU_001: High Dropout Risk
-IF attendance_rate < 75% 
-AND grade_average_trend = "declining" 
+IF attendance_rate < 75%
+AND grade_average_trend = "declining"
 AND parent_engagement = "low"
 THEN dropout_risk = "high"
 CONFIDENCE: 0.85
@@ -726,7 +726,7 @@ CONFIDENCE: 0.90
 **3. Agentic Reasoning Workflow**
 
 ```
-Query → Parse Intent → Retrieve Data → Apply Rules → 
+Query → Parse Intent → Retrieve Data → Apply Rules →
 Generate Prediction → Explain Reasoning → Format Response
 ```
 
@@ -773,15 +773,15 @@ Generate Prediction → Explain Reasoning → Format Response
 ```
 User: "Why is my water connection request still pending?"
 
-Sheria: Your application (Ref #WC-2025-1234) is pending for the 
+Sheria: Your application (Ref #WC-2025-1234) is pending for the
 following reason:
 
-Required Document Missing: Site inspection report from county 
+Required Document Missing: Site inspection report from county
 engineer
 
 Status: Awaiting inspection (scheduled for Nov 15, 2025)
 
 Average Resolution Time: 5-7 days after inspection
 
-Next Steps: 
+Next Steps:
 1. Ensure property is accessible on Nov 15
