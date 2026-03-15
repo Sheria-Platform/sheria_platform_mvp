@@ -81,6 +81,24 @@ export interface MessageRecord {
   created_at: string;
 }
 
+export type DocumentType = "court_order" | "judgment" | "pleading" | "affidavit";
+
+export interface VerificationCheck {
+  check: string;
+  passed: boolean;
+  detail: string;
+}
+
+export interface VerificationReport {
+  authentic: boolean;
+  confidence: number;
+  document_type: string;
+  extracted_metadata: Record<string, string>;
+  verification_checks: VerificationCheck[];
+  risk_flags: string[];
+  summary: string;
+}
+
 export interface RegisterRequest {
   username: string;
   email: string;
