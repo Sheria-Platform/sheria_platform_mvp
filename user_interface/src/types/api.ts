@@ -99,6 +99,17 @@ export interface VerificationReport {
   summary: string;
 }
 
+export interface VerificationActivity {
+  id: number;
+  filename: string;
+  document_type: string;
+  case_number: string;
+  authentic: boolean;
+  confidence: number;
+  report: VerificationReport;
+  created_at: string;
+}
+
 export interface RegisterRequest {
   username: string;
   email: string;

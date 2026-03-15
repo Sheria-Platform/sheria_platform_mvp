@@ -6,6 +6,6 @@ engine and session factory.  This module re-exports them so any code that
 imports from ``memory.models`` continues to work without modification.
 """
 
-from services.api.app.memory.postgres import Base, ChatHistory
+from services.api.app.memory.postgres import Base, ChatHistory, VerificationActivity
 
-__all__ = ["Base", "ChatHistory"]
+__all__ = ["Base", "ChatHistory", "VerificationActivity"]

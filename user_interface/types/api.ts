@@ -19,4 +19,5 @@ export type {
   DocumentType,
   VerificationCheck,
   VerificationReport,
+  VerificationActivity,
 } from "../src/types/api";

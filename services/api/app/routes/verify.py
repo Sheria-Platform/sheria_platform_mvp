@@ -12,15 +12,21 @@ No streaming — document verification is a synchronous request/response.
 import json
 import logging
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile, status
 from pydantic import BaseModel
 
 from services.api.app.auth.jwt import get_current_user
+from services.api.app.memory.postgres import PostgresMemory, postgres_memory
 from services.api.app.tools.verify_document import verify_document
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def get_memory() -> PostgresMemory:
+    return postgres_memory
+
 
 # ── Response schema ───────────────────────────────────────────────────────────
 
@@ -89,6 +95,7 @@ def _extract_text_from_pdf(pdf_bytes: bytes) -> str:
     ),
 )
 async def verify_court_document(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(..., description="PDF court document to verify"),
     document_type: str = Form(
         default="court_order",
@@ -99,6 +106,7 @@ async def verify_court_document(
         description="Case reference number as it appears on the document",
     ),
     user: dict = Depends(get_current_user),
+    memory: PostgresMemory = Depends(get_memory),
 ) -> VerificationReport:
     """Authenticate a court document and return a verification report.
 
@@ -175,4 +183,39 @@ async def verify_court_document(
             detail=report_data["error"],
         )
 
-    return VerificationReport(**report_data)
+    report = VerificationReport(**report_data)
+
+    background_tasks.add_task(
+        memory.save_verification,
+        user.get("id", ""),
+        file.filename or "",
+        document_type,
+        case_number,
+        report_data,
+    )
+
+    return report
+
+
+# ── History endpoint ───────────────────────────────────────────────────────────
+
+
+@router.get(
+    "/history",
+    summary="List past document verifications",
+    description="Return the authenticated user's verification history, newest first.",
+)
+async def get_verification_history(
+    user: dict = Depends(get_current_user),
+    memory: PostgresMemory = Depends(get_memory),
+) -> list[dict]:
+    """Return verification activity records for the current user.
+
+    Args:
+        user:   Authenticated user from JWT.
+        memory: Postgres memory dependency.
+
+    Returns:
+        List of verification activity dicts, newest first (up to 50).
+    """
+    return await memory.get_user_verifications(user.get("id", ""))
