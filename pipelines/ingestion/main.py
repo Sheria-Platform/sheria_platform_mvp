@@ -23,26 +23,29 @@ Example:
 Environment Variables:
     See .env.example for required configuration
 """
+
 import logging
 import os
 import signal
 import sys
+from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any, Dict, Iterator, List, Optional, Tuple
+from typing import Any, Optional
 
 from minio import Minio
 
+from pipelines.ingestion.chunking.metadata_chunking import enrich_metadata
 from pipelines.ingestion.chunking.splitter_chunking import split_text
 from pipelines.ingestion.embedding.embedding_compute import BatchEmbedder
 from pipelines.ingestion.graph.extractor_graph import GraphExtractor
 from pipelines.ingestion.indexing.neo4j_indexing import Neo4jIndexer
 from pipelines.ingestion.indexing.qdrant_indexing import QdrantIndexer
-from pipelines.ingestion.loaders.dispatcher import get_loader, SUPPORTED_EXTENSIONS
-from pipelines.ingestion.chunking.metadata_chunking import enrich_metadata
+from pipelines.ingestion.loaders.dispatcher import SUPPORTED_EXTENSIONS, get_loader
 
 # Load environment variables from .env file if present
 try:
     from dotenv import load_dotenv
+
     load_dotenv()
 except ImportError:
     pass
@@ -50,11 +53,15 @@ except ImportError:
 # Setup logging
 logging.basicConfig(
     level=os.getenv("LOG_LEVEL", "INFO"),
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler(os.path.join(os.path.dirname(__file__), "logs", "ingestion.log"))
-    ] if os.path.exists(os.path.join(os.path.dirname(__file__), "logs")) else [logging.StreamHandler()]
+        logging.FileHandler(
+            os.path.join(os.path.dirname(__file__), "logs", "ingestion.log")
+        ),
+    ]
+    if os.path.exists(os.path.join(os.path.dirname(__file__), "logs"))
+    else [logging.StreamHandler()],
 )
 logger = logging.getLogger(__name__)
 
@@ -71,11 +78,13 @@ def signal_handler(signum: int, frame: Any) -> None:
         frame: Current stack frame
     """
     global _shutdown_requested
-    logger.warning(f"Received shutdown signal {signum}. Finishing current batch and shutting down...")
+    logger.warning(
+        f"Received shutdown signal {signum}. Finishing current batch and shutting down..."
+    )
     _shutdown_requested = True
 
 
-def validate_config() -> Dict[str, Any]:
+def validate_config() -> dict[str, Any]:
     """
     Validate and load configuration from environment variables.
 
@@ -102,13 +111,21 @@ def validate_config() -> Dict[str, Any]:
 
     # Validate ranges
     if config["chunk_size"] < 50 or config["chunk_size"] > 8192:
-        raise ValueError(f"chunk_size must be between 50 and 8192, got {config['chunk_size']}")
+        raise ValueError(
+            f"chunk_size must be between 50 and 8192, got {config['chunk_size']}"
+        )
     if config["chunk_overlap"] < 0 or config["chunk_overlap"] >= config["chunk_size"]:
-        raise ValueError(f"chunk_overlap must be between 0 and chunk_size, got {config['chunk_overlap']}")
+        raise ValueError(
+            f"chunk_overlap must be between 0 and chunk_size, got {config['chunk_overlap']}"
+        )
     if config["max_workers"] < 1 or config["max_workers"] > 32:
-        raise ValueError(f"max_workers must be between 1 and 32, got {config['max_workers']}")
+        raise ValueError(
+            f"max_workers must be between 1 and 32, got {config['max_workers']}"
+        )
     if config["file_batch_size"] < 1 or config["file_batch_size"] > 500:
-        raise ValueError(f"file_batch_size must be between 1 and 500, got {config['file_batch_size']}")
+        raise ValueError(
+            f"file_batch_size must be between 1 and 500, got {config['file_batch_size']}"
+        )
 
     logger.info("Configuration validated successfully")
     logger.debug(f"Config: {config}")
@@ -153,7 +170,9 @@ def extract_path_metadata(object_path: str) -> dict:
     return metadata
 
 
-def process_single_file(file_info: Tuple[str, bytes], config: Dict[str, Any]) -> Tuple[List[dict], Optional[str]]:
+def process_single_file(
+    file_info: tuple[str, bytes], config: dict[str, Any]
+) -> tuple[list[dict], str | None]:
     """
     Process a single file: parse PDF and chunk text.
 
@@ -193,9 +212,7 @@ def process_single_file(file_info: Tuple[str, bytes], config: Dict[str, Any]) ->
 
         # 2. Chunk text
         chunks = split_text(
-            text,
-            chunk_size=config["chunk_size"],
-            overlap=config["chunk_overlap"]
+            text, chunk_size=config["chunk_size"], overlap=config["chunk_overlap"]
         )
         logger.info(f"  Chunked {filename}: {len(chunks)} chunks")
 
@@ -209,17 +226,17 @@ def process_single_file(file_info: Tuple[str, bytes], config: Dict[str, Any]) ->
         return chunks, None
 
     except Exception as e:
-        error = f"Failed to process: {str(e)}"
+        error = f"Failed to process: {e!s}"
         logger.error(f"{filename}: {error}", exc_info=True)
         return [], error
 
 
 def batch_embed(
-    chunks: List[dict],
+    chunks: list[dict],
     batch_size: int,
     max_retries: int = 3,
     embedder: Optional["BatchEmbedder"] = None,
-) -> Tuple[List[dict], int]:
+) -> tuple[list[dict], int]:
     """
     Generate embeddings for chunks in batches with retry logic.
 
@@ -250,22 +267,26 @@ def batch_embed(
             logger.warning("Shutdown requested, stopping embedding generation")
             break
 
-        batch = chunks[i:i + batch_size]
+        batch = chunks[i : i + batch_size]
         batch_num = i // batch_size + 1
-        logger.info(f"Embedding batch {batch_num}/{total_batches} ({len(batch)} chunks)")
+        logger.info(
+            f"Embedding batch {batch_num}/{total_batches} ({len(batch)} chunks)"
+        )
 
         success = False
         for attempt in range(max_retries):
             try:
                 batch_dict = {
                     "text": [c["text"] for c in batch],
-                    "metadata": [c["metadata"] for c in batch]
+                    "metadata": [c["metadata"] for c in batch],
                 }
 
                 result = embedder(batch_dict)
 
                 if "vector" not in result or len(result["vector"]) != len(batch):
-                    raise ValueError(f"Invalid embedding response: expected {len(batch)} vectors")
+                    raise ValueError(
+                        f"Invalid embedding response: expected {len(batch)} vectors"
+                    )
 
                 for j, chunk in enumerate(batch):
                     chunk["vector"] = result["vector"][j]
@@ -275,9 +296,13 @@ def batch_embed(
                 break
 
             except Exception as e:
-                logger.warning(f"Embedding batch {batch_num} failed (attempt {attempt + 1}/{max_retries}): {e}")
+                logger.warning(
+                    f"Embedding batch {batch_num} failed (attempt {attempt + 1}/{max_retries}): {e}"
+                )
                 if attempt == max_retries - 1:
-                    logger.error(f"Failed to embed batch {batch_num} after {max_retries} attempts")
+                    logger.error(
+                        f"Failed to embed batch {batch_num} after {max_retries} attempts"
+                    )
                     failed_count += len(batch)
 
         if not success:
@@ -290,11 +315,11 @@ def batch_embed(
 
 
 def batch_extract_graph(
-    chunks: List[dict],
+    chunks: list[dict],
     batch_size: int,
     max_retries: int = 3,
     extractor: Optional["GraphExtractor"] = None,
-) -> Tuple[List[dict], int]:
+) -> tuple[list[dict], int]:
     """
     Extract graph data from chunks in batches with retry logic.
 
@@ -325,24 +350,30 @@ def batch_extract_graph(
             logger.warning("Shutdown requested, stopping graph extraction")
             break
 
-        batch = chunks[i:i + batch_size]
+        batch = chunks[i : i + batch_size]
         batch_num = i // batch_size + 1
-        logger.info(f"Extracting graph batch {batch_num}/{total_batches} ({len(batch)} chunks)")
+        logger.info(
+            f"Extracting graph batch {batch_num}/{total_batches} ({len(batch)} chunks)"
+        )
 
         success = False
         for attempt in range(max_retries):
             try:
                 batch_dict = {
                     "text": [c["text"] for c in batch],
-                    "metadata": [c["metadata"] for c in batch]
+                    "metadata": [c["metadata"] for c in batch],
                 }
 
                 result = extractor(batch_dict)
 
                 if "graph_nodes" not in result or "graph_edges" not in result:
                     raise ValueError("Invalid graph extraction response structure")
-                if len(result["graph_nodes"]) != len(batch) or len(result["graph_edges"]) != len(batch):
-                    raise ValueError(f"Graph response length mismatch: expected {len(batch)}")
+                if len(result["graph_nodes"]) != len(batch) or len(
+                    result["graph_edges"]
+                ) != len(batch):
+                    raise ValueError(
+                        f"Graph response length mismatch: expected {len(batch)}"
+                    )
 
                 for j, chunk in enumerate(batch):
                     chunk["graph_nodes"] = result["graph_nodes"][j]
@@ -353,9 +384,13 @@ def batch_extract_graph(
                 break
 
             except Exception as e:
-                logger.warning(f"Graph extraction batch {batch_num} failed (attempt {attempt + 1}/{max_retries}): {e}")
+                logger.warning(
+                    f"Graph extraction batch {batch_num} failed (attempt {attempt + 1}/{max_retries}): {e}"
+                )
                 if attempt == max_retries - 1:
-                    logger.error(f"Failed to extract graph for batch {batch_num} after {max_retries} attempts")
+                    logger.error(
+                        f"Failed to extract graph for batch {batch_num} after {max_retries} attempts"
+                    )
                     failed_count += len(batch)
 
         if not success:
@@ -367,7 +402,9 @@ def batch_extract_graph(
 
     if _owns_extractor:
         extractor.close()
-    logger.info(f"Graph extraction complete: {len(results) - failed_count} successful, {failed_count} with empty data")
+    logger.info(
+        f"Graph extraction complete: {len(results) - failed_count} successful, {failed_count} with empty data"
+    )
     return results, failed_count
 
 
@@ -376,9 +413,9 @@ def _iter_file_batches(
     bucket_name: str,
     prefix: str,
     batch_size: int,
-    config: Dict[str, Any],
-    stats: Dict[str, Any],
-) -> Iterator[List[Tuple[str, bytes]]]:
+    config: dict[str, Any],
+    stats: dict[str, Any],
+) -> Iterator[list[tuple[str, bytes]]]:
     """
     Yield fixed-size batches of downloaded PDFs from MinIO.
 
@@ -400,18 +437,22 @@ def _iter_file_batches(
         List of (object_name, file_bytes) tuples, at most batch_size entries
     """
     # Phase 1: collect all document names (names are small — listing is metadata-only)
-    all_doc_names: List[str] = []
+    all_doc_names: list[str] = []
     for obj in client.list_objects(bucket_name, prefix=prefix, recursive=True):
         if _shutdown_requested:
             return
         stats["files_seen"] += 1
-        ext = ("." + obj.object_name.lower().rsplit(".", 1)[-1]) if "." in obj.object_name else ""
+        ext = (
+            ("." + obj.object_name.lower().rsplit(".", 1)[-1])
+            if "." in obj.object_name
+            else ""
+        )
         if ext in SUPPORTED_EXTENSIONS:
             all_doc_names.append(obj.object_name)
         else:
             logger.debug(f"Skipping unsupported file type ({ext}): {obj.object_name}")
 
-    def _download(name: str) -> Tuple[str, bytes]:
+    def _download(name: str) -> tuple[str, bytes]:
         resp = client.get_object(bucket_name, name)
         data = resp.read()
         resp.close()
@@ -423,9 +464,9 @@ def _iter_file_batches(
         for i in range(0, len(all_doc_names), batch_size):
             if _shutdown_requested:
                 break
-            batch_names = all_doc_names[i:i + batch_size]
+            batch_names = all_doc_names[i : i + batch_size]
             futures = {pool.submit(_download, name): name for name in batch_names}
-            batch_results: List[Tuple[str, bytes]] = []
+            batch_results: list[tuple[str, bytes]] = []
             for future in as_completed(futures):
                 if _shutdown_requested:
                     break
@@ -441,9 +482,9 @@ def _iter_file_batches(
 
 
 def _process_file_batch(
-    file_batch: List[Tuple[str, bytes]],
-    config: Dict[str, Any],
-    stats: Dict[str, Any],
+    file_batch: list[tuple[str, bytes]],
+    config: dict[str, Any],
+    stats: dict[str, Any],
     qdrant_indexer,
     neo4j_indexer,
     batch_num: int,
@@ -467,9 +508,11 @@ def _process_file_batch(
         extractor: Shared GraphExtractor instance or None if graph disabled
     """
     # Stage A: Parse + chunk in parallel
-    batch_chunks: List[dict] = []
+    batch_chunks: list[dict] = []
     with ThreadPoolExecutor(max_workers=config["max_workers"]) as executor:
-        futures = [executor.submit(process_single_file, fi, config) for fi in file_batch]
+        futures = [
+            executor.submit(process_single_file, fi, config) for fi in file_batch
+        ]
         for future in as_completed(futures):
             if _shutdown_requested:
                 for f in futures:
@@ -483,7 +526,10 @@ def _process_file_batch(
                 if error:
                     stats["files_failed"] += 1
             except Exception as e:
-                logger.error(f"[Batch {batch_num}] File processing future failed: {e}", exc_info=True)
+                logger.error(
+                    f"[Batch {batch_num}] File processing future failed: {e}",
+                    exc_info=True,
+                )
                 stats["files_failed"] += 1
 
     stats["chunks_created"] += len(batch_chunks)
@@ -505,7 +551,11 @@ def _process_file_batch(
         graph_future = None
         if config["enable_graph"] and neo4j_indexer and extractor:
             graph_future = fork_pool.submit(
-                batch_extract_graph, batch_chunks, config["graph_batch_size"], 3, extractor
+                batch_extract_graph,
+                batch_chunks,
+                config["graph_batch_size"],
+                3,
+                extractor,
             )
 
         try:
@@ -520,7 +570,9 @@ def _process_file_batch(
                 chunks_with_graph, graph_failures = graph_future.result()
                 stats["graph_failed"] += graph_failures
             except Exception as e:
-                logger.error(f"[Batch {batch_num}] Graph fork failed: {e}", exc_info=True)
+                logger.error(
+                    f"[Batch {batch_num}] Graph fork failed: {e}", exc_info=True
+                )
                 stats["graph_failed"] += len(batch_chunks)
 
     # Stage D: Index to Qdrant (sub-batches of 100)
@@ -528,41 +580,49 @@ def _process_file_batch(
         for i in range(0, len(chunks_with_vectors), 100):
             if _shutdown_requested:
                 break
-            sub = chunks_with_vectors[i:i + 100]
+            sub = chunks_with_vectors[i : i + 100]
             for attempt in range(3):
                 try:
                     indexed = qdrant_indexer.write(sub)
                     stats["vectors_indexed"] += indexed
                     break
                 except Exception as e:
-                    logger.warning(f"[Batch {batch_num}] Qdrant attempt {attempt + 1}/3: {e}")
+                    logger.warning(
+                        f"[Batch {batch_num}] Qdrant attempt {attempt + 1}/3: {e}"
+                    )
                     if attempt == 2:
-                        logger.error(f"[Batch {batch_num}] Failed to index sub-batch to Qdrant after 3 attempts")
+                        logger.error(
+                            f"[Batch {batch_num}] Failed to index sub-batch to Qdrant after 3 attempts"
+                        )
 
     # Stage E: Index graph results to Neo4j
     if chunks_with_graph and not _shutdown_requested:
         for i in range(0, len(chunks_with_graph), 100):
             if _shutdown_requested:
                 break
-            sub = chunks_with_graph[i:i + 100]
+            sub = chunks_with_graph[i : i + 100]
             for attempt in range(3):
                 try:
                     indexed = neo4j_indexer.write(sub)
                     stats["graph_indexed"] += indexed
                     break
                 except Exception as e:
-                    logger.warning(f"[Batch {batch_num}] Neo4j attempt {attempt + 1}/3: {e}")
+                    logger.warning(
+                        f"[Batch {batch_num}] Neo4j attempt {attempt + 1}/3: {e}"
+                    )
                     if attempt == 2:
-                        logger.error(f"[Batch {batch_num}] Failed to index sub-batch to Neo4j after 3 attempts")
+                        logger.error(
+                            f"[Batch {batch_num}] Failed to index sub-batch to Neo4j after 3 attempts"
+                        )
 
 
 def main(
     bucket_name: str,
     prefix: str,
-    max_workers: Optional[int] = None,
-    enable_graph: Optional[bool] = None,
-    file_batch_size: Optional[int] = None,
-) -> Tuple[int, Dict[str, Any]]:
+    max_workers: int | None = None,
+    enable_graph: bool | None = None,
+    file_batch_size: int | None = None,
+) -> tuple[int, dict[str, Any]]:
     """
     Main ingestion workflow with production-grade error handling.
 
@@ -594,6 +654,7 @@ def main(
     """
     # Install signal handlers for graceful shutdown (only valid in main thread)
     import threading
+
     if threading.current_thread() is threading.main_thread():
         signal.signal(signal.SIGINT, signal_handler)
         signal.signal(signal.SIGTERM, signal_handler)
@@ -622,13 +683,17 @@ def main(
 
     if file_batch_size is not None:
         if file_batch_size < 1 or file_batch_size > 500:
-            raise ValueError(f"file_batch_size must be between 1 and 500, got {file_batch_size}")
+            raise ValueError(
+                f"file_batch_size must be between 1 and 500, got {file_batch_size}"
+            )
         config["file_batch_size"] = file_batch_size
 
     logger.info(f"Starting ingestion: bucket={bucket_name}, prefix={prefix}")
-    logger.info(f"Configuration: workers={config['max_workers']}, graph={config['enable_graph']}, "
-                f"chunk_size={config['chunk_size']}, overlap={config['chunk_overlap']}, "
-                f"file_batch_size={config['file_batch_size']}")
+    logger.info(
+        f"Configuration: workers={config['max_workers']}, graph={config['enable_graph']}, "
+        f"chunk_size={config['chunk_size']}, overlap={config['chunk_overlap']}, "
+        f"file_batch_size={config['file_batch_size']}"
+    )
 
     # Statistics tracking
     stats = {
@@ -650,7 +715,7 @@ def main(
             config["minio_endpoint"],
             access_key=config["minio_access_key"],
             secret_key=config["minio_secret_key"],
-            secure=config["minio_secure"]
+            secure=config["minio_secure"],
         )
 
         # Test connection
@@ -659,7 +724,9 @@ def main(
         logger.info(f"Connected to MinIO bucket: {bucket_name}")
 
         # 2. Stream files and process in fixed-size memory batches
-        logger.info(f"Streaming files from MinIO in batches of {config['file_batch_size']}...")
+        logger.info(
+            f"Streaming files from MinIO in batches of {config['file_batch_size']}..."
+        )
         qdrant_indexer = QdrantIndexer()
         neo4j_indexer = Neo4jIndexer() if config["enable_graph"] else None
         embedder = BatchEmbedder()
@@ -673,16 +740,26 @@ def main(
                 if _shutdown_requested:
                     break
                 batch_num += 1
-                logger.info(f"[Batch {batch_num}] {len(file_batch)} files "
-                            f"(seen so far: {stats['files_seen']})")
-                _process_file_batch(
-                    file_batch, config, stats, qdrant_indexer, neo4j_indexer, batch_num,
-                    embedder=embedder, extractor=extractor,
+                logger.info(
+                    f"[Batch {batch_num}] {len(file_batch)} files "
+                    f"(seen so far: {stats['files_seen']})"
                 )
-                logger.info(f"[Batch {batch_num}] done -- "
-                            f"processed={stats['files_processed']} "
-                            f"vectors={stats['vectors_indexed']} "
-                            f"failed={stats['files_failed']}")
+                _process_file_batch(
+                    file_batch,
+                    config,
+                    stats,
+                    qdrant_indexer,
+                    neo4j_indexer,
+                    batch_num,
+                    embedder=embedder,
+                    extractor=extractor,
+                )
+                logger.info(
+                    f"[Batch {batch_num}] done -- "
+                    f"processed={stats['files_processed']} "
+                    f"vectors={stats['vectors_indexed']} "
+                    f"failed={stats['files_failed']}"
+                )
         finally:
             qdrant_indexer.close()
             if neo4j_indexer:
@@ -696,10 +773,10 @@ def main(
             return 0, stats
 
         # 3. Summary
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         status = "COMPLETED" if not _shutdown_requested else "INTERRUPTED (graceful)"
         print(f"Ingestion {status}")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
         print(f"  Files seen (streamed): {stats['files_seen']}")
         print(f"  Files downloaded:      {stats['files_downloaded']}")
         print(f"  Files processed:       {stats['files_processed']}")
@@ -711,9 +788,9 @@ def main(
         if config["enable_graph"]:
             print(f"  Graph indexed:         {stats['graph_indexed']}")
             print(f"  Graph empty:           {stats['graph_failed']}")
-        print(f"{'='*60}\n")
+        print(f"{'=' * 60}\n")
 
-        return (0 if stats['files_processed'] > 0 else 1), stats
+        return (0 if stats["files_processed"] > 0 else 1), stats
 
     except KeyboardInterrupt:
         logger.warning("Received keyboard interrupt, shutting down...")
@@ -751,40 +828,38 @@ Examples:
 Environment Variables:
   See .env.example for all available configuration options.
   CLI arguments override environment variables.
-        """
+        """,
     )
 
     parser.add_argument(
-        "bucket_name",
-        type=str,
-        help="MinIO bucket name containing documents to ingest"
+        "bucket_name", type=str, help="MinIO bucket name containing documents to ingest"
     )
 
     parser.add_argument(
         "prefix",
         type=str,
-        help="Prefix path for files to ingest (e.g., 'kenya_law_data/case')"
+        help="Prefix path for files to ingest (e.g., 'kenya_law_data/case')",
     )
 
     parser.add_argument(
         "--max-workers",
         type=int,
         default=None,
-        help="Number of parallel workers for file processing (1-32, default: from config)"
+        help="Number of parallel workers for file processing (1-32, default: from config)",
     )
 
     parser.add_argument(
         "--enable-graph",
         action="store_true",
         default=None,
-        help="Enable graph extraction (slow, default: from config)"
+        help="Enable graph extraction (slow, default: from config)",
     )
 
     parser.add_argument(
         "--file-batch-size",
         type=int,
         default=None,
-        help="Files per memory batch (1-500, default: FILE_BATCH_SIZE env var or 20)"
+        help="Files per memory batch (1-500, default: FILE_BATCH_SIZE env var or 20)",
     )
 
     parser.add_argument(
@@ -792,7 +867,7 @@ Environment Variables:
         type=str,
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
         default=os.getenv("LOG_LEVEL", "INFO"),
-        help="Logging level (default: INFO)"
+        help="Logging level (default: INFO)",
     )
 
     args = parser.parse_args()
@@ -813,4 +888,3 @@ Environment Variables:
     except Exception as e:
         logger.error(f"Pipeline failed: {e}", exc_info=True)
         sys.exit(1)
-    

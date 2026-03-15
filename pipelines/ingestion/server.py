@@ -19,6 +19,7 @@ Running:
     # or directly:
     python -m pipelines.ingestion.server
 """
+
 import io
 import logging
 import os
@@ -28,10 +29,19 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi import (
+    Depends,
+    FastAPI,
+    File,
+    Form,
+    Header,
+    HTTPException,
+    Request,
+    UploadFile,
+)
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from minio import Minio
@@ -62,7 +72,7 @@ def _check_api_key(x_api_key: str = Header(default="")) -> None:
 # ---------------------------------------------------------------------------
 # In-memory job store (thread-safe)
 # ---------------------------------------------------------------------------
-_jobs: Dict[str, Dict[str, Any]] = {}
+_jobs: dict[str, dict[str, Any]] = {}
 _jobs_lock = threading.Lock()
 
 # Background executor — shared for the lifetime of the server process
@@ -121,9 +131,11 @@ def _run_job(job_id: str, bucket_name: str, prefix: str, kwargs: dict) -> None:
 class TriggerRequest(BaseModel):
     bucket_name: str = Field(..., min_length=1, description="MinIO bucket name")
     prefix: str = Field(..., min_length=1, description="Object key prefix to ingest")
-    max_workers: Optional[int] = Field(None, ge=1, le=32)
-    enable_graph: bool = Field(False, description="Enable Neo4j graph extraction (slow)")
-    file_batch_size: Optional[int] = Field(None, ge=1, le=500)
+    max_workers: int | None = Field(None, ge=1, le=32)
+    enable_graph: bool = Field(
+        False, description="Enable Neo4j graph extraction (slow)"
+    )
+    file_batch_size: int | None = Field(None, ge=1, le=500)
 
 
 class JobResponse(BaseModel):
@@ -132,10 +144,10 @@ class JobResponse(BaseModel):
     bucket_name: str
     prefix: str
     created_at: float
-    completed_at: Optional[float] = None
-    duration_seconds: Optional[float] = None
-    stats: Optional[Dict[str, Any]] = None
-    error: Optional[str] = None
+    completed_at: float | None = None
+    duration_seconds: float | None = None
+    stats: dict[str, Any] | None = None
+    error: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -184,7 +196,7 @@ templates.env.globals["job_age"] = _job_age
 # Endpoints
 # ---------------------------------------------------------------------------
 @app.get("/health", tags=["Health"])
-async def health() -> Dict[str, str]:
+async def health() -> dict[str, str]:
     """Liveness probe — always returns 200 when the server is up."""
     return {"status": "ok"}
 
@@ -199,7 +211,7 @@ async def health() -> Dict[str, str]:
 async def trigger_ingestion(
     request: TriggerRequest,
     _: None = Depends(_check_api_key),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Enqueue a background ingestion job for `bucket_name/prefix`.
 
@@ -228,11 +240,13 @@ async def trigger_ingestion(
     summary="Upload a file to MinIO then ingest it immediately",
 )
 async def upload_and_ingest(
-    file: UploadFile = File(..., description="File to upload (PDF, DOCX, HTML, or TXT)"),
+    file: UploadFile = File(
+        ..., description="File to upload (PDF, DOCX, HTML, or TXT)"
+    ),
     bucket_name: str = Form(default="api-uploads", description="Target MinIO bucket"),
     enable_graph: bool = Form(default=False, description="Enable graph extraction"),
     _: None = Depends(_check_api_key),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Upload a single file, store it in MinIO, then trigger an ingestion job
     scoped to that object's prefix.
@@ -278,7 +292,9 @@ async def upload_and_ingest(
         logger.info(f"Uploaded {file.filename!r} → s3://{bucket_name}/{object_name}")
     except Exception as exc:
         logger.error(f"MinIO upload failed: {exc}", exc_info=True)
-        raise HTTPException(status_code=502, detail=f"MinIO upload failed: {exc}") from exc
+        raise HTTPException(
+            status_code=502, detail=f"MinIO upload failed: {exc}"
+        ) from exc
 
     # Enqueue ingestion job scoped to the uploaded object's prefix
     job_id = _create_job(bucket_name, object_name)
@@ -303,7 +319,7 @@ async def upload_and_ingest(
 async def get_job(
     job_id: str,
     _: None = Depends(_check_api_key),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Return the current status and (when complete) final stats for `job_id`."""
     with _jobs_lock:
         job = _jobs.get(job_id)
@@ -314,13 +330,13 @@ async def get_job(
 
 @app.get(
     "/ingest/jobs",
-    response_model=List[JobResponse],
+    response_model=list[JobResponse],
     tags=["Jobs"],
     summary="List all ingestion jobs (most-recent first, max 100)",
 )
 async def list_jobs(
     _: None = Depends(_check_api_key),
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Return up to the 100 most-recently created ingestion jobs."""
     with _jobs_lock:
         jobs = sorted(_jobs.values(), key=lambda j: j["created_at"], reverse=True)
@@ -359,13 +375,13 @@ async def ui_trigger(
     request: Request,
     bucket_name: str = Form(...),
     prefix: str = Form(...),
-    max_workers: Optional[int] = Form(default=None),
-    enable_graph: Optional[str] = Form(default=None),
-    file_batch_size: Optional[int] = Form(default=None),
+    max_workers: int | None = Form(default=None),
+    enable_graph: str | None = Form(default=None),
+    file_batch_size: int | None = Form(default=None),
 ) -> HTMLResponse:
     """Trigger ingestion from the UI form and return a job row fragment."""
     job_id = _create_job(bucket_name, prefix)
-    kwargs: Dict[str, Any] = {"enable_graph": enable_graph == "true"}
+    kwargs: dict[str, Any] = {"enable_graph": enable_graph == "true"}
     if max_workers is not None:
         kwargs["max_workers"] = max_workers
     if file_batch_size is not None:
@@ -387,7 +403,7 @@ async def ui_upload(
     request: Request,
     file: UploadFile = File(...),
     bucket_name: str = Form(default="api-uploads"),
-    enable_graph: Optional[str] = Form(default=None),
+    enable_graph: str | None = Form(default=None),
 ) -> HTMLResponse:
     """Upload a file from the UI form and return a job row fragment (or error row)."""
     suffix = Path(file.filename or "").suffix.lower()

@@ -13,13 +13,16 @@ Environment Variables:
     NEO4J_TIMEOUT: Connection timeout in seconds (default: 30)
     NEO4J_MAX_RETRIES: Maximum retry attempts (default: 3)
 """
+
 import logging
 import os
 import time
 from collections import defaultdict
-from typing import Any, Dict, List
+from typing import Any
 
-from pipelines.ingestion.graph.schema_graph import VALID_RELATION_TYPES as _SCHEMA_RELATION_TYPES
+from pipelines.ingestion.graph.schema_graph import (
+    VALID_RELATION_TYPES as _SCHEMA_RELATION_TYPES,
+)
 
 VALID_RELATION_TYPES = frozenset(_SCHEMA_RELATION_TYPES.__args__)
 
@@ -78,14 +81,14 @@ class Neo4jIndexer:
         if not user:
             raise ValueError("NEO4J_USER cannot be empty")
         if not password or password == "changeme":
-            logger.warning("Using default Neo4j password 'changeme' - not recommended for production")
+            logger.warning(
+                "Using default Neo4j password 'changeme' - not recommended for production"
+            )
 
         # Initialize driver
         try:
             self.driver = GraphDatabase.driver(
-                uri,
-                auth=(user, password),
-                connection_timeout=self.timeout
+                uri, auth=(user, password), connection_timeout=self.timeout
             )
 
             # Test connection
@@ -96,7 +99,9 @@ class Neo4jIndexer:
             logger.error(f"Failed to connect to Neo4j: {e}")
             raise
 
-    def _validate_graph_data(self, batch: List[Dict[str, Any]]) -> tuple[List[dict], List[dict]]:
+    def _validate_graph_data(
+        self, batch: list[dict[str, Any]]
+    ) -> tuple[list[dict], list[dict]]:
         """
         Validate and extract nodes and edges from batch.
 
@@ -131,14 +136,16 @@ class Neo4jIndexer:
                 if isinstance(edges, list):
                     # Validate each edge has required fields
                     for edge in edges:
-                        if isinstance(edge, dict) and all(k in edge for k in ["source", "target", "type"]):
+                        if isinstance(edge, dict) and all(
+                            k in edge for k in ["source", "target", "type"]
+                        ):
                             all_edges.append(edge)
                         else:
                             logger.debug(f"Skipping invalid edge: {edge}")
 
         return all_nodes, all_edges
 
-    def write(self, batch: List[Dict[str, Any]], max_retries: int = None) -> int:
+    def write(self, batch: list[dict[str, Any]], max_retries: int = None) -> int:
         """
         Write graph data to Neo4j in batch with retry logic.
 
@@ -172,7 +179,9 @@ class Neo4jIndexer:
             logger.debug("No valid graph data in batch")
             return 0
 
-        logger.debug(f"Writing {len(all_nodes)} nodes and {len(all_edges)} edges to Neo4j")
+        logger.debug(
+            f"Writing {len(all_nodes)} nodes and {len(all_edges)} edges to Neo4j"
+        )
 
         retries = max_retries if max_retries is not None else self.max_retries
 
@@ -186,24 +195,30 @@ class Neo4jIndexer:
                 return len(all_nodes)
 
             except TransientError as e:
-                logger.warning(f"Neo4j transient error (attempt {attempt + 1}/{retries}): {e}")
+                logger.warning(
+                    f"Neo4j transient error (attempt {attempt + 1}/{retries}): {e}"
+                )
                 if attempt < retries - 1:
-                    time.sleep(1 * (2 ** attempt))  # Exponential backoff
+                    time.sleep(1 * (2**attempt))  # Exponential backoff
                 else:
                     logger.error(f"Failed to write graph data after {retries} attempts")
                     raise
 
             except ServiceUnavailable as e:
-                logger.error(f"Neo4j service unavailable (attempt {attempt + 1}/{retries}): {e}")
+                logger.error(
+                    f"Neo4j service unavailable (attempt {attempt + 1}/{retries}): {e}"
+                )
                 if attempt < retries - 1:
-                    time.sleep(2 * (2 ** attempt))
+                    time.sleep(2 * (2**attempt))
                 else:
                     raise
 
             except Exception as e:
-                logger.error(f"Unexpected error during Neo4j write (attempt {attempt + 1}/{retries}): {e}")
+                logger.error(
+                    f"Unexpected error during Neo4j write (attempt {attempt + 1}/{retries}): {e}"
+                )
                 if attempt < retries - 1:
-                    time.sleep(1 * (2 ** attempt))
+                    time.sleep(1 * (2**attempt))
                 else:
                     raise
 
@@ -248,7 +263,9 @@ class Neo4jIndexer:
                 if rel_type in VALID_RELATION_TYPES:
                     by_type[rel_type].append(e)
                 else:
-                    logger.warning(f"Skipping edge with unknown relationship type: {rel_type!r}")
+                    logger.warning(
+                        f"Skipping edge with unknown relationship type: {rel_type!r}"
+                    )
 
             for rel_type, typed_edges in by_type.items():
                 cypher = f"""
@@ -262,7 +279,9 @@ class Neo4jIndexer:
                     result = tx.run(cypher, edges=typed_edges)
                     result.consume()
                 except Exception as e:
-                    logger.warning(f"Failed to merge {rel_type} edges (may be missing nodes): {e}")
+                    logger.warning(
+                        f"Failed to merge {rel_type} edges (may be missing nodes): {e}"
+                    )
                     # Don't raise - some edges may reference nodes that don't exist
 
     def close(self) -> None:
