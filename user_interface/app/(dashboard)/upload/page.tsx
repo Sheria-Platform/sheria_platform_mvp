@@ -16,7 +16,7 @@ export default function UploadPage() {
     <div className="max-w-2xl mx-auto px-4 py-8 space-y-5">
       <div>
         <h1 className="text-2xl font-bold mb-1" style={{ color: "#1a3a6b" }}>
-          Upload Court Documents
+          Sheria Digitize
         </h1>
         <p className="text-gray-500 text-sm">
           Upload judgments, pleadings, and exhibits. They will be indexed into the
