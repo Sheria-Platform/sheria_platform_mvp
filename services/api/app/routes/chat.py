@@ -27,12 +27,13 @@ logger = logging.getLogger(__name__)
 # --- Schemas ---
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, description="The user's query")
-    session_id: str = Field(
+    session_id: str | None = Field(
         default=None, description="UUID for the conversation thread"
     )
 
 
 # --- Routes ---
+
 
 @router.post("/stream")
 async def chat_stream(
@@ -73,9 +74,12 @@ async def chat_stream(
         )
 
         async def stream_cache():
-            yield json.dumps(
-                {"event": "answer", "content": cached_ans, "session_id": session_id}
-            ) + "\n"
+            yield (
+                json.dumps(
+                    {"event": "answer", "content": cached_ans, "session_id": session_id}
+                )
+                + "\n"
+            )
 
         background_tasks.add_task(
             memory.add_message, session_id, "user", req.message, user_id
@@ -94,7 +98,10 @@ async def chat_stream(
 
     # 3. Load Conversation History (Context Window)
     history_objs = await memory.get_history(session_id, limit=6)
-    history_dicts = [{"role": msg.role, "content": msg.content} for msg in history_objs]
+    history_dicts: list[dict[str, str]] = [
+        {"role": msg.role, "content": msg.content}  # type: ignore[dict-item]
+        for msg in history_objs
+    ]
     history_dicts.append({"role": "user", "content": req.message})
 
     # 4. Initialize Agent State (LangGraph)
@@ -126,16 +133,19 @@ async def chat_stream(
 
                 # Capture Final Answer from Responder Node
                 if node_name == "responder":
-                    if "messages" in node_data and node_data["messages"]:
+                    if node_data.get("messages"):
                         ai_msg = node_data["messages"][-1]
                         final_answer = ai_msg.get("content", "")
-                        yield json.dumps(
-                            {
-                                "event": "answer",
-                                "content": final_answer,
-                                "session_id": session_id,
-                            }
-                        ) + "\n"
+                        yield (
+                            json.dumps(
+                                {
+                                    "event": "answer",
+                                    "content": final_answer,
+                                    "session_id": session_id,
+                                }
+                            )
+                            + "\n"
+                        )
 
             # 6. Post-Processing
             if final_answer:
@@ -148,13 +158,16 @@ async def chat_stream(
                 await memory.add_message(session_id, "assistant", final_answer, user_id)
                 await cache.set_cached_response(req.message, final_answer)
 
-        except Exception as e:
-            logger.error("Error in chat stream: %s", e, exc_info=True)
-            yield json.dumps(
-                {
-                    "event": "error",
-                    "content": "An internal error occurred.",
-                }
-            ) + "\n"
+        except Exception:
+            logger.exception("Error in chat stream")
+            yield (
+                json.dumps(
+                    {
+                        "event": "error",
+                        "content": "An internal error occurred.",
+                    }
+                )
+                + "\n"
+            )
 
     return StreamingResponse(event_generator(), media_type="application/x-ndjson")

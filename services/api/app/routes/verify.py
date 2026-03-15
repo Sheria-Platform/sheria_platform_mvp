@@ -61,8 +61,9 @@ def _extract_text_from_pdf(pdf_bytes: bytes) -> str:
         ValueError: If ``pypdf`` cannot parse the bytes as a PDF.
     """
     try:
-        from pypdf import PdfReader
         import io
+
+        from pypdf import PdfReader
 
         reader = PdfReader(io.BytesIO(pdf_bytes))
         pages: list[str] = []
@@ -150,11 +151,13 @@ async def verify_court_document(
         )
 
     # ── Run verification pipeline ─────────────────────────────────────────
-    tool_input = json.dumps({
-        "document_text": document_text,
-        "document_type": document_type,
-        "case_number": case_number,
-    })
+    tool_input = json.dumps(
+        {
+            "document_text": document_text,
+            "document_type": document_type,
+            "case_number": case_number,
+        }
+    )
 
     try:
         result_json = await verify_document(tool_input)

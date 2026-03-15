@@ -27,4 +27,4 @@ async def run_python_code(code: str) -> str:
                 return f"Sandbox Error: Status {response.status_code}"
 
     except Exception as e:
-        return f"Sandbox Connection Failed: {str(e)}"
+        return f"Sandbox Connection Failed: {e!s}"

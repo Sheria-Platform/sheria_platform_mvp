@@ -37,9 +37,11 @@ async def generate_node(state: AgentState) -> dict:
     # Include prior turns for multi-turn awareness (exclude current user message)
     history_messages = state.get("messages", [])
     prior_turns = history_messages[:-1][-4:]  # up to 2 prior turns
-    history_text = "\n".join(
-        f"{m['role'].capitalize()}: {m['content']}" for m in prior_turns
-    ) if prior_turns else "None"
+    history_text = (
+        "\n".join(f"{m['role'].capitalize()}: {m['content']}" for m in prior_turns)
+        if prior_turns
+        else "None"
+    )
 
     prompt = f"""
 You are Sheria, an AI legal research assistant for Kenya's judiciary.

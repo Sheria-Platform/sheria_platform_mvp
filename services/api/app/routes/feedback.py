@@ -33,7 +33,7 @@ class FeedbackRequest(BaseModel):
 
     session_id: str
     message_id: int
-    score: int          # 1 = like, -1 = dislike
+    score: int  # 1 = like, -1 = dislike
     comment: str | None = None
 
 

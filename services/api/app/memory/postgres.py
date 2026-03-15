@@ -16,16 +16,29 @@ Example:
 """
 
 import uuid
+from collections.abc import Sequence
 from datetime import datetime
-from typing import Sequence
 
-from sqlalchemy import JSON, Column, DateTime, Float, Integer, String, Text, select, text, update
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy import (
+    JSON,
+    Column,
+    DateTime,
+    Float,
+    Integer,
+    String,
+    Text,
+    select,
+    text,
+    update,
+)
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.orm import DeclarativeBase
 
 from services.api.app.config import settings
 
-Base = declarative_base()
+
+class Base(DeclarativeBase):
+    pass
 
 
 class ChatHistory(Base):
@@ -59,17 +72,17 @@ class IngestionJob(Base):
 
     __tablename__ = "ingestion_jobs"
 
-    job_id       = Column(String, primary_key=True)
-    user_id      = Column(String, index=True, nullable=False)
-    status       = Column(String(20), nullable=False, default="pending")
-    filename     = Column(String, nullable=False, default="")
-    s3_key       = Column(String, nullable=False, default="")
-    started_at   = Column(DateTime, nullable=True)
+    job_id = Column(String, primary_key=True)
+    user_id = Column(String, index=True, nullable=False)
+    status = Column(String(20), nullable=False, default="pending")
+    filename = Column(String, nullable=False, default="")
+    s3_key = Column(String, nullable=False, default="")
+    started_at = Column(DateTime, nullable=True)
     completed_at = Column(DateTime, nullable=True)
-    duration_s   = Column(Float, nullable=True)
-    stats        = Column(JSON, default={})
-    error        = Column(Text, nullable=False, default="")
-    created_at   = Column(DateTime, default=datetime.utcnow)
+    duration_s = Column(Float, nullable=True)
+    stats = Column(JSON, default={})
+    error = Column(Text, nullable=False, default="")
+    created_at = Column(DateTime, default=datetime.utcnow)
 
 
 class User(Base):
@@ -77,19 +90,19 @@ class User(Base):
 
     __tablename__ = "users"
 
-    id               = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    username         = Column(String(50), unique=True, nullable=False, index=True)
-    email            = Column(String(120), unique=True, nullable=False, index=True)
-    full_name        = Column(String(200), nullable=False)
-    hashed_password  = Column(String, nullable=True)
-    role             = Column(String(30), nullable=False)
-    court_station    = Column(String(200), nullable=False)
-    staff_number     = Column(String(50), nullable=True)
-    status           = Column(String(20), nullable=False, default="pending")
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    username = Column(String(50), unique=True, nullable=False, index=True)
+    email = Column(String(120), unique=True, nullable=False, index=True)
+    full_name = Column(String(200), nullable=False)
+    hashed_password = Column(String, nullable=True)
+    role = Column(String(30), nullable=False)
+    court_station = Column(String(200), nullable=False)
+    staff_number = Column(String(50), nullable=True)
+    status = Column(String(20), nullable=False, default="pending")
     activation_token = Column(String, nullable=True, index=True)
-    approved_by      = Column(String, nullable=True)
-    created_at       = Column(DateTime, default=datetime.utcnow)
-    activated_at     = Column(DateTime, nullable=True)
+    approved_by = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    activated_at = Column(DateTime, nullable=True)
 
 
 class Feedback(Base):
@@ -97,12 +110,12 @@ class Feedback(Base):
 
     __tablename__ = "feedback"
 
-    id         = Column(Integer, primary_key=True, autoincrement=True)
+    id = Column(Integer, primary_key=True, autoincrement=True)
     session_id = Column(String, nullable=False)
-    user_id    = Column(String, nullable=False)
+    user_id = Column(String, nullable=False)
     message_id = Column(Integer, nullable=False)
-    score      = Column(Integer, nullable=False)
-    comment    = Column(Text, nullable=True)
+    score = Column(Integer, nullable=False)
+    comment = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
@@ -115,8 +128,8 @@ engine = create_async_engine(
     echo=False,
 )
 
-AsyncSessionLocal: sessionmaker = sessionmaker(
-    bind=engine,
+AsyncSessionLocal: async_sessionmaker[AsyncSession] = async_sessionmaker(
+    engine,
     class_=AsyncSession,
     expire_on_commit=False,
 )
@@ -197,7 +210,6 @@ class PostgresMemory:
             rows = result.scalars().all()
             return list(reversed(rows))
 
-
     async def get_user_sessions(self, user_id: str, limit: int = 50) -> list[dict]:
         """Return sessions for a user, newest-first.
 
@@ -238,8 +250,12 @@ class PostgresMemory:
             return [
                 {
                     "session_id": r["session_id"],
-                    "started_at": r["started_at"].isoformat() if r["started_at"] else None,
-                    "last_activity": r["last_activity"].isoformat() if r["last_activity"] else None,
+                    "started_at": r["started_at"].isoformat()
+                    if r["started_at"]
+                    else None,
+                    "last_activity": r["last_activity"].isoformat()
+                    if r["last_activity"]
+                    else None,
                     "message_count": r["message_count"],
                     "preview": (r["preview"] or "")[:120],
                 }
@@ -271,7 +287,6 @@ class PostgresMemory:
                 for r in rows
             ]
 
-
     # ------------------------------------------------------------------
     # Ingestion job persistence
     # ------------------------------------------------------------------
@@ -287,14 +302,16 @@ class PostgresMemory:
         """Insert a new ingestion job row with ``pending`` status."""
         async with AsyncSessionLocal() as session:
             async with session.begin():
-                session.add(IngestionJob(
-                    job_id=job_id,
-                    user_id=user_id,
-                    status="pending",
-                    filename=filename,
-                    s3_key=s3_key,
-                    started_at=started_at,
-                ))
+                session.add(
+                    IngestionJob(
+                        job_id=job_id,
+                        user_id=user_id,
+                        status="pending",
+                        filename=filename,
+                        s3_key=s3_key,
+                        started_at=started_at,
+                    )
+                )
 
     async def update_ingestion_job(
         self,
@@ -323,7 +340,9 @@ class PostgresMemory:
                     .values(**values)
                 )
 
-    async def get_all_ingestion_jobs(self, user_id: str, limit: int = 100) -> list[dict]:
+    async def get_all_ingestion_jobs(
+        self, user_id: str, limit: int = 100
+    ) -> list[dict]:
         """Return all ingestion jobs for a user, newest-first."""
         async with AsyncSessionLocal() as session:
             result = await session.execute(
@@ -368,15 +387,17 @@ class PostgresMemory:
         """
         async with AsyncSessionLocal() as session:
             async with session.begin():
-                session.add(User(
-                    username=username,
-                    email=email,
-                    full_name=full_name,
-                    court_station=court_station,
-                    role=role,
-                    staff_number=staff_number,
-                    status="pending",
-                ))
+                session.add(
+                    User(
+                        username=username,
+                        email=email,
+                        full_name=full_name,
+                        court_station=court_station,
+                        role=role,
+                        staff_number=staff_number,
+                        status="pending",
+                    )
+                )
 
     async def get_user_by_username(self, username: str) -> dict | None:
         """Return a user dict by username, or ``None`` if not found.
@@ -396,18 +417,14 @@ class PostgresMemory:
         Used during registration to enforce email uniqueness.
         """
         async with AsyncSessionLocal() as session:
-            result = await session.execute(
-                select(User).where(User.email == email)
-            )
+            result = await session.execute(select(User).where(User.email == email))
             row = result.scalar_one_or_none()
             return _user_to_dict(row) if row else None
 
     async def get_user_by_id(self, user_id: str) -> dict | None:
         """Return a user dict by primary-key UUID, or ``None`` if not found."""
         async with AsyncSessionLocal() as session:
-            result = await session.execute(
-                select(User).where(User.id == user_id)
-            )
+            result = await session.execute(select(User).where(User.id == user_id))
             row = result.scalar_one_or_none()
             return _user_to_dict(row) if row else None
 
@@ -509,13 +526,15 @@ class PostgresMemory:
         """
         async with AsyncSessionLocal() as session:
             async with session.begin():
-                session.add(Feedback(
-                    session_id=session_id,
-                    user_id=user_id,
-                    message_id=message_id,
-                    score=score,
-                    comment=comment,
-                ))
+                session.add(
+                    Feedback(
+                        session_id=session_id,
+                        user_id=user_id,
+                        message_id=message_id,
+                        score=score,
+                        comment=comment,
+                    )
+                )
 
     # ------------------------------------------------------------------
     # User status management
@@ -549,11 +568,9 @@ class PostgresMemory:
         async with AsyncSessionLocal() as session:
             async with session.begin():
                 result = await session.execute(
-                    update(User)
-                    .where(User.id == user_id)
-                    .values(status=new_status)
+                    update(User).where(User.id == user_id).values(status=new_status)
                 )
-                return result.rowcount > 0
+                return result.rowcount > 0  # type: ignore[attr-defined]
 
     async def seed_admin(
         self,
@@ -585,49 +602,51 @@ class PostgresMemory:
 
         async with AsyncSessionLocal() as session:
             async with session.begin():
-                session.add(User(
-                    username=username,
-                    email=email,
-                    full_name=full_name,
-                    hashed_password=hashed_password,
-                    role="admin",
-                    court_station="Judiciary Headquarters",
-                    status="active",
-                    activated_at=datetime.utcnow(),
-                ))
+                session.add(
+                    User(
+                        username=username,
+                        email=email,
+                        full_name=full_name,
+                        hashed_password=hashed_password,
+                        role="admin",
+                        court_station="Judiciary Headquarters",
+                        status="active",
+                        activated_at=datetime.utcnow(),
+                    )
+                )
         return True
 
 
 def _job_to_dict(row: IngestionJob) -> dict:
     """Serialise an ``IngestionJob`` ORM row to a plain dict."""
     return {
-        "job_id":       row.job_id,
-        "status":       row.status,
-        "filename":     row.filename,
-        "s3_key":       row.s3_key,
-        "started_at":   row.started_at.timestamp() if row.started_at else None,
+        "job_id": row.job_id,
+        "status": row.status,
+        "filename": row.filename,
+        "s3_key": row.s3_key,
+        "started_at": row.started_at.timestamp() if row.started_at else None,
         "completed_at": row.completed_at.timestamp() if row.completed_at else None,
-        "duration_s":   row.duration_s,
-        "stats":        row.stats or {},
-        "error":        row.error or "",
+        "duration_s": row.duration_s,
+        "stats": row.stats or {},
+        "error": row.error or "",
     }
 
 
 def _user_to_dict(row: User) -> dict:
     """Serialise a ``User`` ORM row to a plain dict (excludes hashed_password from most uses)."""
     return {
-        "id":               row.id,
-        "username":         row.username,
-        "email":            row.email,
-        "full_name":        row.full_name,
-        "role":             row.role,
-        "court_station":    row.court_station,
-        "staff_number":     row.staff_number,
-        "status":           row.status,
-        "hashed_password":  row.hashed_password,
+        "id": row.id,
+        "username": row.username,
+        "email": row.email,
+        "full_name": row.full_name,
+        "role": row.role,
+        "court_station": row.court_station,
+        "staff_number": row.staff_number,
+        "status": row.status,
+        "hashed_password": row.hashed_password,
         "activation_token": row.activation_token,
-        "created_at":       row.created_at.isoformat() if row.created_at else None,
-        "activated_at":     row.activated_at.isoformat() if row.activated_at else None,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "activated_at": row.activated_at.isoformat() if row.activated_at else None,
     }
 
 

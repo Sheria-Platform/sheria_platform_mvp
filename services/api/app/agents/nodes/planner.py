@@ -121,7 +121,7 @@ async def planner_node(state: AgentState) -> dict:
                 *recent_messages,
             ],
             temperature=0.0,  # deterministic planning
-            json_mode=True,   # constrain output to valid JSON
+            json_mode=True,  # constrain output to valid JSON
         )
 
         plan: dict = json.loads(response_text)
@@ -145,11 +145,10 @@ async def planner_node(state: AgentState) -> dict:
             "action": action,
         }
 
-    except Exception as exc:
+    except Exception:
         duration_ms = round((time.perf_counter() - start) * 1000, 2)
-        logger.error(
+        logger.exception(
             "Planner node failed, defaulting to retrieve",
-            exc_info=True,
             extra={"node": "planner", "duration_ms": duration_ms},
         )
         return {

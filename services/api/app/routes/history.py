@@ -20,6 +20,7 @@ router = APIRouter()
 
 # ── Pydantic response models ──────────────────────────────────────────────────
 
+
 class SessionSummary(BaseModel):
     session_id: str
     started_at: str
@@ -36,6 +37,7 @@ class MessageRecord(BaseModel):
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
+
 
 @router.get("/sessions", response_model=list[SessionSummary])
 async def list_sessions(

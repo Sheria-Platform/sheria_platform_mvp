@@ -125,6 +125,4 @@ async def send_activation_email(
         )
         logger.info("Activation email sent to %s", to_address)
     except Exception as exc:
-        logger.warning(
-            "Failed to send activation email to %s: %s", to_address, exc
-        )
+        logger.warning("Failed to send activation email to %s: %s", to_address, exc)

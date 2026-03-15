@@ -38,9 +38,7 @@ _TIMEOUT = 5.0  # seconds per individual check
 async def _check_postgres() -> str:
     try:
         async with engine.connect() as conn:
-            await asyncio.wait_for(
-                conn.execute(text("SELECT 1")), timeout=_TIMEOUT
-            )
+            await asyncio.wait_for(conn.execute(text("SELECT 1")), timeout=_TIMEOUT)
         return "up"
     except Exception as exc:
         logger.warning("Readiness: PostgreSQL check failed: %s", exc)
@@ -59,9 +57,7 @@ async def _check_redis() -> str:
 
 async def _check_qdrant() -> str:
     try:
-        await asyncio.wait_for(
-            qdrant_client.client.get_collections(), timeout=_TIMEOUT
-        )
+        await asyncio.wait_for(qdrant_client.client.get_collections(), timeout=_TIMEOUT)
         return "up"
     except Exception as exc:
         logger.warning("Readiness: Qdrant check failed: %s", exc)
@@ -72,9 +68,7 @@ async def _check_neo4j() -> str:
     try:
         if not neo4j_client._driver:
             return "down"
-        await asyncio.wait_for(
-            neo4j_client.query("RETURN 1"), timeout=_TIMEOUT
-        )
+        await asyncio.wait_for(neo4j_client.query("RETURN 1"), timeout=_TIMEOUT)
         return "up"
     except Exception as exc:
         logger.warning("Readiness: Neo4j check failed: %s", exc)
@@ -83,9 +77,7 @@ async def _check_neo4j() -> str:
 
 async def _check_ollama() -> str:
     try:
-        ok = await asyncio.wait_for(
-            ollama_client.health_check(), timeout=_TIMEOUT
-        )
+        ok = await asyncio.wait_for(ollama_client.health_check(), timeout=_TIMEOUT)
         return "up" if ok else "down"
     except Exception as exc:
         logger.warning("Readiness: Ollama check failed: %s", exc)
@@ -151,7 +143,7 @@ async def readiness(response: Response) -> dict[str, str]:
         checks["minio"] = _check_minio()
 
     results = await asyncio.gather(*checks.values())
-    status_report: dict[str, str] = dict(zip(checks.keys(), results))
+    status_report: dict[str, str] = dict(zip(checks.keys(), results, strict=False))
 
     if any(v == "down" for v in status_report.values()):
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE

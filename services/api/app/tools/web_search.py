@@ -37,4 +37,4 @@ async def web_search_tool(query: str) -> str:
             return formatted if formatted else "No results found on the web."
 
     except Exception as e:
-        return f"Web Search Error: {str(e)}"
+        return f"Web Search Error: {e!s}"

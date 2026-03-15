@@ -40,7 +40,7 @@ class VectorDBClient:
         self.client: AsyncQdrantClient = AsyncQdrantClient(
             host=settings.QDRANT_HOST,
             port=settings.QDRANT_PORT,
-            prefer_grpc=True,        # gRPC for lower latency
+            prefer_grpc=True,  # gRPC for lower latency
         )
 
     async def connect(self) -> None:

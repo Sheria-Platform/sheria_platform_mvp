@@ -13,12 +13,12 @@ import asyncio
 import uuid
 from datetime import datetime, timedelta
 
+import bcrypt as _bcrypt
 from fastapi import APIRouter, Depends, HTTPException, status
 from jose import jwt
-import bcrypt as _bcrypt
 from pydantic import BaseModel
 
-from services.api.app.auth.jwt import get_current_user, require_admin
+from services.api.app.auth.jwt import require_admin
 from services.api.app.config import settings
 from services.api.app.memory.postgres import postgres_memory
 from services.api.app.utils.email import send_activation_email
@@ -49,10 +49,13 @@ def _create_token(user_id: str, username: str, role: str, court: str) -> str:
         "court": court,
         "exp": expire,
     }
-    return jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
+    return jwt.encode(
+        payload, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM
+    )
 
 
 # ── Request / Response models ─────────────────────────────────────────────
+
 
 class RegisterRequest(BaseModel):
     username: str
@@ -83,12 +86,13 @@ class UpdateStatusRequest(BaseModel):
 
 
 _SAFE_STATUS_TRANSITIONS: dict[str, set[str]] = {
-    "active":    {"suspended"},
+    "active": {"suspended"},
     "suspended": {"active"},
 }
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────
+
 
 @router.post("/register", status_code=status.HTTP_201_CREATED)
 async def register(req: RegisterRequest) -> dict:
@@ -115,7 +119,9 @@ async def register(req: RegisterRequest) -> dict:
         role=req.role,
         staff_number=req.staff_number,
     )
-    return {"message": "Registration request submitted. An administrator will review it."}
+    return {
+        "message": "Registration request submitted. An administrator will review it."
+    }
 
 
 @router.post("/login")
@@ -123,20 +129,30 @@ async def login(req: LoginRequest) -> dict:
     """Authenticate and receive a JWT. Account must be active."""
     user = await postgres_memory.get_user_by_username(req.username)
     if not user:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials"
+        )
 
     status_map = {
-        "pending":   "Account pending administrator approval",
-        "approved":  "Account not yet activated. Use your activation link to set a password.",
+        "pending": "Account pending administrator approval",
+        "approved": "Account not yet activated. Use your activation link to set a password.",
         "suspended": "Account suspended. Contact your administrator.",
     }
     if user["status"] in status_map:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=status_map[user["status"]])
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail=status_map[user["status"]]
+        )
     if user["status"] != "active":
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account not active")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Account not active"
+        )
 
-    if not user.get("hashed_password") or not _verify_password(req.password, user["hashed_password"]):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+    if not user.get("hashed_password") or not _verify_password(
+        req.password, user["hashed_password"]
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials"
+        )
 
     token = _create_token(
         user_id=user["id"],
@@ -148,12 +164,12 @@ async def login(req: LoginRequest) -> dict:
         "access_token": token,
         "token_type": "bearer",
         "user": {
-            "id":        user["id"],
-            "username":  user["username"],
-            "role":      user["role"],
-            "court":     user["court_station"],
+            "id": user["id"],
+            "username": user["username"],
+            "role": user["role"],
+            "court": user["court_station"],
             "full_name": user["full_name"],
-            "token":     token,
+            "token": token,
         },
     }
 
@@ -164,11 +180,15 @@ async def activate(req: ActivateRequest) -> dict:
     if req.password != req.confirm_password:
         raise HTTPException(status_code=400, detail="Passwords do not match")
     if len(req.password) < 8:
-        raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
+        raise HTTPException(
+            status_code=400, detail="Password must be at least 8 characters"
+        )
 
     user = await postgres_memory.get_user_by_activation_token(req.token)
     if not user:
-        raise HTTPException(status_code=404, detail="Invalid or expired activation token")
+        raise HTTPException(
+            status_code=404, detail="Invalid or expired activation token"
+        )
 
     await postgres_memory.activate_user(user["id"], _hash_password(req.password))
     return {"message": "Account activated. You can now sign in."}
@@ -208,7 +228,7 @@ async def approve_user(
     # Fire-and-forget: email failure never blocks or fails the HTTP response
     user = await postgres_memory.get_user_by_id(user_id)
     if user:
-        asyncio.create_task(
+        asyncio.create_task(  # noqa: RUF006
             send_activation_email(
                 to_address=user["email"],
                 full_name=user["full_name"],
@@ -270,5 +290,7 @@ async def update_user_status(
         )
 
     await postgres_memory.update_user_status(user_id, req.status)
-    return {"message": f"User status updated to '{req.status}'. "
-                       f"{'User can no longer log in.' if req.status == 'suspended' else 'User can now log in.'}"}
+    return {
+        "message": f"User status updated to '{req.status}'. "
+        f"{'User can no longer log in.' if req.status == 'suspended' else 'User can now log in.'}"
+    }

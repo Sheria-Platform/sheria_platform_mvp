@@ -51,9 +51,7 @@ class RedisClient:
             encoding="utf-8",
             decode_responses=True,  # return str, not bytes
         )
-        logger.info(
-            "Redis client initialised. url=%s", settings.REDIS_URL
-        )
+        logger.info("Redis client initialised. url=%s", settings.REDIS_URL)
 
     async def close(self) -> None:
         """Close the Redis connection pool.
@@ -79,9 +77,7 @@ class RedisClient:
             True
         """
         if not self.redis:
-            raise RuntimeError(
-                "RedisClient not connected. Call connect() first."
-            )
+            raise RuntimeError("RedisClient not connected. Call connect() first.")
         return self.redis
 
 

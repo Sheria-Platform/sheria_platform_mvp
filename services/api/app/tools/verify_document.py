@@ -66,14 +66,15 @@ risk_level: low | medium | high"""
 # ── Confidence weights ────────────────────────────────────────────────────────
 
 _W_METADATA = 0.20
-_W_QDRANT   = 0.40
-_W_FRAUD    = 0.40
+_W_QDRANT = 0.40
+_W_FRAUD = 0.40
 
 # Qdrant similarity threshold for a "match"
 _MATCH_THRESHOLD = 0.70
 
 
 # ── Main entry-point ─────────────────────────────────────────────────────────
+
 
 async def verify_document(tool_input: str) -> str:
     """Verify a court document and return a ``VerificationReport`` JSON string.
@@ -96,11 +97,11 @@ async def verify_document(tool_input: str) -> str:
     except json.JSONDecodeError as exc:
         return json.dumps({"error": f"Invalid tool_input JSON: {exc}"})
 
-    document_text: str  = params.get("document_text", "")
-    document_type: str  = params.get("document_type", "court_order")
-    case_number: str    = params.get("case_number", "")
+    document_text: str = params.get("document_text", "")
+    document_type: str = params.get("document_type", "court_order")
+    case_number: str = params.get("case_number", "")
 
-    checks: list[dict]  = []
+    checks: list[dict] = []
     risk_flags: list[str] = []
     score: float = 0.0
 
@@ -109,13 +110,15 @@ async def verify_document(tool_input: str) -> str:
     metadata_passed = False
     try:
         raw = await ollama_client.chat_completion(
-            messages=[{
-                "role": "user",
-                "content": _METADATA_PROMPT.format(
-                    document_type=document_type,
-                    document_text=document_text[:3000],
-                ),
-            }],
+            messages=[
+                {
+                    "role": "user",
+                    "content": _METADATA_PROMPT.format(
+                        document_type=document_type,
+                        document_text=document_text[:3000],
+                    ),
+                }
+            ],
             temperature=0.0,
             max_tokens=512,
             json_mode=True,
@@ -135,11 +138,13 @@ async def verify_document(tool_input: str) -> str:
         logger.warning("Metadata extraction failed: %s", exc)
         detail = f"Extraction failed: {exc}"
 
-    checks.append({
-        "check": "metadata_extraction",
-        "passed": metadata_passed,
-        "detail": detail,
-    })
+    checks.append(
+        {
+            "check": "metadata_extraction",
+            "passed": metadata_passed,
+            "detail": detail,
+        }
+    )
     if metadata_passed:
         score += _W_METADATA
 
@@ -170,11 +175,13 @@ async def verify_document(tool_input: str) -> str:
         logger.warning("Qdrant cross-reference failed: %s", exc)
         qdrant_detail = f"Vector search error: {exc}"
 
-    checks.append({
-        "check": "case_law_match",
-        "passed": qdrant_passed,
-        "detail": qdrant_detail,
-    })
+    checks.append(
+        {
+            "check": "case_law_match",
+            "passed": qdrant_passed,
+            "detail": qdrant_detail,
+        }
+    )
     if qdrant_passed:
         score += _W_QDRANT
 
@@ -183,24 +190,26 @@ async def verify_document(tool_input: str) -> str:
     fraud_detail = "Fraud analysis inconclusive."
     try:
         raw = await ollama_client.chat_completion(
-            messages=[{
-                "role": "user",
-                "content": _FRAUD_PROMPT.format(
-                    document_type=document_type,
-                    case_number=case_number,
-                    extracted_metadata=json.dumps(extracted_metadata),
-                    document_text=document_text[:800],
-                ),
-            }],
+            messages=[
+                {
+                    "role": "user",
+                    "content": _FRAUD_PROMPT.format(
+                        document_type=document_type,
+                        case_number=case_number,
+                        extracted_metadata=json.dumps(extracted_metadata),
+                        document_text=document_text[:800],
+                    ),
+                }
+            ],
             temperature=0.0,
             max_tokens=1024,
             json_mode=True,
         )
         fraud_data = json.loads(raw)
         fraud_indicators = fraud_data.get("fraud_indicators_found", True)
-        risk_level      = fraud_data.get("risk_level", "medium")
-        flags           = fraud_data.get("flags", [])
-        analysis        = fraud_data.get("analysis", "")
+        risk_level = fraud_data.get("risk_level", "medium")
+        flags = fraud_data.get("flags", [])
+        analysis = fraud_data.get("analysis", "")
 
         fraud_passed = not fraud_indicators and risk_level == "low"
         fraud_detail = f"Risk: {risk_level}. {analysis}"
@@ -209,16 +218,18 @@ async def verify_document(tool_input: str) -> str:
         logger.warning("Fraud analysis failed: %s", exc)
         fraud_detail = f"Fraud analysis error: {exc}"
 
-    checks.append({
-        "check": "fraud_analysis",
-        "passed": fraud_passed,
-        "detail": fraud_detail,
-    })
+    checks.append(
+        {
+            "check": "fraud_analysis",
+            "passed": fraud_passed,
+            "detail": fraud_detail,
+        }
+    )
     if fraud_passed:
         score += _W_FRAUD
 
     # ── Compose report ────────────────────────────────────────────────────
-    authentic = score >= 0.60   # at least 2 of 3 checks passed
+    authentic = score >= 0.60  # at least 2 of 3 checks passed
 
     if authentic and not risk_flags:
         summary = f"Document appears authentic (confidence {score:.0%}). Case confirmed in Kenya Law Reports."

@@ -116,14 +116,14 @@ class Settings(BaseSettings):
     # Default Admin Seed                                                    #
     # ------------------------------------------------------------------ #
     ADMIN_USERNAME: str = "admin"
-    ADMIN_PASSWORD: str = "Admin1234!"   # change in production
+    ADMIN_PASSWORD: str = "Admin1234!"  # change in production
     ADMIN_EMAIL: str = "admin@judiciary.go.ke"
     ADMIN_FULL_NAME: str = "System Administrator"
 
     # ------------------------------------------------------------------ #
     # SMTP / Email                                                           #
     # ------------------------------------------------------------------ #
-    SMTP_HOST: str = ""          # empty = email delivery disabled
+    SMTP_HOST: str = ""  # empty = email delivery disabled
     SMTP_PORT: int = 587
     SMTP_USER: str = ""
     SMTP_PASSWORD: str = ""
@@ -137,4 +137,4 @@ class Settings(BaseSettings):
         extra = "ignore"
 
 
-settings: Settings = Settings()
+settings: Settings = Settings()  # type: ignore[call-arg]

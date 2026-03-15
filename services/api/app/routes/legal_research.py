@@ -42,6 +42,7 @@ logger = logging.getLogger(__name__)
 
 # --- Schemas ---
 
+
 class DateRange(BaseModel):
     from_date: str = Field(alias="from", description="Start year, e.g. '2010'")
     to_date: str = Field(alias="to", description="End year, e.g. '2026'")
@@ -70,6 +71,7 @@ class LegalResearchRequest(BaseModel):
 
 
 # --- Route ---
+
 
 @router.post("")
 async def legal_research(
@@ -106,15 +108,24 @@ async def legal_research(
         logger.info("Legal research cache hit")
 
         async def _stream_cache() -> AsyncGenerator[str, None]:
-            yield json.dumps({
-                "event": "answer",
-                "content": cached_ans,
-                "citations": [],
-                "session_id": session_id,
-            }) + "\n"
+            yield (
+                json.dumps(
+                    {
+                        "event": "answer",
+                        "content": cached_ans,
+                        "citations": [],
+                        "session_id": session_id,
+                    }
+                )
+                + "\n"
+            )
 
-        background_tasks.add_task(memory.add_message, session_id, "user", req.query, user_id)
-        background_tasks.add_task(memory.add_message, session_id, "assistant", cached_ans, user_id)
+        background_tasks.add_task(
+            memory.add_message, session_id, "user", req.query, user_id
+        )
+        background_tasks.add_task(
+            memory.add_message, session_id, "assistant", cached_ans, user_id
+        )
         return StreamingResponse(_stream_cache(), media_type="application/x-ndjson")
 
     # Build initial agent state — action is not set here; this graph skips the
@@ -153,16 +164,21 @@ async def legal_research(
 
                 # Capture final answer from responder
                 if node_name == "responder":
-                    if "messages" in node_data and node_data["messages"]:
+                    if node_data.get("messages"):
                         ai_msg = node_data["messages"][-1]
                         final_answer = ai_msg.get("content", "")
 
-                        yield json.dumps({
-                            "event": "answer",
-                            "content": final_answer,
-                            "citations": final_citations,
-                            "session_id": session_id,
-                        }) + "\n"
+                        yield (
+                            json.dumps(
+                                {
+                                    "event": "answer",
+                                    "content": final_answer,
+                                    "citations": final_citations,
+                                    "session_id": session_id,
+                                }
+                            )
+                            + "\n"
+                        )
 
             if final_answer:
                 total_ms = round((time.perf_counter() - request_start) * 1000, 2)
@@ -179,10 +195,15 @@ async def legal_research(
                 await cache.set_cached_response(req.query, final_answer)
 
         except Exception:
-            logger.error("Error in legal research stream", exc_info=True)
-            yield json.dumps({
-                "event": "error",
-                "content": "An internal error occurred during legal research.",
-            }) + "\n"
+            logger.exception("Error in legal research stream")
+            yield (
+                json.dumps(
+                    {
+                        "event": "error",
+                        "content": "An internal error occurred during legal research.",
+                    }
+                )
+                + "\n"
+            )
 
     return StreamingResponse(event_generator(), media_type="application/x-ndjson")

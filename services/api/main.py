@@ -21,8 +21,8 @@ Example:
 import logging
 import time
 import uuid
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -41,7 +41,16 @@ from services.api.app.clients.qdrant import qdrant_client
 from services.api.app.config import settings
 from services.api.app.logging import bind_context
 from services.api.app.memory.postgres import Base, engine, postgres_memory
-from services.api.app.routes import auth, chat, feedback, health, history, legal_research, upload, verify
+from services.api.app.routes import (
+    auth,
+    chat,
+    feedback,
+    health,
+    history,
+    legal_research,
+    upload,
+    verify,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +59,7 @@ _EMBEDDING_DIM = 768
 
 
 # ── Request Logging Middleware ─────────────────────────────────────────────
+
 
 class RequestLoggingMiddleware(BaseHTTPMiddleware):
     """Attaches a trace_id to every request and logs start/end with latency.
@@ -100,6 +110,7 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
 
 # ── Startup Helpers ────────────────────────────────────────────────────────
 
+
 async def _ensure_qdrant_collections() -> None:
     """Create required Qdrant collections if they do not already exist.
 
@@ -109,8 +120,7 @@ async def _ensure_qdrant_collections() -> None:
     Safe to call on every startup; existing collections are left untouched.
     """
     existing = {
-        c.name
-        for c in (await qdrant_client.client.get_collections()).collections
+        c.name for c in (await qdrant_client.client.get_collections()).collections
     }
 
     if "semantic_cache" not in existing:
@@ -242,9 +252,7 @@ app.add_middleware(RequestLoggingMiddleware)
 # ── Route Registration ────────────────────────────────────────────────────
 app.include_router(chat.router, prefix="/api/v1/chat", tags=["Chat"])
 app.include_router(upload.router, prefix="/api/v1/upload", tags=["Upload"])
-app.include_router(
-    feedback.router, prefix="/api/v1/feedback", tags=["Feedback"]
-)
+app.include_router(feedback.router, prefix="/api/v1/feedback", tags=["Feedback"])
 app.include_router(health.router, prefix="/health", tags=["Health"])
 app.include_router(history.router, prefix="/api/v1/history", tags=["History"])
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["Auth"])
@@ -265,4 +273,4 @@ if __name__ == "__main__":
     import uvicorn
 
     # Development convenience — production uses the Docker CMD
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8000)  # noqa: S104

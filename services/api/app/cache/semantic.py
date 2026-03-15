@@ -40,7 +40,11 @@ class SemanticCache:
             miss.  ``vector`` is always returned (even on a miss) so the caller
             can reuse it for retrieval without a second embed call.
         """
-        effective_max_age = max_age_days if max_age_days is not None else settings.SEMANTIC_CACHE_MAX_AGE_DAYS
+        effective_max_age = (
+            max_age_days
+            if max_age_days is not None
+            else settings.SEMANTIC_CACHE_MAX_AGE_DAYS
+        )
         vector: list[float] | None = None
         try:
             vector = await embeddings_client.embed_query(query)
@@ -89,6 +93,7 @@ class SemanticCache:
         """
         try:
             import uuid
+
             from qdrant_client.http import models
 
             if vector is None:
