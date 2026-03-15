@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-export function middleware(req: NextRequest) {
+export function proxy(req: NextRequest) {
   const cookie = req.cookies.get("sheria_auth");
   const { pathname } = req.nextUrl;
 

@@ -240,11 +240,6 @@ app.add_middleware(
 app.add_middleware(RequestLoggingMiddleware)
 
 # ── Route Registration ────────────────────────────────────────────────────
-@app.get("/api/v1/health")
-async def api_v1_health() -> dict[str, str]:
-    # Simple compatibility alias for legacy health checks.
-    return {"status": "ok"}
-
 app.include_router(chat.router, prefix="/api/v1/chat", tags=["Chat"])
 app.include_router(upload.router, prefix="/api/v1/upload", tags=["Upload"])
 app.include_router(
