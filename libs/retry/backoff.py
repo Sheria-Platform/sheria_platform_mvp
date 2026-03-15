@@ -25,7 +25,7 @@ def exponential_backoff(
                 except Exception as e:
                     if retries >= max_retries:
                         logger.error(f"Max retries reached for {func.__name__}: {e}")
-                        raise e
+                        raise
 
                     # Algorithm: base * (2 ^ retries) + random_jitter
                     # Jitter prevents "Thundering Herd" problem on the server

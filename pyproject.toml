@@ -1,0 +1,87 @@
+[tool.ruff]
+target-version = "py310"   # oldest runtime (data_scrapper)
+line-length = 88
+
+exclude = [
+    ".git", ".mypy_cache", ".ruff_cache", ".venv", "venv", "__pycache__",
+    "node_modules", "user_interface/", "resources/", "kenya_law_data/",
+    "test_data/", "deploy/", "infra/",
+]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",    # pycodestyle
+    "F",         # pyflakes (unused imports, undefined names)
+    "I",         # isort (import ordering)
+    "UP",        # pyupgrade (modernise syntax)
+    "B",         # flake8-bugbear (likely bugs)
+    "C4",        # flake8-comprehensions
+    "ASYNC",     # flake8-async (async anti-patterns)
+    "S",         # flake8-bandit (security subset)
+    "G",         # flake8-logging-format
+    "T20",       # flake8-print (no print() in production)
+    "RUF",       # Ruff-specific rules
+]
+
+ignore = [
+    "BLE001",   # blind except — intentional defensive pattern (32 occurrences); fix in Phase 2
+    "G004",     # f-string in logger — backoff.py + agent nodes; fix in Phase 2
+    "S105",     # hardcoded password false positives — detect-secrets covers real secrets
+    "S106",     # same as S105
+    "B008",     # function call in default arg — FastAPI Depends() is intentional
+    "E501",     # line length — handled by ruff-format, not linter
+    "RUF012",   # mutable class attrs — Pydantic/TypedDict patterns trigger this
+    "T201",     # print — scripts use print for CLI; per-file ignore for production dirs
+]
+
+fixable = ["I", "UP", "C4", "F401", "W", "E", "RUF"]
+unfixable = ["B", "S", "F811"]   # require human review
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py"       = ["S101", "T201"]
+"tests/conftest.py"   = ["S101", "S105", "S106", "S108"]
+"scripts/**/*.py"     = ["T201", "S603", "S607"]
+"pipelines/**/*.py"   = ["T201", "BLE001"]
+"data_scrapper/**/*.py" = ["T201", "BLE001", "UP"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["libs", "services"]
+split-on-trailing-comma = true
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+magic-trailing-comma = true
+line-ending = "lf"
+
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true     # many deps lack stubs (neo4j, qdrant, langgraph)
+disallow_untyped_defs = false     # good coverage but some closures unannotated; Phase 2
+warn_return_any = false
+warn_unused_configs = true
+no_implicit_optional = true
+check_untyped_defs = true
+show_error_codes = true
+exclude = [
+    "data_scrapper/", "pipelines/", "resources/", "scripts/",
+    "tests/", "deploy/", "infra/", "user_interface/", "venv/",
+]
+
+[[tool.mypy.overrides]]
+module = [
+    "neo4j.*", "qdrant_client.*", "langgraph.*", "langchain.*",
+    "jose.*", "prometheus_client.*", "opentelemetry.*",
+    "posthog.*", "aiofiles.*", "httpx_sse.*", "backoff.*",
+]
+ignore_missing_imports = true
+
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
