@@ -11,14 +11,13 @@ import { Separator } from "@/components/ui/separator";
 import { clearAuth } from "@/lib/auth";
 import { RoleBadge } from "./RoleBadge";
 import { UserRole } from "@/types/api";
-import { MessageSquarePlus, FileText, Activity, LogOut, Layers, History, Users, ShieldCheck } from "lucide-react";
+import { MessageSquarePlus, FileText, Activity, LogOut, History, Users, ShieldCheck } from "lucide-react";
 
 const NAV_ITEMS = [
   { href: "/chat", label: "Legal Research", icon: MessageSquarePlus },
   { href: "/verify", label: "Verify Document", icon: ShieldCheck },
-  { href: "/history", label: "Chat History", icon: History },
+  { href: "/history", label: "Activity History", icon: History },
   { href: "/upload", label: "Upload Documents", icon: FileText },
-  { href: "/jobs", label: "Ingestion Jobs", icon: Layers },
   { href: "/health", label: "System Status", icon: Activity },
 ];
 

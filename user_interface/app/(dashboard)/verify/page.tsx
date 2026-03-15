@@ -5,10 +5,9 @@ import { useDropzone } from "react-dropzone";
 import { Button } from "@/components/ui/button";
 import { VerificationReportCard } from "@/components/verify/VerificationReportCard";
 import { useVerify } from "@/hooks/useVerify";
-import { useVerifyHistory } from "@/hooks/useVerifyHistory";
-import { DocumentType, VerificationActivity } from "@/types/api";
+import { DocumentType } from "@/types/api";
 import { cn } from "@/lib/utils";
-import { FileText, X, ShieldCheck, History, ChevronDown, ChevronUp } from "lucide-react";
+import { FileText, X, ShieldCheck } from "lucide-react";
 
 const DOCUMENT_TYPES: { value: DocumentType; label: string }[] = [
   { value: "court_order", label: "Court Order" },
@@ -17,19 +16,10 @@ const DOCUMENT_TYPES: { value: DocumentType; label: string }[] = [
   { value: "affidavit", label: "Affidavit" },
 ];
 
-function formatDate(iso: string) {
-  return new Date(iso).toLocaleString("en-KE", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
-}
-
 export default function VerifyPage() {
   const { state, report, error, file, selectFile, reset, verify } = useVerify();
-  const history = useVerifyHistory();
   const [documentType, setDocumentType] = useState<DocumentType>("court_order");
   const [caseNumber, setCaseNumber] = useState("");
-  const [expandedId, setExpandedId] = useState<number | null>(null);
 
   const onDrop = useCallback(
     (accepted: File[]) => {
@@ -48,15 +38,6 @@ export default function VerifyPage() {
 
   const isVerifying = state === "verifying";
   const canSubmit = !!file && !isVerifying;
-
-  async function handleVerify() {
-    await verify(documentType, caseNumber);
-    history.refresh();
-  }
-
-  function toggleExpanded(id: number) {
-    setExpandedId((prev) => (prev === id ? null : id));
-  }
 
   return (
     <div className="max-w-2xl mx-auto px-4 py-8 space-y-6">
@@ -145,7 +126,7 @@ export default function VerifyPage() {
           </div>
 
           <Button
-            onClick={handleVerify}
+            onClick={() => verify(documentType, caseNumber)}
             disabled={!canSubmit}
             className="w-full"
             style={{ backgroundColor: "#1a3a6b" }}
@@ -171,81 +152,6 @@ export default function VerifyPage() {
 
       {/* Report */}
       {state === "done" && report && <VerificationReportCard report={report} />}
-
-      {/* History panel */}
-      <div className="space-y-3">
-        <div className="flex items-center gap-2 text-sm font-medium text-gray-700">
-          <History size={16} />
-          <span>Verification History</span>
-          {!history.loading && (
-            <span className="text-xs text-gray-400 font-normal">
-              ({history.activities.length})
-            </span>
-          )}
-        </div>
-
-        {history.loading && (
-          <p className="text-xs text-gray-400">Loading history…</p>
-        )}
-
-        {!history.loading && history.error && (
-          <p className="text-xs text-red-500">{history.error}</p>
-        )}
-
-        {!history.loading && !history.error && history.activities.length === 0 && (
-          <p className="text-xs text-gray-400">No verifications yet.</p>
-        )}
-
-        {!history.loading &&
-          history.activities.map((activity: VerificationActivity) => (
-            <div key={activity.id} className="bg-white border rounded-xl overflow-hidden">
-              <button
-                className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-gray-50 transition-colors"
-                onClick={() => toggleExpanded(activity.id)}
-              >
-                {/* Authentic badge */}
-                <span
-                  className={cn(
-                    "shrink-0 text-xs font-semibold px-2 py-0.5 rounded-full",
-                    activity.authentic
-                      ? "bg-green-100 text-green-700"
-                      : "bg-red-100 text-red-700"
-                  )}
-                >
-                  {activity.authentic ? "Authentic" : "Suspect"}
-                </span>
-
-                {/* Filename + meta */}
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-gray-800 truncate">
-                    {activity.filename || "Unnamed document"}
-                  </p>
-                  <p className="text-xs text-gray-400">
-                    {activity.document_type.replace("_", " ")}
-                    {activity.case_number ? ` · ${activity.case_number}` : ""}
-                    {" · "}
-                    {Math.round(activity.confidence * 100)}% confidence
-                    {" · "}
-                    {formatDate(activity.created_at)}
-                  </p>
-                </div>
-
-                {/* Expand toggle */}
-                {expandedId === activity.id ? (
-                  <ChevronUp size={16} className="text-gray-400 shrink-0" />
-                ) : (
-                  <ChevronDown size={16} className="text-gray-400 shrink-0" />
-                )}
-              </button>
-
-              {expandedId === activity.id && (
-                <div className="border-t px-4 pb-4 pt-2">
-                  <VerificationReportCard report={activity.report} />
-                </div>
-              )}
-            </div>
-          ))}
-      </div>
     </div>
   );
 }
