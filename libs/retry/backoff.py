@@ -30,7 +30,7 @@ def exponential_backoff(
                     # Algorithm: base * (2 ^ retries) + random_jitter
                     # Jitter prevents "Thundering Herd" problem on the server
                     delay = min(base_delay * (2**retries), max_delay)
-                    jitter = random.uniform(0, 0.5)
+                    jitter = random.uniform(0, 0.5)  # noqa: S311
                     sleep_time = delay + jitter
 
                     logger.warning(
