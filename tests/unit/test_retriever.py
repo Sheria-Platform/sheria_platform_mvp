@@ -1,19 +1,26 @@
 """Tests for the retriever node — vector reuse and deduplication."""
+
+from unittest.mock import AsyncMock, patch
+
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 
 
 @pytest.mark.asyncio
 async def test_retriever_skips_embed_when_vector_in_state(base_state, sample_vector):
     """Retriever must reuse state['query_vector'] and NOT call embed_query."""
-    with patch("services.api.app.agents.nodes.retriever.embeddings_client") as mock_embed, \
-         patch("services.api.app.agents.nodes.retriever.qdrant_client") as mock_qdrant, \
-         patch("services.api.app.agents.nodes.retriever.neo4j_client") as mock_neo4j:
+    with (
+        patch(
+            "services.api.app.agents.nodes.retriever.embeddings_client"
+        ) as mock_embed,
+        patch("services.api.app.agents.nodes.retriever.qdrant_client") as mock_qdrant,
+        patch("services.api.app.agents.nodes.retriever.neo4j_client") as mock_neo4j,
+    ):
         mock_embed.embed_query = AsyncMock(return_value=sample_vector)
         mock_qdrant.search = AsyncMock(return_value=[])
         mock_neo4j.query = AsyncMock(return_value=[])
 
         from services.api.app.agents.nodes.retriever import retrieve_node
+
         await retrieve_node(base_state)
 
     mock_embed.embed_query.assert_not_called()
@@ -27,14 +34,19 @@ async def test_retriever_embeds_when_no_vector_in_state(sample_vector):
         "query_vector": [],  # empty → must embed
         "messages": [],
     }
-    with patch("services.api.app.agents.nodes.retriever.embeddings_client") as mock_embed, \
-         patch("services.api.app.agents.nodes.retriever.qdrant_client") as mock_qdrant, \
-         patch("services.api.app.agents.nodes.retriever.neo4j_client") as mock_neo4j:
+    with (
+        patch(
+            "services.api.app.agents.nodes.retriever.embeddings_client"
+        ) as mock_embed,
+        patch("services.api.app.agents.nodes.retriever.qdrant_client") as mock_qdrant,
+        patch("services.api.app.agents.nodes.retriever.neo4j_client") as mock_neo4j,
+    ):
         mock_embed.embed_query = AsyncMock(return_value=sample_vector)
         mock_qdrant.search = AsyncMock(return_value=[])
         mock_neo4j.query = AsyncMock(return_value=[])
 
         from services.api.app.agents.nodes.retriever import retrieve_node
+
         await retrieve_node(state)
 
     mock_embed.embed_query.assert_called_once_with("test")

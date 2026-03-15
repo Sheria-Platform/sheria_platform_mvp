@@ -1,8 +1,11 @@
 """Shared fixtures for Sheria API unit tests."""
+
 import os
 
 # Set required env vars before any settings-dependent imports
-os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://test:test@localhost:5432/test")
+os.environ.setdefault(
+    "DATABASE_URL", "postgresql+asyncpg://test:test@localhost:5432/test"
+)
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
 os.environ.setdefault("NEO4J_PASSWORD", "test_password")
 os.environ.setdefault("JWT_SECRET_KEY", "test_secret_key_for_unit_tests_only_not_real")
@@ -13,8 +16,8 @@ import pytest
 
 from services.api.app.agents.state import AgentState
 
-
 # ── Shared mock fixtures ────────────────────────────────────────────────────
+
 
 @pytest.fixture
 def sample_vector() -> list[float]:
