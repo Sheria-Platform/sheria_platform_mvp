@@ -33,13 +33,13 @@ _PACKAGE_ROOT = Path(__file__).resolve().parent.parent
 if str(_PACKAGE_ROOT) not in sys.path:
     sys.path.insert(0, str(_PACKAGE_ROOT))
 
-from scraper.config.settings import get_settings
-from scraper.crawlers.legal_sites import (
+from scraper.config.settings import get_settings  # noqa: E402
+from scraper.crawlers.legal_sites import (  # noqa: E402
     COURT_NAMES,
     GenericLegalCrawler,
     KenyaLawCrawler,
 )
-from scraper.storage.minio_client import MinIOClient
+from scraper.storage.minio_client import MinIOClient  # noqa: E402
 
 console = Console()
 
@@ -66,12 +66,12 @@ def _print_report(crawl_report, minio_stats: dict) -> None:
     table = Table(show_header=False, padding=(0, 2))
     table.add_column("Metric", style="cyan")
     table.add_column("Value", style="white")
-    table.add_row("URLs visited",           str(crawl_report.total_urls_visited))
-    table.add_row("Documents downloaded",   str(crawl_report.documents_downloaded))
-    table.add_row("Duplicates skipped",     str(crawl_report.documents_skipped_duplicate))
-    table.add_row("Invalid files skipped",  str(crawl_report.documents_skipped_invalid))
-    table.add_row("Failed downloads",       str(crawl_report.documents_failed))
-    table.add_row("MinIO upload failures",  str(len(crawl_report.upload_failures)))
+    table.add_row("URLs visited", str(crawl_report.total_urls_visited))
+    table.add_row("Documents downloaded", str(crawl_report.documents_downloaded))
+    table.add_row("Duplicates skipped", str(crawl_report.documents_skipped_duplicate))
+    table.add_row("Invalid files skipped", str(crawl_report.documents_skipped_invalid))
+    table.add_row("Failed downloads", str(crawl_report.documents_failed))
+    table.add_row("MinIO upload failures", str(len(crawl_report.upload_failures)))
     console.print(table)
 
     if minio_stats:
@@ -103,8 +103,7 @@ async def _run_kenya_law(args, settings, minio, site_config) -> None:
     invalid = [c for c in courts if c not in _VALID_COURTS]
     if invalid:
         console.print(
-            f"[red]Unknown court code(s): {invalid}[/red]\n"
-            f"Valid codes: {_VALID_COURTS}"
+            f"[red]Unknown court code(s): {invalid}[/red]\nValid codes: {_VALID_COURTS}"
         )
         sys.exit(1)
 
@@ -113,7 +112,9 @@ async def _run_kenya_law(args, settings, minio, site_config) -> None:
     terms = [t.strip() for t in terms_raw.split(",") if t.strip()]
 
     if mode == "search" and not terms:
-        console.print("[red]Search mode requires --terms. Example: --terms 'land,succession'[/red]")
+        console.print(
+            "[red]Search mode requires --terms. Example: --terms 'land,succession'[/red]"
+        )
         sys.exit(1)
 
     crawler = KenyaLawCrawler(

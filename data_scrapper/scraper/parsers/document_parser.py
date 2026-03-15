@@ -12,7 +12,7 @@ class DocumentMetadata:
     source_url: str
     sha256: str
     file_size: int
-    doc_type: str                          # e.g. "pdf", "docx"
+    doc_type: str  # e.g. "pdf", "docx"
     jurisdiction: str = "Kenya"
     download_date: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
@@ -22,7 +22,7 @@ class DocumentMetadata:
     year: Optional[str] = None
     case_name: Optional[str] = None
     case_number: Optional[str] = None
-    source: str = "unknown"                # e.g. "kenya_law", "generic"
+    source: str = "unknown"  # e.g. "kenya_law", "generic"
 
 
 def _slugify(text: str) -> str:

@@ -26,12 +26,8 @@ class Settings(BaseSettings):
     )
 
     # Scraper behaviour
-    max_concurrent_downloads: int = Field(
-        default=5, alias="MAX_CONCURRENT_DOWNLOADS"
-    )
-    default_rate_limit_rps: float = Field(
-        default=0.5, alias="DEFAULT_RATE_LIMIT_RPS"
-    )
+    max_concurrent_downloads: int = Field(default=5, alias="MAX_CONCURRENT_DOWNLOADS")
+    default_rate_limit_rps: float = Field(default=0.5, alias="DEFAULT_RATE_LIMIT_RPS")
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
 
 

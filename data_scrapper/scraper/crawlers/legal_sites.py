@@ -24,7 +24,7 @@ import logging
 import re
 from dataclasses import dataclass
 from typing import Dict, List, Optional
-from urllib.parse import urljoin, urlparse, quote_plus
+from urllib.parse import quote_plus, urljoin, urlparse
 
 import aiohttp
 from bs4 import BeautifulSoup
@@ -42,22 +42,22 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 COURT_CODES: Dict[str, str] = {
-    "supreme_court":              "KESC",
-    "court_of_appeal":            "KECA",
-    "high_court":                 "KEHC",
-    "employment_labour":          "KEELRC",
-    "environment_land":           "KEELC",
-    "industrial_court":           "KEIC",
+    "supreme_court": "KESC",
+    "court_of_appeal": "KECA",
+    "high_court": "KEHC",
+    "employment_labour": "KEELRC",
+    "environment_land": "KEELC",
+    "industrial_court": "KEIC",
 }
 
 # Human-readable names for metadata
 COURT_NAMES: Dict[str, str] = {
-    "KESC":   "Supreme Court of Kenya",
-    "KECA":   "Court of Appeal of Kenya",
-    "KEHC":   "High Court of Kenya",
+    "KESC": "Supreme Court of Kenya",
+    "KECA": "Court of Appeal of Kenya",
+    "KEHC": "High Court of Kenya",
     "KEELRC": "Employment and Labour Relations Court",
-    "KEELC":  "Environment and Land Court",
-    "KEIC":   "Industrial Court of Kenya",
+    "KEELC": "Environment and Land Court",
+    "KEIC": "Industrial Court of Kenya",
 }
 
 # AKN URL pattern for individual judgments
@@ -80,6 +80,7 @@ _ANCHOR_TEXT_RE = re.compile(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _clean_text(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip() if text else ""
@@ -138,10 +139,11 @@ def _akn_to_docx_url(base_url: str, akn_href: str) -> str:
 @dataclass
 class JudgmentLink:
     """Parsed judgment link extracted from a listing or search page."""
-    akn_href: str          # e.g. /akn/ke/judgment/kesc/2026/20/eng@2026-02-20
+
+    akn_href: str  # e.g. /akn/ke/judgment/kesc/2026/20/eng@2026-02-20
     pdf_url: str
     docx_url: str
-    court_code: str        # e.g. KESC
+    court_code: str  # e.g. KESC
     year: str
     citation_number: str
     date: str
@@ -170,25 +172,32 @@ def _extract_judgment_links(html: str, base_url: str) -> List[JudgmentLink]:
         if not m:
             continue
 
-        court_raw, year, citation_num, date = m.group(1), m.group(2), m.group(3), m.group(4)
+        court_raw, year, citation_num, date = (
+            m.group(1),
+            m.group(2),
+            m.group(3),
+            m.group(4),
+        )
         court_code = court_raw.upper()
 
         anchor_text = _clean_text(anchor.get_text(separator=" "))
         meta = _parse_anchor_metadata(anchor_text)
 
-        links.append(JudgmentLink(
-            akn_href=href,
-            pdf_url=_akn_to_pdf_url(base_url, href),
-            docx_url=_akn_to_docx_url(base_url, href),
-            court_code=court_code,
-            year=year,
-            citation_number=citation_num,
-            date=date,
-            title=meta.get("title") or anchor_text,
-            case_number=meta.get("case_number"),
-            citation=meta.get("citation"),
-            doc_type_label=meta.get("doc_type"),
-        ))
+        links.append(
+            JudgmentLink(
+                akn_href=href,
+                pdf_url=_akn_to_pdf_url(base_url, href),
+                docx_url=_akn_to_docx_url(base_url, href),
+                court_code=court_code,
+                year=year,
+                citation_number=citation_num,
+                date=date,
+                title=meta.get("title") or anchor_text,
+                case_number=meta.get("case_number"),
+                citation=meta.get("citation"),
+                doc_type_label=meta.get("doc_type"),
+            )
+        )
 
     return links
 
@@ -210,6 +219,7 @@ def _has_next_page(html: str) -> bool:
 # ---------------------------------------------------------------------------
 # Kenya Law Crawler
 # ---------------------------------------------------------------------------
+
 
 class KenyaLawCrawler(BaseCrawler):
     """
@@ -258,7 +268,9 @@ class KenyaLawCrawler(BaseCrawler):
     # Entry point
     # ------------------------------------------------------------------
 
-    async def crawl(self, start_urls: Optional[List[str]] = None, depth: int = 1) -> CrawlReport:
+    async def crawl(
+        self, start_urls: Optional[List[str]] = None, depth: int = 1
+    ) -> CrawlReport:
         connector = aiohttp.TCPConnector(limit=10)
         headers = {
             "User-Agent": "SheriaBot/1.0 (+https://sheriaplatform.go.ke/bot)",
@@ -320,7 +332,9 @@ class KenyaLawCrawler(BaseCrawler):
 
             logger.info(
                 "[%s] page %d — found %d judgment links",
-                court_code, page, len(links),
+                court_code,
+                page,
+                len(links),
             )
             await self._process_links(links, session, report, sem)
 
@@ -351,12 +365,16 @@ class KenyaLawCrawler(BaseCrawler):
 
             links = _extract_judgment_links(html, self.BASE_URL)
             if not links:
-                logger.debug("No judgment links on search page %d for '%s'.", page, term)
+                logger.debug(
+                    "No judgment links on search page %d for '%s'.", page, term
+                )
                 break
 
             logger.info(
                 "[search:'%s'] page %d — found %d judgment links",
-                term, page, len(links),
+                term,
+                page,
+                len(links),
             )
             await self._process_links(links, session, report, sem)
 
@@ -374,10 +392,7 @@ class KenyaLawCrawler(BaseCrawler):
         report: CrawlReport,
         sem: asyncio.Semaphore,
     ) -> None:
-        tasks = [
-            self._download_and_store(jl, session, report, sem)
-            for jl in links
-        ]
+        tasks = [self._download_and_store(jl, session, report, sem) for jl in links]
         await asyncio.gather(*tasks, return_exceptions=True)
 
     async def _download_and_store(
@@ -408,7 +423,9 @@ class KenyaLawCrawler(BaseCrawler):
                     report.documents_failed += 1
                     return
                 doc_type = "docx"
-                filename = filename if filename.endswith(".docx") else f"{filename}.docx"
+                filename = (
+                    filename if filename.endswith(".docx") else f"{filename}.docx"
+                )
             else:
                 doc_type = "pdf"
                 if not filename.endswith(".pdf"):
@@ -449,8 +466,11 @@ class KenyaLawCrawler(BaseCrawler):
             report.documents_downloaded += 1
             logger.info(
                 "Stored [%s %s/%s] %s → %s",
-                jl.court_code, jl.year, jl.citation_number,
-                jl.title or stable_filename, minio_path,
+                jl.court_code,
+                jl.year,
+                jl.citation_number,
+                jl.title or stable_filename,
+                minio_path,
             )
 
     # ------------------------------------------------------------------
@@ -503,6 +523,7 @@ class KenyaLawCrawler(BaseCrawler):
 # ---------------------------------------------------------------------------
 # Generic Legal Crawler (unchanged)
 # ---------------------------------------------------------------------------
+
 
 class GenericLegalCrawler(BaseCrawler):
     """
@@ -573,15 +594,19 @@ class GenericLegalCrawler(BaseCrawler):
 
                     links = await self._extract_links(resp, url)
                     doc_links = [
-                        lk for lk in links
+                        lk
+                        for lk in links
                         if any(lk.lower().endswith(ext) for ext in self._SUPPORTED_EXTS)
                     ]
                     page_links = [
-                        lk for lk in links
-                        if not any(lk.lower().endswith(ext) for ext in self._SUPPORTED_EXTS)
+                        lk
+                        for lk in links
+                        if not any(
+                            lk.lower().endswith(ext) for ext in self._SUPPORTED_EXTS
+                        )
                     ]
 
-                    sem = asyncio.Semaphore(self.settings.max_concurrent_downloads)
+                    _sem = asyncio.Semaphore(self.settings.max_concurrent_downloads)
                     tasks = [
                         self._process_url(doc_url, session, report)
                         for doc_url in doc_links
