@@ -204,40 +204,28 @@ before any shared or staging deployment.
 
 ---
 
-### 3.1 Rate-limit the login endpoint 🟡
+### 3.1 Rate-limit the login endpoint 🟢
 
 **Problem:** `POST /api/v1/auth/login` has no brute-force protection. An attacker can enumerate
 passwords without throttling.
 
 **Tasks:**
 
-- [ ] **3.1.1** — Add `slowapi` to `pyproject.toml` / `requirements.txt`:
-  ```
-  slowapi>=0.1.9
-  ```
+- [x] **3.1.1** — Add `slowapi>=0.1.9` to `services/api/requirements.txt`.
 
-- [ ] **3.1.2** — Configure a `Limiter` in `main.py` backed by the existing Redis client:
-  ```python
-  from slowapi import Limiter
-  from slowapi.util import get_remote_address
-  limiter = Limiter(key_func=get_remote_address, storage_uri=settings.REDIS_URL)
-  app.state.limiter = limiter
-  ```
+- [x] **3.1.2** — Created `services/api/app/limiter.py` — slowapi `Limiter` singleton keyed on
+  remote IP, backed by Redis via `settings.REDIS_URL`. Wired into `main.py`:
+  `app.state.limiter = limiter` + `RateLimitExceeded` exception handler.
 
-- [ ] **3.1.3** — Apply the decorator to `auth.py:127` (`login` handler):
-  ```python
-  @router.post("/login")
-  @limiter.limit("5/15minutes")
-  async def login(request: Request, req: LoginRequest) -> dict:
-  ```
-  Return `429 Too Many Requests` on breach.
+- [x] **3.1.3** — Applied `@limiter.limit("5/15minutes")` to `login` handler. Added
+  `request: Request` parameter (required by slowapi). Returns `429 Too Many Requests` on breach.
 
 - [ ] **3.1.4** — Test: send 6 login attempts in < 15 minutes from the same IP; assert the 6th
   returns `429`.
 
 ---
 
-### 3.2 Token revocation for suspended users 🟡
+### 3.2 Token revocation for suspended users 🟢
 
 **Problem:** When an admin suspends a user via `POST /auth/users/{id}/status`, the user's existing
 JWT remains valid for up to 8 hours. A suspended user can continue making API calls until
@@ -245,52 +233,48 @@ their token naturally expires.
 
 **Tasks:**
 
-- [ ] **3.2.1** — Add a `TOKEN_BLACKLIST_TTL_SECONDS: int = 28800` (8 hours) setting to
-  `config.py` (matches JWT TTL).
+- [x] **3.2.1** — Added `TOKEN_BLACKLIST_TTL_SECONDS: int = 28800` to `config.py`.
 
-- [ ] **3.2.2** — Create `services/api/app/auth/blacklist.py`:
-  ```python
-  """Redis-backed JWT blacklist for immediately invalidating tokens."""
-  async def blacklist_token(redis_client, jti: str, ttl_seconds: int) -> None: ...
-  async def is_blacklisted(redis_client, jti: str) -> bool: ...
-  ```
+- [x] **3.2.2** — Created `services/api/app/auth/blacklist.py` with three async functions:
+  `store_user_jti` (called at login), `blacklist_user_tokens` (called on suspend),
+  `is_blacklisted` (checked on every authenticated request). Redis key scheme:
+  `user_jti:{user_id}` and `token_blacklist:{jti}`, both with 8-hour TTL.
 
-- [ ] **3.2.3** — Add `jti` (JWT ID, a UUID) to the token payload in `auth.py:43`
-  (`_create_token`). This gives each token a unique identifier for blacklisting.
+- [x] **3.2.3** — Added `jti: str` param to `_create_token`; UUID embedded in JWT payload.
 
-- [ ] **3.2.4** — In `auth.py:264` (`update_user_status` → suspend action): after updating DB
-  status, look up the user's active token JTI (from a new `active_jti` column on `users`, or from
-  a Redis key `user:{user_id}:jti` written at login time) and call `blacklist_token(jti)`.
+- [x] **3.2.4** — `login` handler generates UUID jti, passes to `_create_token`, calls
+  `store_user_jti(user_id, jti)`. `update_user_status` calls `blacklist_user_tokens(user_id)`
+  when target status is `"suspended"`.
 
-- [ ] **3.2.5** — In `auth/jwt.py` (`get_current_user`): after decoding the token, call
-  `is_blacklisted(jti)`. If blacklisted, raise `HTTPException(401, "Token revoked")`.
+- [x] **3.2.5** — `get_current_user` in `jwt.py` extracts `jti` from payload and raises
+  `HTTP 401 "Token has been revoked"` if `is_blacklisted(jti)` returns True.
 
 - [ ] **3.2.6** — Test: login as a user, get token, admin suspends user, attempt API call with
-  old token → assert `401 Token revoked` (not `403`).
+  old token → assert `401 Token has been revoked`.
 
 ---
 
-### 3.3 Activation token expiry 🟡
+### 3.3 Activation token expiry 🟢
 
 **Problem:** `auth.py:187` (`activate` handler) looks up a user by `activation_token` but never
 checks whether the token was issued recently. A token is valid indefinitely until used.
 
 **Tasks:**
 
-- [ ] **3.3.1** — Add `activation_token_expires_at = Column(DateTime, nullable=True)` to the
+- [x] **3.3.1** — Added `activation_token_expires_at = Column(DateTime, nullable=True)` to
   `User` ORM model in `memory/postgres.py`.
 
-- [ ] **3.3.2** — In `memory/postgres.py` (`approve_user` method): set
-  `activation_token_expires_at = datetime.utcnow() + timedelta(days=7)` when generating the token.
+- [x] **3.3.2** — `approve_user` method now sets `activation_token_expires_at = datetime.utcnow()
+  + timedelta(days=settings.ACTIVATION_TOKEN_TTL_DAYS)`.
 
-- [ ] **3.3.3** — In `auth.py:187` (`activate` handler): after retrieving the user by token,
-  check `user["activation_token_expires_at"] < datetime.utcnow()`. If expired, raise
-  `HTTPException(400, "Activation link has expired. Please contact your administrator.")`.
+- [x] **3.3.3** — Expiry enforced at query level: `get_user_by_activation_token` filters with
+  `User.activation_token_expires_at > datetime.utcnow()`. Expired tokens return `None` →
+  existing `404 "Invalid or expired activation token"` is returned without handler changes.
 
-- [ ] **3.3.4** — Add `ACTIVATION_TOKEN_TTL_DAYS: int = 7` to `config.py`.
+- [x] **3.3.4** — Added `ACTIVATION_TOKEN_TTL_DAYS: int = 7` to `config.py`.
 
 - [ ] **3.3.5** — Test: generate an activation token, manually set its expiry to the past in the
-  DB, attempt activation → assert `400 Activation link has expired`.
+  DB, attempt activation → assert `404 Invalid or expired activation token`.
 
 ---
 
