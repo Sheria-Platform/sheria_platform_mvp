@@ -190,14 +190,19 @@ All API inputs are validated via Pydantic models:
 ```python
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://192.168.100.104:3000",  # LAN dev machine
+        "http://0.0.0.0:3000",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 ```
 
-**Reviewer concern:** Hard-coded `localhost:3000`. Production requires configurable `ALLOWED_ORIGINS` from environment variable.
+**Reviewer concern:** All four origins are hard-coded, including a specific LAN IP (`192.168.100.104`). Production requires a configurable `ALLOWED_ORIGINS` environment variable. The LAN IP will break in any other developer's environment and must not reach staging/production.
 
 ---
 
@@ -226,17 +231,44 @@ Every HTTP request is logged with:
 
 ---
 
-## 10. Security Checklist for PR Review
+## 10. Admin Approval Audit Trail
+
+The `users` table includes an `approved_by` column (`VARCHAR`, nullable) that stores the `user_id` of the admin who approved a registration. This provides a lightweight audit trail for accountability.
+
+**Reviewer note:** Confirm that `approved_by` is populated in the approval handler (`POST /auth/approve/{user_id}`) and that it is included in the admin user-list response for auditability.
+
+---
+
+## 11. Verify Endpoint Security
+
+The `POST /api/v1/verify` endpoint accepts a multipart PDF upload.
+
+**Controls in place:**
+- JWT authentication required
+- File content validated: empty file → 400, invalid PDF → 400
+- No file stored on disk — bytes read into memory, text extracted via `pypdf`, bytes discarded
+
+**Reviewer concerns:**
+- **Filename sanitization:** The `file.filename` from the multipart upload is passed directly to `memory.save_verification()`. Confirm this is stored as metadata only (not used in any file path or shell command) to prevent path traversal
+- **File size limit:** No explicit size cap on uploaded PDFs — a malformed multi-GB PDF could cause OOM. Consider adding `Content-Length` validation or FastAPI's `max_upload_size`
+- **Image PDFs:** Scanned documents yield empty text; the pipeline continues without error. Ensure responses clearly indicate "no text extracted" to prevent false confidence in verification results
+
+---
+
+## 12. Security Checklist for PR Review
 
 - [ ] **JWT_SECRET_KEY** is not hardcoded or in `.env.example`
 - [ ] **Admin seed password** (`ADMIN_PASSWORD`) is changed from default `Admin1234!` in production
 - [ ] **Token revocation** on user suspension (current: tokens valid until TTL expiry)
 - [ ] **Activation token TTL** — verify tokens expire after a reasonable period
-- [ ] **Filename sanitization** in presigned URL key construction
-- [ ] **CORS origins** configurable for production deployment
+- [ ] **Filename sanitization** in presigned URL key construction AND in verify endpoint metadata storage
+- [ ] **CORS origins** configurable for production (remove hardcoded LAN IP `192.168.100.104`)
 - [ ] **SQL injection** — all queries use parameterized ORM calls (no raw SQL with interpolation)
 - [ ] **Password policy** — minimum 8 characters; consider adding complexity requirements
 - [ ] **Rate limiting** — no rate limiting on login endpoint (brute force risk)
-- [ ] **Prompt injection** — user input passed to LLM without sanitization
+- [ ] **Prompt injection** — user input passed to LLM without sanitization (chat and verify pipelines)
 - [ ] **Error messages** — HTTP errors should not leak internal details (stack traces)
 - [ ] **Neo4j Cypher injection** — verify `$query` parameter is safely parameterized
+- [ ] **`approved_by` field** — verify populated on approval and included in admin audit logs
+- [ ] **PDF upload size limit** — no `max_upload_size` cap on verify endpoint; add before production
+- [ ] **Embedding dimension** — `_EMBEDDING_DIM = 768` in `main.py`; confirm this matches actual `nomic-embed-text` output to avoid silent vector shape errors in Qdrant

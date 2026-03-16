@@ -497,6 +497,145 @@ sheria_retrieval_docs_count{source="combined"} 5831
 
 ---
 
+## Verify Endpoints (`/api/v1/verify`)
+
+### POST `/api/v1/verify`
+
+**Auth required:** Yes
+
+Upload a PDF court document and receive an authenticity report. The pipeline extracts metadata via LLM, cross-references the case in Kenya Law Reports (Qdrant), and runs a fraud pattern analysis.
+
+**Request:** `multipart/form-data`
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `file` | PDF file | Yes | — | Court document to authenticate |
+| `document_type` | string | No | `court_order` | `court_order` \| `judgment` \| `pleading` \| `affidavit` |
+| `case_number` | string | No | `""` | Case reference for cross-referencing against Qdrant corpus |
+
+**Response 200:**
+```json
+{
+  "authentic": true,
+  "confidence": 0.87,
+  "document_type": "court_order",
+  "extracted_metadata": {
+    "case_number": "HC MISC. APP. 123 OF 2025",
+    "court": "High Court Nairobi",
+    "date_issued": "2025-03-01",
+    "presiding_judge": "Justice Jane Kimani"
+  },
+  "verification_checks": [
+    {"check": "metadata_extraction", "passed": true, "detail": "All metadata fields extracted"},
+    {"check": "case_cross_reference", "passed": true, "detail": "Case found in Kenya Law Reports"},
+    {"check": "fraud_pattern_analysis", "passed": true, "detail": "No fraud patterns detected"}
+  ],
+  "risk_flags": [],
+  "summary": "Document appears authentic. Case cross-referenced successfully."
+}
+```
+
+**Errors:**
+- `400` — Empty file or invalid/unreadable PDF
+- `422` — Verification pipeline raised an unrecoverable error
+
+**Side effects:** Saves result to `verification_activity` table via background task.
+
+**Scanned PDF behaviour:** If `pypdf` extracts no text (image-only PDF), the pipeline continues with an empty text string. Checks that require text content will fail gracefully and flag the document as inconclusive rather than crashing.
+
+---
+
+### GET `/api/v1/verify/history`
+
+**Auth required:** Yes
+
+Return the authenticated user's document verification history, newest first (up to 50 records).
+
+**Response 200:**
+```json
+[
+  {
+    "id": 1,
+    "filename": "court_order_2025.pdf",
+    "document_type": "court_order",
+    "case_number": "HC MISC. APP. 123 OF 2025",
+    "authentic": true,
+    "confidence": 0.87,
+    "created_at": "2026-03-15T10:00:00Z"
+  }
+]
+```
+
+---
+
+## Legal Research Endpoint (`/api/v1/legal-research`)
+
+### POST `/api/v1/legal-research`
+
+**Auth required:** Yes
+
+Structured judicial research endpoint (streaming). Unlike `/api/v1/chat/stream`, this endpoint:
+- **Always retrieves** from Kenya Law Reports — never short-circuits to a direct answer.
+- Accepts optional `jurisdiction` and `date_range` filters applied as Qdrant payload filters.
+- Returns structured `citations` alongside the IRAC answer text.
+
+**Request:**
+```json
+{
+  "query": "What is the test for adverse possession in Kenya?",
+  "jurisdiction": ["Supreme Court", "Court of Appeal"],
+  "date_range": {"from": "2010", "to": "2026"},
+  "session_id": "optional-session-uuid"
+}
+```
+
+**Fields:**
+- `query` — required, min_length=1
+- `jurisdiction` — optional list; valid values: `"Supreme Court"`, `"Court of Appeal"`, `"High Court"`, `"Industrial Court"`. Omit for all courts.
+- `date_range.from` / `date_range.to` — year strings (e.g. `"2010"`, `"2026"`)
+- `session_id` — optional UUID; auto-generated if omitted
+
+**Response:** `Content-Type: application/x-ndjson`
+
+Status events (emitted as each node starts):
+```json
+{"event": "status", "step": "retriever", "session_id": "..."}
+{"event": "status", "step": "responder", "session_id": "..."}
+```
+
+Answer event (final):
+```json
+{
+  "event": "answer",
+  "content": "The test for adverse possession in Kenya requires...",
+  "citations": [
+    {
+      "text": "Adverse possession requires actual, open, continuous possession...",
+      "source": "supreme_court/waweru_v_republic.pdf",
+      "case_number": "[2023] KESC 45",
+      "court": "Supreme Court"
+    }
+  ],
+  "session_id": "..."
+}
+```
+
+Cache hit (immediate, no agent execution):
+```json
+{"event": "answer", "content": "...", "citations": [], "session_id": "..."}
+```
+
+Error event:
+```json
+{"event": "error", "content": "An internal error occurred during legal research."}
+```
+
+**Background tasks (after stream):**
+1. Save user query and AI response to `chat_history`
+2. Update `semantic_cache` with new Q&A pair
+
+---
+
 ## Error Response Format
 
 All error responses use a consistent format:

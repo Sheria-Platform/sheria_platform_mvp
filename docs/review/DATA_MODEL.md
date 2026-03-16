@@ -8,19 +8,20 @@
 
 ```sql
 CREATE TABLE users (
-    id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    username         VARCHAR(100) NOT NULL UNIQUE,
-    email            VARCHAR(255) NOT NULL UNIQUE,
-    full_name        VARCHAR(255) NOT NULL,
-    hashed_password  VARCHAR(255),            -- bcrypt hash; NULL until activated
-    role             VARCHAR(50) NOT NULL,     -- judge|magistrate|registrar|clerk|admin
-    court_station    VARCHAR(255),
-    staff_number     VARCHAR(100),
-    status           VARCHAR(50) NOT NULL DEFAULT 'pending',
+    id               VARCHAR PRIMARY KEY,     -- UUID string generated at app layer
+    username         VARCHAR(50) NOT NULL UNIQUE,
+    email            VARCHAR(120) NOT NULL UNIQUE,
+    full_name        VARCHAR(200) NOT NULL,
+    hashed_password  VARCHAR,                 -- bcrypt hash; NULL until activated
+    role             VARCHAR(30) NOT NULL,    -- judge|magistrate|registrar|clerk|admin
+    court_station    VARCHAR(200) NOT NULL,   -- required at registration
+    staff_number     VARCHAR(50),
+    status           VARCHAR(20) NOT NULL DEFAULT 'pending',
                      -- pending → approved → active → suspended
-    activation_token VARCHAR(255),            -- UUID; cleared after use
-    created_at       TIMESTAMPTZ DEFAULT now(),
-    activated_at     TIMESTAMPTZ             -- NULL until status=active
+    activation_token VARCHAR,                 -- UUID; cleared after use
+    approved_by      VARCHAR,                 -- user_id of the admin who approved (audit trail)
+    created_at       TIMESTAMP DEFAULT now(),
+    activated_at     TIMESTAMP               -- NULL until status=active
 );
 ```
 
@@ -46,18 +47,20 @@ CREATE TABLE users (
 
 ```sql
 CREATE TABLE chat_history (
-    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    session_id  VARCHAR(255) NOT NULL,
-    user_id     UUID NOT NULL REFERENCES users(id),
-    role        VARCHAR(50) NOT NULL,   -- 'user' | 'assistant'
+    id          SERIAL PRIMARY KEY,       -- Integer autoincrement (not UUID)
+    session_id  VARCHAR NOT NULL,
+    user_id     VARCHAR NOT NULL,         -- String FK (references users.id by value)
+    role        VARCHAR(50) NOT NULL,     -- 'user' | 'assistant' | 'system'
     content     TEXT NOT NULL,
-    metadata_   JSONB,                  -- sources, node timings, cache_hit flag, etc.
-    created_at  TIMESTAMPTZ DEFAULT now()
+    metadata_   JSON,                     -- sources, node timings, cache_hit flag, etc.
+    created_at  TIMESTAMP DEFAULT now()
 );
 
 CREATE INDEX idx_chat_history_session ON chat_history(session_id);
 CREATE INDEX idx_chat_history_user ON chat_history(user_id);
 ```
+
+> **Implementation note:** The ORM maps `id` as `Integer` autoincrement, and `user_id` as `String` (not a UUID column type or FK constraint). This means referential integrity with `users.id` is enforced at the application layer, not the database layer.
 
 **`metadata_` JSONB examples:**
 
@@ -108,16 +111,17 @@ CREATE TABLE feedback (
 
 ```sql
 CREATE TABLE ingestion_jobs (
-    job_id        VARCHAR(255) PRIMARY KEY,
-    user_id       UUID NOT NULL REFERENCES users(id),
-    status        VARCHAR(50) NOT NULL,  -- pending|running|completed|failed
-    filename      VARCHAR(512),
-    s3_key        VARCHAR(1024),
-    started_at    TIMESTAMPTZ DEFAULT now(),
-    completed_at  TIMESTAMPTZ,
+    job_id        VARCHAR PRIMARY KEY,
+    user_id       VARCHAR NOT NULL,          -- String FK (references users.id by value)
+    status        VARCHAR(20) NOT NULL DEFAULT 'pending',  -- pending|running|completed|failed
+    filename      VARCHAR NOT NULL DEFAULT '',
+    s3_key        VARCHAR NOT NULL DEFAULT '',
+    started_at    TIMESTAMP,
+    completed_at  TIMESTAMP,
     duration_s    FLOAT,
-    stats         JSONB,                  -- vectors_indexed, graph_nodes, errors
-    error         TEXT
+    stats         JSON DEFAULT '{}',          -- vectors_indexed, graph_nodes, errors
+    error         TEXT NOT NULL DEFAULT '',
+    created_at    TIMESTAMP DEFAULT now()
 );
 ```
 
@@ -134,6 +138,45 @@ CREATE TABLE ingestion_jobs (
 
 ---
 
+### 1.5 `verification_activity` Table
+
+Audit log of every document verification request. Created in this branch (`sheria-verify-basic-design`).
+
+```sql
+CREATE TABLE verification_activity (
+    id             SERIAL PRIMARY KEY,
+    user_id        VARCHAR NOT NULL,         -- references users.id (app-enforced)
+    filename       VARCHAR NOT NULL DEFAULT '',
+    document_type  VARCHAR(50) NOT NULL,     -- court_order|judgment|pleading|affidavit
+    case_number    VARCHAR NOT NULL DEFAULT '',
+    authentic      BOOLEAN NOT NULL,
+    confidence     FLOAT NOT NULL,
+    report_json    JSON,                     -- full VerificationReport payload
+    created_at     TIMESTAMP DEFAULT now()
+);
+
+CREATE INDEX idx_verification_activity_user ON verification_activity(user_id);
+```
+
+**`report_json` example:**
+```json
+{
+  "authentic": true,
+  "confidence": 0.87,
+  "document_type": "court_order",
+  "extracted_metadata": {"case_number": "HC MISC. APP. 123 OF 2025", "court": "High Court Nairobi"},
+  "verification_checks": [
+    {"check": "metadata_extraction", "passed": true, "detail": "All fields extracted"},
+    {"check": "case_cross_reference", "passed": true, "detail": "Case found in corpus"},
+    {"check": "fraud_pattern_analysis", "passed": true, "detail": "No fraud patterns"}
+  ],
+  "risk_flags": [],
+  "summary": "Document appears authentic."
+}
+```
+
+---
+
 ## 2. Qdrant Vector Collections
 
 ### 2.1 `kenya_law_reports` Collection
@@ -143,7 +186,7 @@ CREATE TABLE ingestion_jobs (
 **Configuration:**
 ```python
 VectorParams(
-    size=2560,              # nomic-embed-text output dimensions
+    size=768,              # nomic-embed-text output dimensions
     distance=Distance.COSINE
 )
 ```
@@ -152,7 +195,7 @@ VectorParams(
 ```python
 PointStruct(
     id=str(uuid4()),        # Unique point ID
-    vector=[...],           # 2560-float embedding
+    vector=[...],           # 768-float embedding
     payload={
         "text": "...",              # Chunk content (512 tokens)
         "source": "path/to/file",   # MinIO object key
@@ -169,7 +212,7 @@ PointStruct(
 ```python
 client.search(
     collection_name="kenya_law_reports",
-    query_vector=query_embedding,   # 2560-float
+    query_vector=query_embedding,   # 768-float
     limit=5,
     with_payload=True
 )
@@ -184,7 +227,7 @@ client.search(
 **Configuration:**
 ```python
 VectorParams(
-    size=2560,
+    size=768,
     distance=Distance.COSINE
 )
 ```
@@ -330,7 +373,16 @@ class AgentState(TypedDict):
 
     # Cached embedding vector (reused across nodes to avoid re-embedding)
     query_vector: list[float]
+
+    # Optional court filter for /api/v1/legal-research (e.g. ["Supreme Court", "Court of Appeal"])
+    # Empty list = no filter (return results from all courts)
+    jurisdiction_filter: list[str]
+
+    # Structured citations emitted by the retriever node (used by legal-research route only)
+    citations: list[dict]
 ```
+
+> **Usage:** `jurisdiction_filter` and `citations` are used exclusively by `legal_research_graph.py` (the dedicated graph for `/api/v1/legal-research`). The generic chat graph (`graph.py`) leaves these fields empty.
 
 **Message format in `messages` list:**
 ```python

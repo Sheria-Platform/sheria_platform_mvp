@@ -42,6 +42,9 @@ The Sheria Platform MVP is an **AI-powered judicial intelligence platform** for 
 | Ingestion Pipeline (Ray Data) | Implemented | `pipelines/ingestion/` |
 | Next.js Frontend | Implemented | `user_interface/` |
 | Default Admin Seed on Boot | Implemented | `memory/postgres.py` |
+| Document Verification (Sheria Verify) | Implemented | `routes/verify.py`, `tools/verify_document.py` |
+| Structured Legal Research (Sheria Ask) | Implemented | `routes/legal_research.py`, `agents/legal_research_graph.py` |
+| Verification History | Implemented | `memory/postgres.py` (`verification_activity` table) |
 
 ---
 
@@ -51,7 +54,7 @@ The Sheria Platform MVP is an **AI-powered judicial intelligence platform** for 
 |-------|-----------|---------|
 | API Framework | FastAPI | Latest |
 | LLM Inference | Ollama + llama3.3 | — |
-| Embedding Model | nomic-embed-text (2560-dim) | — |
+| Embedding Model | nomic-embed-text (768-dim) | — |
 | Agent Orchestration | LangGraph | — |
 | Vector DB | Qdrant | v1.7.3 |
 | Graph DB | Neo4j | 5.16.0-community |
@@ -68,28 +71,17 @@ The Sheria Platform MVP is an **AI-powered judicial intelligence platform** for 
 
 ## Branch Under Review
 
-**Branch:** `53-task-82-backend-performance-benchmarking-optimization`
+**Branch:** `sheria-verify-basic-design`
 **Base:** `main`
 
 ### Recent Commits on This Branch
 
 ```
-9989730  feat(auth): seed default admin account on first boot
-bc69a38  chore(dev): add MailHog SMTP service and update Postman collection
-c3ba271  feat(admin): add user suspend/reactivate endpoints and UI
-e67e41e  feat(email): add async activation email delivery via aiosmtplib
-9bc9f23  refactor(feedback): migrate feedback table from raw SQL to ORM
-9fe4912  feat(api): update Postman collection for v2.0 with auth flow
-5ca02d6  refactor(auth-ui): extract shared components, fix bugs
-d558efd  feat(auth): implement supervised user registration workflow
-7721ba6  feat(ui): update global font to Palatino Linotype serif
-7b35cb2  feat(memory): add ingestion job tracking to PostgreSQL
-2a36a0d  feat(api,ui): enhance ingestion job tracking with detailed status
-507532e  perf(ingestion): optimize graph extraction and pipeline config
-97b2678  feat(upload): wire MinIO upload to ingestion pipeline
-a4f99ad  fix(api): fix cache-hit stream key mismatch and add request observability
-a05cbc9  fix(ui): fix health dashboard crashes and wrong status colour
-ce59a01  feat(ui): redesign frontend with Claude-like layout and Sheria logo
+e821acd  feat(ui): update branding and implement collapsible sidebar
+c0f0e69  feat(history): add ingestion jobs and verification tabs to history page
+cede39f  feat(memory): add verification activity model and persistence methods
+b864a30  feat(verify): add document verification page with file upload and form
+5f4ebc4  chore(docs): update ReadMe.md and regenerate secrets baseline
 ```
 
 ---
@@ -108,3 +100,5 @@ When reviewing this PR, focus on:
 8. **ORM migration** — Feedback table migrated from raw SQL to ORM; data compatibility
 9. **Presigned URL TTL** — 1-hour window for S3 uploads; adequate for large files?
 10. **Database pool config** — `pool_size=10, max_overflow=20`; adequate for load?
+11. **Embedding dimension** — `_EMBEDDING_DIM = 768` in `main.py` creates the `semantic_cache` Qdrant collection; confirm this matches the actual output dimension of `nomic-embed-text` in the Ollama version deployed
+12. **Verify pipeline resilience** — `verify_document` tool runs LLM + Qdrant in sequence; confirm graceful degradation for scanned/image-only PDFs (empty text path) and Qdrant unavailability
