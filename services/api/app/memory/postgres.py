@@ -17,7 +17,7 @@ Example:
 
 import uuid
 from collections.abc import Sequence
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from sqlalchemy import (
     JSON,
@@ -101,6 +101,7 @@ class User(Base):
     staff_number = Column(String(50), nullable=True)
     status = Column(String(20), nullable=False, default="pending")
     activation_token = Column(String, nullable=True, index=True)
+    activation_token_expires_at = Column(DateTime, nullable=True)
     approved_by = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     activated_at = Column(DateTime, nullable=True)
@@ -456,6 +457,7 @@ class PostgresMemory:
                 select(User).where(
                     User.activation_token == token,
                     User.status == "approved",
+                    User.activation_token_expires_at > datetime.utcnow(),
                 )
             )
             row = result.scalar_one_or_none()
@@ -497,6 +499,8 @@ class PostgresMemory:
                         status="approved",
                         role=role,
                         activation_token=activation_token,
+                        activation_token_expires_at=datetime.utcnow()
+                        + timedelta(days=settings.ACTIVATION_TOKEN_TTL_DAYS),
                         approved_by=approved_by,
                     )
                 )
@@ -738,6 +742,10 @@ def _user_to_dict(row: User) -> dict:
         "status": row.status,
         "hashed_password": row.hashed_password,
         "activation_token": row.activation_token,
+        "approved_by": row.approved_by,
+        "activation_token_expires_at": row.activation_token_expires_at.isoformat()
+        if row.activation_token_expires_at
+        else None,
         "created_at": row.created_at.isoformat() if row.created_at else None,
         "activated_at": row.activated_at.isoformat() if row.activated_at else None,
     }
