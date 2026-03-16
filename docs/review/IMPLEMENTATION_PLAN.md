@@ -374,45 +374,30 @@ the platform.
 
 ### 5.1 Implement `predict_case_duration` tool 🟢
 
-**File:** `services/api/app/tools/predict_case_duration.py` (currently referenced but empty)
+**File:** `services/api/app/tools/predict_case_duration.py`
 
-- [ ] **5.1.1** — Define the tool input schema:
-  ```python
-  class PredictCaseDurationInput(BaseModel):
-      case_type: str          # e.g. "land_dispute", "criminal", "family"
-      parties_count: int
-      complexity: str         # "low" | "medium" | "high"
-      court: str              # e.g. "High Court Nairobi"
-  ```
+- [x] **5.1.1** — Define the tool input schema (JSON string with case_type, court,
+  parties_count, complexity, description).
 
-- [ ] **5.1.2** — Implement the prediction logic. MVP approach: query Neo4j for historical cases
-  matching `case_type` and `court`, compute median duration from the `date` fields. Return
-  `{estimated_months: int, confidence: float, similar_cases_count: int}`.
+- [x] **5.1.2** — Implemented via two-step pipeline: Qdrant analogy retrieval (embed
+  case attributes → search kenya_law_reports for up to 5 similar cases) then Ollama
+  LLM synthesis producing estimated_months_min/max, confidence, key_factors, risk_level,
+  summary.
 
-- [ ] **5.1.3** — Wire the tool into the tool node registry in
-  `agents/nodes/tool.py`:
-  ```python
-  TOOLS = {
-      "calculator": calculator_tool,
-      "predict_case_duration": predict_case_duration_tool,
-  }
-  ```
+- [x] **5.1.3** — Wired into `_TOOL_REGISTRY` in `agents/nodes/tool.py`.
 
-- [ ] **5.1.4** — Update the planner system prompt (`nodes/planner.py`) to know about
-  `predict_case_duration`: add it to the list of available tools with a description.
+- [x] **5.1.4** — Updated `_SYSTEM_PROMPT` in `nodes/planner.py` with tool name and
+  input key descriptions.
 
 ---
 
-### 5.2 Add `POST /api/v1/predict/case-duration` route 🟢
+### 5.2 Add `POST /api/v1/predict` route 🟢
 
-**File:** `services/api/app/routes/predict.py` (new file)
+**File:** `services/api/app/routes/predict.py`
 
-- [ ] **5.2.1** — Create the route with a `PredictCaseDurationRequest` Pydantic model.
+- [x] **5.2.1** — Created with `PredictionRequest` and `PredictionReport` Pydantic models.
 
-- [ ] **5.2.2** — Register the router in `main.py`:
-  ```python
-  app.include_router(predict.router, prefix="/api/v1/predict", tags=["Predict"])
-  ```
+- [x] **5.2.2** — Registered in `main.py`: `prefix="/api/v1/predict", tags=["Predict"]`.
 
 - [ ] **5.2.3** — Add the endpoint to `API_REFERENCE.md`.
 
@@ -422,21 +407,12 @@ the platform.
 
 ### 5.3 Add `prediction_history` table 🟢
 
-- [ ] **5.3.1** — Add `PredictionHistory` ORM model to `memory/postgres.py`:
-  ```sql
-  CREATE TABLE prediction_history (
-      id            SERIAL PRIMARY KEY,
-      user_id       VARCHAR NOT NULL,
-      case_type     VARCHAR(100) NOT NULL,
-      court         VARCHAR(200) NOT NULL,
-      input_json    JSON NOT NULL,
-      predicted_months INTEGER,
-      confidence    FLOAT,
-      created_at    TIMESTAMP DEFAULT now()
-  )
-  ```
+- [x] **5.3.1** — Added `PredictionHistory` ORM model to `memory/postgres.py` with columns:
+  id, user_id, case_type, court, complexity, parties_count, estimated_months_min/max,
+  confidence, risk_level, report (JSON), created_at.
 
-- [ ] **5.3.2** — Add `save_prediction` and `get_user_predictions` methods.
+- [x] **5.3.2** — Added `save_prediction` and `get_user_predictions` methods plus
+  `_prediction_to_dict` serialiser.
 
 - [ ] **5.3.3** — Update `DATA_MODEL.md` with the new table.
 
