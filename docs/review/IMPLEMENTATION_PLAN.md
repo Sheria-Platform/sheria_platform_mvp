@@ -138,48 +138,43 @@ and chat endpoints return hollow AI responses. This is the highest-impact unbloc
 
 ---
 
-### 2.1 Run the data scraper 🟡
+### 2.1 Run the data scraper 🟢
 
-- [ ] **2.1.1** — Review and run `data_scrapper/data_scrapper.py` targeting Kenya Law Reports
+- [x] **2.1.1** — Review and run `data_scrapper/data_scrapper.py` targeting Kenya Law Reports
   (Supreme Court, Court of Appeal, High Court). Verify output lands in `kenya_law_data/`.
 
-- [ ] **2.1.2** — Validate scraped files: count PDFs/HTMLs, spot-check 3-5 documents for
+- [x] **2.1.2** — Validate scraped files: count PDFs/HTMLs, spot-check 3-5 documents for
   readable text (not image-only scans).
 
-- [ ] **2.1.3** — Document the scraper run in a `data_scrapper/README.md`: target URL, date run,
+- [x] **2.1.3** — Document the scraper run in a `data_scrapper/README.md`: target URL, date run,
   counts, any known gaps.
 
 ---
 
-### 2.2 Upload to MinIO and trigger ingestion 🟡
+### 2.2 Upload to MinIO and trigger ingestion 🟢
 
-- [ ] **2.2.1** — Start the full Docker Compose stack (`make up`). Confirm all 10 services healthy:
+- [x] **2.2.1** — Start the full Docker Compose stack (`make up`). Confirm all 10 services healthy:
   ```bash
   curl http://localhost:8000/health
   ```
 
-- [ ] **2.2.2** — Run the ingestion script:
-  ```bash
-  python testExample/minio_ingestion.py
-  ```
-  Monitor logs for chunk counts, embedding counts, and Neo4j node creation.
+- [x] **2.2.2** — Run the ingestion pipeline via `pipelines/ingestion/server.py`
+  (`POST /ingest/trigger` or `POST /ingest/upload`). The pipeline streams files from MinIO
+  in batches of 20, embeds via Ollama (`nomic-embed-text` at `192.168.214.21:11434`), and
+  indexes to Qdrant + Neo4j. `testExample/minio_ingestion.py` was replaced by this server.
 
-- [ ] **2.2.3** — Verify data landed in Qdrant:
-  ```bash
-  curl http://localhost:6333/collections/kenya_law_reports
-  # Check "vectors_count" > 0
-  ```
+- [x] **2.2.3** — Verified data landed in Qdrant (`QDRANT_VECTOR_SIZE=768`,
+  `QDRANT_COLLECTION=kenya_law_reports`, host `192.168.214.21:6333`).
 
-- [ ] **2.2.4** — Verify data landed in Neo4j. Open `http://localhost:7474` and run:
-  ```cypher
-  MATCH (c:Case) RETURN count(c)
-  ```
+- [x] **2.2.4** — Verified data landed in Neo4j (`bolt://192.168.214.21:7687`).
+  Graph extraction used `qwen3:8b` with JSON-constrained decoding for entity/relation
+  extraction (Case, Judge, Principle, Statute nodes; CITES/OVERRULES/DISTINGUISHES/APPLIES edges).
 
 ---
 
-### 2.3 Smoke-test the RAG pipeline 🟡
+### 2.3 Smoke-test the RAG pipeline 🟢
 
-- [ ] **2.3.1** — Login as admin, send a legal research query, assert non-empty `citations` in
+- [x] **2.3.1** — Login as admin, send a legal research query, assert non-empty `citations` in
   the response:
   ```bash
   curl -X POST http://localhost:8000/api/v1/legal-research \
@@ -189,7 +184,7 @@ and chat endpoints return hollow AI responses. This is the highest-impact unbloc
   ```
   Expected: `citations` list is non-empty; `content` references real case citations.
 
-- [ ] **2.3.2** — Test the chat endpoint against the populated corpus:
+- [x] **2.3.2** — Test the chat endpoint against the populated corpus:
   ```bash
   curl -X POST http://localhost:8000/api/v1/chat/stream \
     -H "Authorization: Bearer <token>" \
@@ -197,7 +192,7 @@ and chat endpoints return hollow AI responses. This is the highest-impact unbloc
     -d '{"message": "Explain vicarious liability in Kenyan case law", "session_id": "test-001"}'
   ```
 
-- [ ] **2.3.3** — Test jurisdiction filter: send a legal research query with
+- [x] **2.3.3** — Test jurisdiction filter: send a legal research query with
   `"jurisdiction": ["Supreme Court"]` and confirm results only contain Supreme Court cases.
 
 ---
