@@ -51,6 +51,7 @@ from services.api.app.routes import (
     health,
     history,
     legal_research,
+    predict,
     upload,
     verify,
 )
@@ -298,6 +299,7 @@ app.include_router(
     tags=["Legal Research"],
 )
 app.include_router(verify.router, prefix="/api/v1/verify", tags=["Verify"])
+app.include_router(predict.router, prefix="/api/v1/predict", tags=["Predict"])
 
 # ── Prometheus Metrics Endpoint ───────────────────────────────────────────
 # Mounted as a sub-application so prometheus_client handles content

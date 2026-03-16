@@ -56,9 +56,14 @@ Analyze the user's query and conversation history. Decide the next action:
 
 3. "tool_use"       — Requests requiring computation or structured external data:
                        - Case duration prediction or delay risk assessment
+                         (tool: predict_case_duration — inputs: case_type, court,
+                          parties_count, complexity, description)
                        - Judge workload analytics
                        - Document authenticity verification (court orders, title deeds)
+                         (tool: verify_document — inputs: document_text, document_type,
+                          case_number)
                        - Mathematical or statistical calculations
+                         (tool: calculator — inputs: expression string)
 
 When writing "refined_query":
 - Resolve coreferences using conversation history ("that case" → full case name and citation)
