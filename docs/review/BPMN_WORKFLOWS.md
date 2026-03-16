@@ -175,7 +175,7 @@ flowchart TD
     L --> M[PLANNER NODE\nOllama JSON mode temp=0.0]
     M --> N{Route decision}
 
-    N -- direct_answer --> R[RESPONDER NODE\nOllama llama3.3 temp=0.3]
+    N -- direct_answer --> R[RESPONDER NODE\nOllama qwen3:8b temp=0.3]
     N -- tool_use --> O[TOOL NODE\nExecute tool function]
     O --> R
 
@@ -187,7 +187,7 @@ flowchart TD
     P3 --> R
 
     R --> S[Build IRAC prompt\nIssue-Rule-Application-Conclusion]
-    S --> T[Stream response tokens\nllama3.3 max_tokens=1024]
+    S --> T[Stream response tokens\nqwen3:8b max_tokens=1024]
     T --> U[NDJSON stream to client\nevent=answer]
 
     U --> V[Background Task 1\nSave to chat_history PostgreSQL]
@@ -244,7 +244,7 @@ flowchart TD
     <serviceTask id="Task_Tool" name="TOOL NODE\nExecute tool function"/>
 
     <!-- Responder Node -->
-    <serviceTask id="Task_Responder" name="RESPONDER NODE\nBuild IRAC prompt\nOllama llama3.3 (temp=0.3)"/>
+    <serviceTask id="Task_Responder" name="RESPONDER NODE\nBuild IRAC prompt\nOllama qwen3:8b (temp=0.3)"/>
     <serviceTask id="Task_StreamAnswer" name="Stream Answer to Client\n(NDJSON events)"/>
 
     <!-- Background Tasks -->

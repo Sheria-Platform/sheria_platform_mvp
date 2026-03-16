@@ -50,7 +50,7 @@
 │  │PostgreSQL│  │  │  │ Ollama  │  │  │  │MinIO │  │  │  │ Redis  │  │
 │  │ Port 5432│  │  │  │Port11434│  │  │  │ 9000 │  │  │  │  6379  │  │
 │  └──────────┘  │  │  └─────────┘  │  │  └──────┘  │  │  └────────┘  │
-│                │  │    llama3.3   │  │            │  │              │
+│                │  │   qwen3:8b    │  │            │  │              │
 │  ┌──────────┐  │  │  nomic-embed  │  └────────────┘  └──────────────┘
 │  │  Qdrant  │  │  └───────────────┘
 │  │6333/6334 │  │
@@ -328,7 +328,7 @@ Semantic Cache Check (Qdrant)
               │
               ├──→ Responder Node
               │     │ Build IRAC prompt (Issue/Rule/Application/Conclusion)
-              │     │ Ollama llama3.3 (temperature=0.3, max_tokens=1024)
+              │     │ Ollama qwen3:8b (temperature=0.3, max_tokens=1024)
               │     │ Stream tokens to client
               │     │
               │     └──→ END

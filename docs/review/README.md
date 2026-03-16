@@ -53,7 +53,7 @@ The Sheria Platform MVP is an **AI-powered judicial intelligence platform** for 
 | Layer | Technology | Version |
 |-------|-----------|---------|
 | API Framework | FastAPI | Latest |
-| LLM Inference | Ollama + llama3.3 | — |
+| LLM Inference | Ollama + qwen3:8b | — |
 | Embedding Model | nomic-embed-text (768-dim) | — |
 | Agent Orchestration | LangGraph | — |
 | Vector DB | Qdrant | v1.7.3 |

@@ -92,7 +92,7 @@ class Settings(BaseSettings):
     # Ollama (LLM & Embeddings)                                             #
     # ------------------------------------------------------------------ #
     OLLAMA_BASE_URL: str = "http://ollama:11434"
-    OLLAMA_LLM_MODEL: str = "llama3.3"
+    OLLAMA_LLM_MODEL: str = "qwen3:8b"
     OLLAMA_EMBEDDING_MODEL: str = "nomic-embed-text"
     OLLAMA_TIMEOUT: int = 60  # seconds
 

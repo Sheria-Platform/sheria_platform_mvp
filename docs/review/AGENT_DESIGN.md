@@ -360,7 +360,7 @@ return StreamingResponse(
 | Planner LLM call (Ollama) | 500ms-2s | JSON mode, temp=0 |
 | Vector search (Qdrant) | 20-50ms | Top-5, cosine |
 | Graph search (Neo4j) | 50-200ms | Fulltext + 1-hop |
-| Responder LLM streaming (Ollama) | 2-8s | llama3.3, 1024 tokens |
+| Responder LLM streaming (Ollama) | 2-8s | qwen3:8b, 1024 tokens |
 | **Total (cache miss)** | **3-11s** | TTFB ~3s (status events), full response 6-11s |
 | **Total (cache hit)** | **< 100ms** | Embed + search + stream |
 
