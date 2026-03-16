@@ -1,12 +1,12 @@
 # services/api/app/routes/verify.py
-"""Sheria Verify — court document authentication endpoint.
+"""Sheria Verify -- court document authentication endpoint.
 
 POST /api/v1/verify
     Accepts a multipart PDF upload, extracts its text with pypdf,
     runs the ``verify_document`` tool (3-step LLM + Qdrant pipeline),
     and returns a ``VerificationReport``.
 
-No streaming — document verification is a synchronous request/response.
+No streaming -- document verification is a synchronous request/response.
 """
 
 import json
@@ -26,8 +26,8 @@ from pydantic import BaseModel
 
 from services.api.app.auth.jwt import get_current_user
 from services.api.app.config import settings
-from services.api.app.dependencies import get_memory
-from services.api.app.memory.postgres import PostgresMemory
+from services.api.app.dependencies import get_verification_repo
+from services.api.app.memory.verification_repository import VerificationRepository
 from services.api.app.tools.verify_document import verify_document
 
 logger = logging.getLogger(__name__)
@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-# ── Response schema ───────────────────────────────────────────────────────────
+# -- Response schema -----------------------------------------------------------
 
 
 class VerificationCheck(BaseModel):
@@ -65,14 +65,14 @@ class VerificationActivity(BaseModel):
     created_at: str
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# -- Helpers -------------------------------------------------------------------
 
 
 def _extract_text_from_pdf(pdf_bytes: bytes) -> str:
     """Extract plain text from PDF bytes using pypdf.
 
     Tries the standard text-layer extraction.  If that yields nothing
-    (scanned/image-only PDF), returns an empty string — the LLM steps
+    (scanned/image-only PDF), returns an empty string -- the LLM steps
     will still run but will note they could not read the document.
 
     Args:
@@ -99,7 +99,7 @@ def _extract_text_from_pdf(pdf_bytes: bytes) -> str:
         raise ValueError(f"Could not parse PDF: {exc}") from exc
 
 
-# ── Endpoint ──────────────────────────────────────────────────────────────────
+# -- Endpoint ------------------------------------------------------------------
 
 
 @router.post(
@@ -124,7 +124,7 @@ async def verify_court_document(
         description="Case reference number as it appears on the document",
     ),
     user: dict = Depends(get_current_user),
-    memory: PostgresMemory = Depends(get_memory),
+    memory: VerificationRepository = Depends(get_verification_repo),
 ) -> VerificationReport:
     """Authenticate a court document and return a verification report.
 
@@ -153,7 +153,7 @@ async def verify_court_document(
         },
     )
 
-    # ── Read & validate PDF ───────────────────────────────────────────────
+    # -- Read & validate PDF ---------------------------------------------------
     pdf_bytes = await file.read()
 
     _max_bytes = settings.MAX_PDF_UPLOAD_MB * 1024 * 1024
@@ -182,11 +182,11 @@ async def verify_court_document(
 
     if not document_text:
         logger.warning(
-            "No text extracted from PDF — likely a scanned image document",
+            "No text extracted from PDF -- likely a scanned image document",
             extra={"upload_filename": file.filename},
         )
 
-    # ── Run verification pipeline ─────────────────────────────────────────
+    # -- Run verification pipeline ---------------------------------------------
     tool_input = json.dumps(
         {
             "document_text": document_text,
@@ -225,7 +225,7 @@ async def verify_court_document(
     return report
 
 
-# ── History endpoint ───────────────────────────────────────────────────────────
+# -- History endpoint ----------------------------------------------------------
 
 
 @router.get(
@@ -236,13 +236,13 @@ async def verify_court_document(
 )
 async def get_verification_history(
     user: dict = Depends(get_current_user),
-    memory: PostgresMemory = Depends(get_memory),
+    memory: VerificationRepository = Depends(get_verification_repo),
 ) -> list[VerificationActivity]:
     """Return verification activity records for the current user.
 
     Args:
         user:   Authenticated user from JWT.
-        memory: Postgres memory dependency.
+        memory: Verification repository dependency.
 
     Returns:
         List of verification activity dicts, newest first (up to 50).

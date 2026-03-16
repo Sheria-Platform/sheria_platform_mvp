@@ -15,9 +15,9 @@ from services.api.app.agents.state import AgentState
 from services.api.app.auth.jwt import get_current_user
 from services.api.app.cache.semantic import SemanticCache
 from services.api.app.clients.ollama_client import OllamaClient
-from services.api.app.dependencies import get_llm_client, get_memory, get_semantic_cache
+from services.api.app.dependencies import get_chat_repo, get_llm_client, get_semantic_cache
 from services.api.app.logging import bind_context
-from services.api.app.memory.postgres import PostgresMemory
+from services.api.app.memory.chat_repository import ChatRepository
 from services.api.app.streaming import iter_agent_events
 
 router = APIRouter()
@@ -41,7 +41,7 @@ async def chat_stream(
     background_tasks: BackgroundTasks,
     user: dict = Depends(get_current_user),
     cache: SemanticCache = Depends(get_semantic_cache),
-    memory: PostgresMemory = Depends(get_memory),
+    memory: ChatRepository = Depends(get_chat_repo),
     llm: OllamaClient = Depends(get_llm_client),
 ):
     """
@@ -114,7 +114,7 @@ async def chat_stream(
         tool_choice="",
         tool_input="",
         query_vector=query_vector or [],  # reuse embedding from cache check
-        jurisdiction_filter=[],  # not used by generic chat — legal-research route only
+        jurisdiction_filter=[],  # not used by generic chat -- legal-research route only
         citations=[],
     )
 

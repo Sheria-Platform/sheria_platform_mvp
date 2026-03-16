@@ -1,5 +1,5 @@
 # services/api/app/routes/predict.py
-"""Sheria Predict — case duration forecasting endpoint.
+"""Sheria Predict -- case duration forecasting endpoint.
 
 POST /api/v1/predict
     Accepts a JSON body with case attributes, runs the ``predict_case_duration``
@@ -9,7 +9,7 @@ POST /api/v1/predict
 GET /api/v1/predict/history
     Returns the authenticated user's prediction history, newest first.
 
-No streaming — prediction is a synchronous request/response.
+No streaming -- prediction is a synchronous request/response.
 """
 
 import json
@@ -19,8 +19,8 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
 from services.api.app.auth.jwt import get_current_user
-from services.api.app.dependencies import get_memory
-from services.api.app.memory.postgres import PostgresMemory
+from services.api.app.dependencies import get_prediction_repo
+from services.api.app.memory.prediction_repository import PredictionRepository
 from services.api.app.tools.predict_case_duration import predict_case_duration
 
 logger = logging.getLogger(__name__)
@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-# ── Request / Response models ─────────────────────────────────────────────────
+# -- Request / Response models -------------------------------------------------
 
 
 class PredictionRequest(BaseModel):
@@ -87,7 +87,7 @@ class PredictionActivity(BaseModel):
     created_at: str
 
 
-# ── Endpoints ──────────────────────────────────────────────────────────────────
+# -- Endpoints -----------------------------------------------------------------
 
 
 @router.post(
@@ -104,7 +104,7 @@ async def predict_duration(
     request: PredictionRequest,
     background_tasks: BackgroundTasks,
     user: dict = Depends(get_current_user),
-    memory: PostgresMemory = Depends(get_memory),
+    memory: PredictionRepository = Depends(get_prediction_repo),
 ) -> PredictionReport:
     """Forecast how long a court case is likely to take.
 
@@ -112,7 +112,7 @@ async def predict_duration(
         request:          Case attributes from the request body.
         background_tasks: FastAPI background task queue.
         user:             Authenticated user from JWT.
-        memory:           Postgres memory dependency.
+        memory:           Prediction repository dependency.
 
     Returns:
         ``PredictionReport`` with duration range, confidence, risk level,
@@ -182,13 +182,13 @@ async def predict_duration(
 )
 async def get_prediction_history(
     user: dict = Depends(get_current_user),
-    memory: PostgresMemory = Depends(get_memory),
+    memory: PredictionRepository = Depends(get_prediction_repo),
 ) -> list[PredictionActivity]:
     """Return prediction records for the current user.
 
     Args:
         user:   Authenticated user from JWT.
-        memory: Postgres memory dependency.
+        memory: Prediction repository dependency.
 
     Returns:
         List of prediction dicts, newest first (up to 50).

@@ -14,7 +14,8 @@ from qdrant_client.http.models import Distance, VectorParams
 
 from services.api.app.clients.qdrant import qdrant_client
 from services.api.app.config import settings
-from services.api.app.memory.postgres import Base, engine, postgres_memory
+from services.api.app.memory.models import Base, engine
+from services.api.app.memory.user_repository import user_repository
 
 logger = logging.getLogger(__name__)
 
@@ -25,10 +26,10 @@ async def create_db_tables() -> None:
     """Create all database tables and apply lightweight column migrations.
 
     Runs ``CREATE TABLE IF NOT EXISTS`` for every SQLAlchemy ORM model
-    registered under ``Base``.  Safe to call on every startup — existing
+    registered under ``Base``.  Safe to call on every startup -- existing
     tables are left untouched.
 
-    Also applies idempotent ``ALTER TABLE … ADD COLUMN IF NOT EXISTS``
+    Also applies idempotent ``ALTER TABLE ... ADD COLUMN IF NOT EXISTS``
     statements for columns added after the initial schema was deployed.
     """
     async with engine.begin() as conn:
@@ -52,7 +53,7 @@ async def ensure_qdrant_collections() -> None:
     """Create required Qdrant collections if they do not already exist.
 
     Collections created:
-    - ``semantic_cache`` — Q&A embedding pairs for semantic deduplication
+    - ``semantic_cache`` -- Q&A embedding pairs for semantic deduplication
       (cosine distance, threshold 0.95 in cache/semantic.py).
 
     Also validates the ``kenya_law_reports`` collection dimension against
@@ -97,14 +98,14 @@ async def seed_admin() -> None:
     can be rotated without code changes.  The seed is skipped when any
     admin already exists, making it safe to call on every startup.
     """
-    import bcrypt  # use bcrypt directly — passlib 1.7.4 is incompatible with bcrypt>=4
+    import bcrypt  # use bcrypt directly -- passlib 1.7.4 is incompatible with bcrypt>=4
 
     hashed = bcrypt.hashpw(
         settings.ADMIN_PASSWORD.encode("utf-8"),
         bcrypt.gensalt(),
     ).decode("utf-8")
 
-    created = await postgres_memory.seed_admin(
+    created = await user_repository.seed_admin(
         username=settings.ADMIN_USERNAME,
         email=settings.ADMIN_EMAIL,
         full_name=settings.ADMIN_FULL_NAME,
@@ -116,4 +117,4 @@ async def seed_admin() -> None:
             extra={"username": settings.ADMIN_USERNAME},
         )
     else:
-        logger.info("Admin account already exists — skipping seed")
+        logger.info("Admin account already exists -- skipping seed")

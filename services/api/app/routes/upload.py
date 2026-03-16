@@ -25,7 +25,7 @@ from pydantic import BaseModel
 
 from services.api.app.auth.jwt import get_current_user
 from services.api.app.config import settings
-from services.api.app.memory.postgres import postgres_memory
+from services.api.app.memory.ingestion_repository import ingestion_repository
 
 router = APIRouter()
 
@@ -151,7 +151,7 @@ async def generate_upload_url(
 
 
 # ---------------------------------------------------------------------------
-# In-memory job store — live status cache; persisted to PostgreSQL for durability
+# In-memory job store -- live status cache; persisted to PostgreSQL for durability
 # ---------------------------------------------------------------------------
 _jobs: dict[str, dict[str, Any]] = {}
 _jobs_lock = threading.Lock()
@@ -179,7 +179,7 @@ def _run_ingest(job_id: str, bucket: str, s3_key: str, user_id: str) -> None:
     with _jobs_lock:
         _jobs[job_id]["status"] = "running"
         _jobs[job_id]["started_at"] = time.time()
-    asyncio.run(postgres_memory.update_ingestion_job(job_id, status="running"))
+    asyncio.run(ingestion_repository.update_ingestion_job(job_id, status="running"))
     try:
         from pipelines.ingestion.main import main as ingest_main  # lazy import
 
@@ -194,7 +194,7 @@ def _run_ingest(job_id: str, bucket: str, s3_key: str, user_id: str) -> None:
                 completed - (_jobs[job_id].get("started_at") or completed), 1
             )
         asyncio.run(
-            postgres_memory.update_ingestion_job(
+            ingestion_repository.update_ingestion_job(
                 job_id,
                 status=final_status,
                 completed_at=datetime.utcfromtimestamp(completed),
@@ -211,7 +211,7 @@ def _run_ingest(job_id: str, bucket: str, s3_key: str, user_id: str) -> None:
             _jobs[job_id]["completed_at"] = completed
             _jobs[job_id]["duration_s"] = duration
         asyncio.run(
-            postgres_memory.update_ingestion_job(
+            ingestion_repository.update_ingestion_job(
                 job_id,
                 status="failed",
                 completed_at=datetime.utcfromtimestamp(completed),
@@ -252,7 +252,7 @@ async def trigger_ingest(
             "error": "",
         }
 
-    await postgres_memory.create_ingestion_job(
+    await ingestion_repository.create_ingestion_job(
         job_id=job_id,
         user_id=user["id"],
         filename=filename,
@@ -277,7 +277,7 @@ async def trigger_ingest(
 async def list_jobs(
     user: dict = Depends(get_current_user),
 ) -> list[JobStatus]:
-    rows = await postgres_memory.get_all_ingestion_jobs(user["id"])
+    rows = await ingestion_repository.get_all_ingestion_jobs(user["id"])
     return [JobStatus(**r) for r in rows]
 
 
@@ -297,7 +297,7 @@ async def get_job_status(
             **{k: v for k, v in job.items() if k != "user_id"},
         )
     # Fall back to DB for completed / pre-restart jobs
-    row = await postgres_memory.get_ingestion_job(job_id, user["id"])
+    row = await ingestion_repository.get_ingestion_job(job_id, user["id"])
     if not row:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Job not found"

@@ -2,11 +2,11 @@
 """User registration, login, and account activation endpoints.
 
 Registration workflow:
-    1. Staff submits POST /register  → status=pending
-    2. Admin reviews GET /pending → approves via POST /approve/{id}
-       → status=approved, activation_token generated
-    3. Staff uses token at POST /activate to set password → status=active
-    4. Staff logs in via POST /login → receives JWT
+    1. Staff submits POST /register  -> status=pending
+    2. Admin reviews GET /pending -> approves via POST /approve/{id}
+       -> status=approved, activation_token generated
+    3. Staff uses token at POST /activate to set password -> status=active
+    4. Staff logs in via POST /login -> receives JWT
 """
 
 import asyncio
@@ -22,7 +22,7 @@ from services.api.app.auth.blacklist import blacklist_user_tokens, store_user_jt
 from services.api.app.auth.jwt import require_admin
 from services.api.app.config import settings
 from services.api.app.limiter import limiter
-from services.api.app.memory.postgres import postgres_memory
+from services.api.app.memory.user_repository import user_repository
 from services.api.app.utils.email import send_activation_email
 
 router = APIRouter()
@@ -57,7 +57,7 @@ def _create_token(user_id: str, username: str, role: str, court: str, jti: str) 
     )
 
 
-# ── Request / Response models ─────────────────────────────────────────────
+# -- Request / Response models ------------------------------------------------
 
 
 class RegisterRequest(BaseModel):
@@ -94,7 +94,7 @@ _SAFE_STATUS_TRANSITIONS: dict[str, set[str]] = {
 }
 
 
-# ── Endpoints ─────────────────────────────────────────────────────────────
+# -- Endpoints -----------------------------------------------------------------
 
 
 @router.post("/register", status_code=status.HTTP_201_CREATED)
@@ -106,15 +106,15 @@ async def register(req: RegisterRequest) -> dict:
             detail=f"Invalid role. Choose from: {', '.join(sorted(_REQUESTABLE_ROLES))}",
         )
     existing_username, existing_email = await asyncio.gather(
-        postgres_memory.get_user_by_username(req.username),
-        postgres_memory.get_user_by_email(req.email),
+        user_repository.get_user_by_username(req.username),
+        user_repository.get_user_by_email(req.email),
     )
     if existing_username:
         raise HTTPException(status_code=400, detail="Username already taken")
     if existing_email:
         raise HTTPException(status_code=400, detail="Email already registered")
 
-    await postgres_memory.create_user(
+    await user_repository.create_user(
         username=req.username,
         email=req.email,
         full_name=req.full_name,
@@ -131,7 +131,7 @@ async def register(req: RegisterRequest) -> dict:
 @limiter.limit("5/15minutes")
 async def login(request: Request, req: LoginRequest) -> dict:
     """Authenticate and receive a JWT. Account must be active."""
-    user = await postgres_memory.get_user_by_username(req.username)
+    user = await user_repository.get_user_by_username(req.username)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials"
@@ -191,20 +191,20 @@ async def activate(req: ActivateRequest) -> dict:
             status_code=400, detail="Password must be at least 8 characters"
         )
 
-    user = await postgres_memory.get_user_by_activation_token(req.token)
+    user = await user_repository.get_user_by_activation_token(req.token)
     if not user:
         raise HTTPException(
             status_code=404, detail="Invalid or expired activation token"
         )
 
-    await postgres_memory.activate_user(user["id"], _hash_password(req.password))
+    await user_repository.activate_user(user["id"], _hash_password(req.password))
     return {"message": "Account activated. You can now sign in."}
 
 
 @router.get("/pending")
 async def list_pending(admin: dict = Depends(require_admin)) -> list[dict]:
     """List all pending registration requests. Admin only."""
-    users = await postgres_memory.get_pending_users()
+    users = await user_repository.get_pending_users()
     # Strip sensitive fields before returning
     return [
         {k: v for k, v in u.items() if k not in ("hashed_password", "activation_token")}
@@ -225,7 +225,7 @@ async def approve_user(
     activation_token = str(uuid.uuid4())
     activation_link = f"/activate?token={activation_token}"
 
-    await postgres_memory.approve_user(
+    await user_repository.approve_user(
         user_id=user_id,
         role=req.role,
         activation_token=activation_token,
@@ -233,7 +233,7 @@ async def approve_user(
     )
 
     # Fire-and-forget: email failure never blocks or fails the HTTP response
-    user = await postgres_memory.get_user_by_id(user_id)
+    user = await user_repository.get_user_by_id(user_id)
     if user:
         asyncio.create_task(  # noqa: RUF006
             send_activation_email(
@@ -258,10 +258,10 @@ async def list_users(
     """List all user accounts with an optional ``?status=`` filter. Admin only.
 
     Args:
-        status: Optional filter — ``"pending"``, ``"approved"``,
+        status: Optional filter -- ``"pending"``, ``"approved"``,
             ``"active"``, or ``"suspended"``.  Omit to return all users.
     """
-    users = await postgres_memory.get_users(status=status)
+    users = await user_repository.get_users(status=status)
     return [
         {k: v for k, v in u.items() if k not in ("hashed_password", "activation_token")}
         for u in users
@@ -276,7 +276,7 @@ async def update_user_status(
 ) -> dict:
     """Suspend or reactivate a user account. Admin only.
 
-    Valid transitions: ``active → suspended``, ``suspended → active``.
+    Valid transitions: ``active -> suspended``, ``suspended -> active``.
     All other target statuses or invalid transitions return 400.
     """
     if req.status not in ("active", "suspended"):
@@ -285,7 +285,7 @@ async def update_user_status(
             detail="Invalid target status. Must be 'active' or 'suspended'.",
         )
 
-    user = await postgres_memory.get_user_by_id(user_id)
+    user = await user_repository.get_user_by_id(user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
@@ -296,7 +296,7 @@ async def update_user_status(
             detail=f"Cannot transition from '{current}' to '{req.status}'.",
         )
 
-    await postgres_memory.update_user_status(user_id, req.status)
+    await user_repository.update_user_status(user_id, req.status)
     if req.status == "suspended":
         await blacklist_user_tokens(user_id)
     return {
