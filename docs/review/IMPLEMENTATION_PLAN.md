@@ -25,7 +25,7 @@ These must be resolved before this branch is merged into `main`.
 
 ---
 
-### 1.1 Resolve embedding dimension 🔴
+### 1.1 Resolve embedding dimension 🟢
 
 **Problem:** `main.py:58` creates the `semantic_cache` Qdrant collection with `_EMBEDDING_DIM = 768`.
 All prior code and the ingestion pipeline assumed `2560` (nomic-embed-text).
@@ -33,43 +33,43 @@ If the actual model output is `2560`, every vector insert and search against `se
 
 **Tasks:**
 
-- [ ] **1.1.1** — Confirm the actual output dimension of `nomic-embed-text` in the running Ollama instance:
+- [x] **1.1.1** — Confirm the actual output dimension of `nomic-embed-text` in the running Ollama instance:
   ```bash
   docker exec -it ollama ollama show nomic-embed-text --modelinfo | grep "embedding length"
   ```
   Expected result: either `768` or `2560`. Note the value.
 
-- [ ] **1.1.2** — If actual dimension is `2560`, update `main.py:58`:
+- [x] **1.1.2** — If actual dimension is `2560`, update `main.py:58`:
   ```python
   # services/api/main.py
   _EMBEDDING_DIM = 2560   # was 768 — corrected to match nomic-embed-text actual output
   ```
   Drop and recreate the `semantic_cache` collection (it will be empty in dev — safe to recreate).
 
-- [ ] **1.1.3** — If actual dimension is `768`, confirm the ingestion pipeline's Qdrant indexing step
+- [x] **1.1.3** — If actual dimension is `768`, confirm the ingestion pipeline's Qdrant indexing step
   (`pipelines/ingestion/indexing/qdrant_indexing.py`) also uses `768` when creating the
   `kenya_law_reports` collection. Both collections must use the same dimension as the model output.
 
-- [ ] **1.1.4** — Add a startup assertion in `_ensure_qdrant_collections()` (`main.py:114`) that
+- [x] **1.1.4** — Add a startup assertion in `_ensure_qdrant_collections()` (`main.py:114`) that
   verifies the existing `kenya_law_reports` collection dimension matches `_EMBEDDING_DIM`, and logs
   a clear error (not a silent mismatch) if they differ.
 
 ---
 
-### 1.2 Fix CORS — remove hardcoded LAN IP 🔴
+### 1.2 Fix CORS — remove hardcoded LAN IP 🟢
 
 **Problem:** `main.py:240-248` hardcodes `192.168.100.104` — a specific developer's LAN address.
 This breaks in every other environment and must not reach staging or production.
 
 **Tasks:**
 
-- [ ] **1.2.1** — Add `ALLOWED_ORIGINS` to `services/api/app/config.py` (`Settings` class):
+- [x] **1.2.1** — Add `ALLOWED_ORIGINS` to `services/api/app/config.py` (`Settings` class):
   ```python
   # services/api/app/config.py
   ALLOWED_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000"
   ```
 
-- [ ] **1.2.2** — Update `main.py:238-249` to read from settings:
+- [x] **1.2.2** — Update `main.py:238-249` to read from settings:
   ```python
   app.add_middleware(
       CORSMiddleware,
@@ -80,24 +80,24 @@ This breaks in every other environment and must not reach staging or production.
   )
   ```
 
-- [ ] **1.2.3** — Add `ALLOWED_ORIGINS` to `.env.example` with the dev default:
+- [x] **1.2.3** — Add `ALLOWED_ORIGINS` to `.env.example` with the dev default:
   ```env
   ALLOWED_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
   ```
 
-- [ ] **1.2.4** — Add `ALLOWED_ORIGINS` to the `sheria-api` service `environment:` block in
+- [x] **1.2.4** — Add `ALLOWED_ORIGINS` to the `sheria-api` service `environment:` block in
   `docker-compose.yml`.
 
 ---
 
-### 1.3 Add PDF upload size limit to the verify endpoint 🔴
+### 1.3 Add PDF upload size limit to the verify endpoint 🟢
 
 **Problem:** `routes/verify.py:139` calls `await file.read()` with no size guard. A malformed
 multi-GB PDF (or a deliberate OOM attack) will exhaust container memory.
 
 **Tasks:**
 
-- [ ] **1.3.1** — Add a size check immediately after `pdf_bytes = await file.read()` in
+- [x] **1.3.1** — Add a size check immediately after `pdf_bytes = await file.read()` in
   `routes/verify.py:139`. Reject files larger than 20 MB (configurable):
   ```python
   MAX_PDF_BYTES = 20 * 1024 * 1024  # 20 MB
@@ -108,25 +108,25 @@ multi-GB PDF (or a deliberate OOM attack) will exhaust container memory.
       )
   ```
 
-- [ ] **1.3.2** — Add `MAX_PDF_UPLOAD_MB: int = 20` to `config.py` so the limit is configurable
+- [x] **1.3.2** — Add `MAX_PDF_UPLOAD_MB: int = 20` to `config.py` so the limit is configurable
   via environment variable without code changes.
 
-- [ ] **1.3.3** — Document the limit in `API_REFERENCE.md` under `POST /api/v1/verify`.
+- [x] **1.3.3** — Document the limit in `API_REFERENCE.md` under `POST /api/v1/verify`.
 
 ---
 
-### 1.4 Confirm `approved_by` is surfaced in admin responses 🟡
+### 1.4 Confirm `approved_by` is surfaced in admin responses 🟢
 
 **Status:** `approved_by` is correctly written in `auth.py:225` (`approved_by=admin["id"]`).
 The column is populated. Remaining gap: the admin user-list response strips it.
 
 **Tasks:**
 
-- [ ] **1.4.1** — Audit `auth.py:258-261` (`list_users` handler). The current strip list only
+- [x] **1.4.1** — Audit `auth.py:258-261` (`list_users` handler). The current strip list only
   removes `hashed_password` and `activation_token`. Confirm `approved_by` is **included** in the
   response (it should be — just verify it is not accidentally excluded).
 
-- [ ] **1.4.2** — Add `approved_by` to the user object in `API_REFERENCE.md` under
+- [x] **1.4.2** — Add `approved_by` to the user object in `API_REFERENCE.md` under
   `GET /api/v1/auth/users` response schema.
 
 ---
