@@ -47,9 +47,9 @@ class VectorDBClient:
         """Verify the Qdrant connection at application startup.
 
         Fetches the collection list as a lightweight health check.
-
-        Raises:
-            Exception: If Qdrant is unreachable or returns an error.
+        Logs a warning on failure but does NOT raise — the app starts
+        regardless so that endpoints unrelated to vector search remain
+        available while Qdrant is temporarily unreachable.
         """
         try:
             collections = await self.client.get_collections()
@@ -58,8 +58,11 @@ class VectorDBClient:
                 len(collections.collections),
             )
         except Exception as exc:
-            logger.error("Qdrant connection failed: %s", exc)
-            raise
+            logger.warning(
+                "Qdrant unavailable at startup — vector search will fail "
+                "until Qdrant is reachable. error=%s",
+                exc,
+            )
 
     async def disconnect(self) -> None:
         """Close the Qdrant connection at application shutdown."""

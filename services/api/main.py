@@ -245,7 +245,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     neo4j_client.connect()
     await redis_client.connect()
     await qdrant_client.connect()
-    await _ensure_qdrant_collections()
+    try:
+        await _ensure_qdrant_collections()
+    except Exception as exc:
+        logger.warning(
+            "Qdrant collection setup skipped — Qdrant unreachable at startup. "
+            "Collections will be created on the next successful connection. error=%s",
+            exc,
+        )
     await ollama_client.start()
     logger.info("All clients initialized successfully")
 
