@@ -1,7 +1,6 @@
 export interface LoginRequest {
   username: string;
   password: string;
-  role: UserRole;
 }
 
 export interface LoginResponse {
@@ -36,9 +35,9 @@ export interface StreamEvent {
 export type PipelineStep = "planner" | "retriever" | "responder";
 
 export interface FeedbackRequest {
-  message_id: string;
+  message_id: number;
   session_id: string;
-  rating: "thumbs_up" | "thumbs_down";
+  score: number; // 1 = thumbs up, -1 = thumbs down
   comment?: string;
 }
 
@@ -50,7 +49,7 @@ export interface UploadPresignRequest {
 export interface UploadPresignResponse {
   upload_url: string;
   file_id: string;
-  expires_in: number;
+  s3_key: string;
 }
 
 export interface HealthResponse {
