@@ -19,6 +19,7 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 
+from services.api.app.auth.blacklist import is_blacklisted
 from services.api.app.config import settings
 
 # Tells Swagger UI which URL issues tokens (informational only)
@@ -79,6 +80,14 @@ async def get_current_user(
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Token expired",
+            )
+
+        jti: str | None = payload.get("jti")
+        if jti and await is_blacklisted(jti):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token has been revoked",
+                headers={"WWW-Authenticate": "Bearer"},
             )
 
         return {

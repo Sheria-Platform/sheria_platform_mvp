@@ -104,6 +104,8 @@ class Settings(BaseSettings):
     # Comma-separated list of allowed CORS origins.
     # Override in production: ALLOWED_ORIGINS=https://sheria.judiciary.go.ke
     ALLOWED_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000"
+    TOKEN_BLACKLIST_TTL_SECONDS: int = 28800  # 8 hours — matches JWT TTL
+    ACTIVATION_TOKEN_TTL_DAYS: int = 7
 
     # ------------------------------------------------------------------ #
     # Embeddings                                                          #
