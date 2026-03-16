@@ -52,9 +52,9 @@ class SemanticCache:
             from qdrant_client.http import models as qmodels
 
             cutoff = time.time() - (effective_max_age * 86400)
-            results = await qdrant_client.client.search(
+            response = await qdrant_client.client.query_points(
                 collection_name="semantic_cache",
-                query_vector=vector,
+                query=vector,
                 limit=1,
                 with_payload=True,
                 score_threshold=threshold,
@@ -67,6 +67,7 @@ class SemanticCache:
                     ]
                 ),
             )
+            results = response.points
 
             if results:
                 logger.info("Semantic Cache Hit! Score: %s", results[0].score)

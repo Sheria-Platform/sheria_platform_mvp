@@ -15,12 +15,23 @@ Returns a ``PredictionReport`` JSON string callable identically from:
 
 import json
 import logging
+import re
 
 from services.api.app.clients.ollama_client import ollama_client
 from services.api.app.clients.ollama_embeddings import embeddings_client
 from services.api.app.clients.qdrant import qdrant_client
 
 logger = logging.getLogger(__name__)
+
+_JSON_FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.DOTALL)
+
+
+def _extract_json(raw: str) -> str:
+    """Strip optional markdown fences and return the inner JSON string."""
+    raw = raw.strip()
+    m = _JSON_FENCE_RE.search(raw)
+    return m.group(1) if m else raw
+
 
 # ── Prompt ────────────────────────────────────────────────────────────────────
 
@@ -141,9 +152,8 @@ async def predict_case_duration(tool_input: str) -> str:
             ],
             temperature=0.1,
             max_tokens=512,
-            json_mode=True,
         )
-        report = json.loads(raw)
+        report = json.loads(_extract_json(raw))
         # Ensure similar_cases_found reflects actual Qdrant result, not LLM hallucination
         report["similar_cases_found"] = similar_cases_found
     except Exception as exc:

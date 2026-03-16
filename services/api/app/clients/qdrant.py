@@ -10,7 +10,7 @@ Example:
     ...     vector=[0.1, 0.2, ...], limit=5
     ... )
     >>> for hit in results:
-    ...     print(hit.payload["text"])
+    ...     print(hit.payload["text"])  # ScoredPoint list
 """
 
 import logging
@@ -102,13 +102,14 @@ class VectorDBClient:
             ... )
             >>> top_text = hits[0].payload["text"]
         """
-        return await self.client.search(
+        result = await self.client.query_points(
             collection_name=settings.QDRANT_COLLECTION,
-            query_vector=vector,
+            query=vector,
             limit=limit,
             with_payload=True,
             query_filter=query_filter,
         )
+        return result.points
 
 
 # Global singleton — lifecycle managed by main.py lifespan
