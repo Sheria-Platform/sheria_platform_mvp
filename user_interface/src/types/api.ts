@@ -110,6 +110,41 @@ export interface VerificationActivity {
   created_at: string;
 }
 
+export type CaseComplexity = "low" | "medium" | "high" | "very_high";
+export type RiskLevel = "low" | "medium" | "high" | "critical";
+
+export interface PredictionRequest {
+  case_type: string;
+  court: string;
+  parties_count: number;
+  complexity: CaseComplexity;
+  description: string;
+}
+
+export interface PredictionReport {
+  estimated_months_min: number;
+  estimated_months_max: number;
+  confidence: number;
+  similar_cases_found: number;
+  key_factors: string[];
+  risk_level: RiskLevel;
+  summary: string;
+}
+
+export interface PredictionActivity {
+  id: number;
+  case_type: string;
+  court: string;
+  complexity: CaseComplexity;
+  parties_count: number;
+  estimated_months_min: number | null;
+  estimated_months_max: number | null;
+  confidence: number | null;
+  risk_level: RiskLevel | null;
+  report: PredictionReport;
+  created_at: string;
+}
+
 export interface RegisterRequest {
   username: string;
   email: string;

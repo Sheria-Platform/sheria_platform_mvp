@@ -26,6 +26,7 @@ import {
   History,
   Users,
   ShieldCheck,
+  TrendingUp,
   PanelLeftClose,
   PanelLeftOpen,
 } from "lucide-react";
@@ -33,6 +34,7 @@ import {
 const NAV_ITEMS = [
   { href: "/chat",    label: "Sheria Ask",       icon: MessageSquarePlus },
   { href: "/verify",  label: "Sheria Verify",    icon: ShieldCheck },
+  { href: "/predict", label: "Sheria Predict",   icon: TrendingUp },
   { href: "/upload",  label: "Sheria Digitize",  icon: FileText },
   { href: "/history", label: "Activity History", icon: History },
   { href: "/health",  label: "System Status",    icon: Activity },
