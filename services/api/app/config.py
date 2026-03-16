@@ -101,6 +101,19 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------ #
     JWT_SECRET_KEY: str  # required — sensitive
     JWT_ALGORITHM: str = "HS256"
+    # Comma-separated list of allowed CORS origins.
+    # Override in production: ALLOWED_ORIGINS=https://sheria.judiciary.go.ke
+    ALLOWED_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000"
+
+    # ------------------------------------------------------------------ #
+    # Embeddings                                                          #
+    # ------------------------------------------------------------------ #
+    EMBEDDING_DIM: int = 768  # Must match OLLAMA_EMBEDDING_MODEL output dimensions
+
+    # ------------------------------------------------------------------ #
+    # File uploads                                                        #
+    # ------------------------------------------------------------------ #
+    MAX_PDF_UPLOAD_MB: int = 20  # Maximum PDF size accepted by /api/v1/verify
 
     # ------------------------------------------------------------------ #
     # Semantic Cache                                                         #

@@ -54,8 +54,8 @@ from services.api.app.routes import (
 
 logger = logging.getLogger(__name__)
 
-# Dimension produced by nomic-embed-text (must match OLLAMA_EMBEDDING_MODEL)
-_EMBEDDING_DIM = 768
+# Embedding dimension — must match OLLAMA_EMBEDDING_MODEL output (configured via EMBEDDING_DIM env var)
+_EMBEDDING_DIM: int = settings.EMBEDDING_DIM
 
 
 # ── Request Logging Middleware ─────────────────────────────────────────────
@@ -132,6 +132,23 @@ async def _ensure_qdrant_collections() -> None:
             ),
         )
         logger.info("Created Qdrant collection: semantic_cache")
+
+    # Validate kenya_law_reports collection dimension if it already exists
+    if "kenya_law_reports" in existing:
+        info = await qdrant_client.client.get_collection("kenya_law_reports")
+        actual_dim = info.config.params.vectors.size
+        if actual_dim != _EMBEDDING_DIM:
+            logger.error(
+                "DIMENSION MISMATCH: kenya_law_reports collection has %d dimensions "
+                "but EMBEDDING_DIM=%d. Vector searches will fail silently. "
+                "Drop and recreate the collection with the correct dimension.",
+                actual_dim,
+                _EMBEDDING_DIM,
+            )
+        else:
+            logger.info(
+                "kenya_law_reports dimension validated: %d", actual_dim
+            )
 
 
 async def _create_db_tables() -> None:
@@ -237,12 +254,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "http://192.168.100.104:3000",
-        "http://0.0.0.0:3000",
-    ],
+    allow_origins=[o.strip() for o in settings.ALLOWED_ORIGINS.split(",") if o.strip()],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

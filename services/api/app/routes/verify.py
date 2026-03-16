@@ -12,10 +12,20 @@ No streaming — document verification is a synchronous request/response.
 import json
 import logging
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    UploadFile,
+    status,
+)
 from pydantic import BaseModel
 
 from services.api.app.auth.jwt import get_current_user
+from services.api.app.config import settings
 from services.api.app.memory.postgres import PostgresMemory, postgres_memory
 from services.api.app.tools.verify_document import verify_document
 
@@ -137,6 +147,16 @@ async def verify_court_document(
 
     # ── Read & validate PDF ───────────────────────────────────────────────
     pdf_bytes = await file.read()
+
+    _max_bytes = settings.MAX_PDF_UPLOAD_MB * 1024 * 1024
+    if len(pdf_bytes) > _max_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=(
+                f"File too large. Maximum allowed size is "
+                f"{settings.MAX_PDF_UPLOAD_MB} MB."
+            ),
+        )
 
     if not pdf_bytes:
         raise HTTPException(

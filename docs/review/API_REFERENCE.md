@@ -184,7 +184,8 @@ List all users with optional filters.
       "court_station": "High Court Nairobi",
       "status": "active",
       "created_at": "2026-03-13T08:00:00Z",
-      "activated_at": "2026-03-13T09:00:00Z"
+      "activated_at": "2026-03-13T09:00:00Z",
+      "approved_by": "admin-user-id"
     }
   ],
   "total": 42
@@ -537,7 +538,10 @@ Upload a PDF court document and receive an authenticity report. The pipeline ext
 
 **Errors:**
 - `400` — Empty file or invalid/unreadable PDF
+- `413` — File exceeds the server's upload limit (`MAX_PDF_UPLOAD_MB`, default **20 MB**)
 - `422` — Verification pipeline raised an unrecoverable error
+
+**File size limit:** Controlled by the `MAX_PDF_UPLOAD_MB` environment variable (default `20`). Override in `.env` or `docker-compose.yml`. Files exceeding the limit are rejected immediately after reading, before any LLM processing.
 
 **Side effects:** Saves result to `verification_activity` table via background task.
 
@@ -656,6 +660,7 @@ All error responses use a consistent format:
 | `403` | Insufficient role / ownership violation |
 | `404` | Resource not found |
 | `409` | Conflict (duplicate username/email) |
+| `413` | Payload too large (PDF exceeds `MAX_PDF_UPLOAD_MB`) |
 | `422` | Pydantic validation failure |
 | `500` | Internal server error |
 | `503` | Service dependency unavailable |
