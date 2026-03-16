@@ -161,9 +161,27 @@ async def _create_db_tables() -> None:
     registered under ``Base`` (``chat_history``, ``ingestion_jobs``,
     ``users``, ``feedback``).  Safe to call on every startup — existing
     tables are left untouched.
+
+    Also applies lightweight column-level migrations (``ALTER TABLE … ADD
+    COLUMN IF NOT EXISTS``) for columns added after the initial schema was
+    created.  Each statement is idempotent so re-running on an up-to-date
+    schema is a no-op.
     """
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # Phase 3 addition: activation token TTL columns
+        await conn.execute(
+            __import__("sqlalchemy").text(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS "
+                "activation_token_expires_at TIMESTAMP WITHOUT TIME ZONE"
+            )
+        )
+        await conn.execute(
+            __import__("sqlalchemy").text(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS "
+                "approved_by VARCHAR"
+            )
+        )
 
 
 async def _seed_admin() -> None:
