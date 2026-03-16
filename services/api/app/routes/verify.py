@@ -26,16 +26,13 @@ from pydantic import BaseModel
 
 from services.api.app.auth.jwt import get_current_user
 from services.api.app.config import settings
-from services.api.app.memory.postgres import PostgresMemory, postgres_memory
+from services.api.app.dependencies import get_memory
+from services.api.app.memory.postgres import PostgresMemory
 from services.api.app.tools.verify_document import verify_document
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-
-def get_memory() -> PostgresMemory:
-    return postgres_memory
 
 
 # ── Response schema ───────────────────────────────────────────────────────────
@@ -55,6 +52,17 @@ class VerificationReport(BaseModel):
     verification_checks: list[VerificationCheck]
     risk_flags: list[str]
     summary: str
+
+
+class VerificationActivity(BaseModel):
+    id: int
+    filename: str
+    document_type: str
+    case_number: str
+    authentic: bool
+    confidence: float
+    report: VerificationReport
+    created_at: str
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -222,13 +230,14 @@ async def verify_court_document(
 
 @router.get(
     "/history",
+    response_model=list[VerificationActivity],
     summary="List past document verifications",
     description="Return the authenticated user's verification history, newest first.",
 )
 async def get_verification_history(
     user: dict = Depends(get_current_user),
     memory: PostgresMemory = Depends(get_memory),
-) -> list[dict]:
+) -> list[VerificationActivity]:
     """Return verification activity records for the current user.
 
     Args:

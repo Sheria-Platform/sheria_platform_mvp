@@ -19,16 +19,13 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
 from services.api.app.auth.jwt import get_current_user
-from services.api.app.memory.postgres import PostgresMemory, postgres_memory
+from services.api.app.dependencies import get_memory
+from services.api.app.memory.postgres import PostgresMemory
 from services.api.app.tools.predict_case_duration import predict_case_duration
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-
-def get_memory() -> PostgresMemory:
-    return postgres_memory
 
 
 # ── Request / Response models ─────────────────────────────────────────────────
@@ -74,6 +71,20 @@ class PredictionReport(BaseModel):
     key_factors: list[str]
     risk_level: str
     summary: str
+
+
+class PredictionActivity(BaseModel):
+    id: int
+    case_type: str
+    court: str
+    complexity: str
+    parties_count: int
+    estimated_months_min: int | None
+    estimated_months_max: int | None
+    confidence: float | None
+    risk_level: str | None
+    report: PredictionReport
+    created_at: str
 
 
 # ── Endpoints ──────────────────────────────────────────────────────────────────
@@ -165,13 +176,14 @@ async def predict_duration(
 
 @router.get(
     "/history",
+    response_model=list[PredictionActivity],
     summary="List past case duration predictions",
     description="Return the authenticated user's prediction history, newest first.",
 )
 async def get_prediction_history(
     user: dict = Depends(get_current_user),
     memory: PostgresMemory = Depends(get_memory),
-) -> list[dict]:
+) -> list[PredictionActivity]:
     """Return prediction records for the current user.
 
     Args:
