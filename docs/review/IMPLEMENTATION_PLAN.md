@@ -285,82 +285,82 @@ Nothing covers the two features added in this branch or the auth flow end-to-end
 
 ---
 
-### 4.1 Unit tests for the verify document tool 🟡
+### 4.1 Unit tests for the verify document tool 🟢
 
 **File:** `tests/unit/test_verify_document.py`
 
-- [ ] **4.1.1** — Test: valid PDF text → pipeline runs all 3 steps → returns authentic=True with
+- [x] **4.1.1** — Test: valid PDF text → pipeline runs all 3 steps → returns authentic=True with
   confidence > 0. Mock `ollama_client` and `qdrant_client`.
 
-- [ ] **4.1.2** — Test: empty text (scanned/image PDF) → pipeline completes without raising →
+- [x] **4.1.2** — Test: empty text (scanned/image PDF) → pipeline completes without raising →
   authentic field is present in result (may be False with low confidence).
 
-- [ ] **4.1.3** — Test: Ollama returns malformed JSON → `verify_document` returns an error dict
+- [x] **4.1.3** — Test: Ollama returns malformed JSON → `verify_document` returns an error dict
   (not an unhandled exception).
 
-- [ ] **4.1.4** — Test: Qdrant search returns zero results for the case number → verification
+- [x] **4.1.4** — Test: Qdrant search returns zero results for the case number → verification
   continues and marks `case_cross_reference` check as `passed=False`.
 
 ---
 
-### 4.2 Integration test for the verify route 🟡
+### 4.2 Integration test for the verify route 🟢
 
 **File:** `tests/integration/test_verify_route.py`
 
-- [ ] **4.2.1** — Test `POST /api/v1/verify`: upload a real small PDF (`test_data/`), assert
+- [x] **4.2.1** — Test `POST /api/v1/verify`: upload a real small PDF (`test_data/`), assert
   response shape matches `VerificationReport` schema (all required fields present).
 
-- [ ] **4.2.2** — Test: upload empty bytes → assert `400 Uploaded file is empty`.
+- [x] **4.2.2** — Test: upload empty bytes → assert `400 Uploaded file is empty`.
 
-- [ ] **4.2.3** — Test: upload a non-PDF file (e.g. plain text with `.pdf` extension) → assert
+- [x] **4.2.3** — Test: upload a non-PDF file (e.g. plain text with `.pdf` extension) → assert
   `400 Could not parse PDF`.
 
-- [ ] **4.2.4** — Test: upload a PDF exceeding `MAX_PDF_UPLOAD_MB` → assert `413`.
+- [x] **4.2.4** — Test: upload a PDF exceeding `MAX_PDF_UPLOAD_MB` → assert `413`.
 
-- [ ] **4.2.5** — Test `GET /api/v1/verify/history`: call verify once, then call history → assert
+- [x] **4.2.5** — Test `GET /api/v1/verify/history`: call verify once, then call history → assert
   the record appears with matching `filename`, `authentic`, `confidence`.
 
-- [ ] **4.2.6** — Test: call history without a JWT → assert `401`.
+- [x] **4.2.6** — Test: call history without a JWT → assert `401`.
 
 ---
 
-### 4.3 Unit tests for the legal research graph 🟡
+### 4.3 Unit tests for the legal research graph 🟢
 
 **File:** `tests/unit/test_legal_research_graph.py`
 
-- [ ] **4.3.1** — Test: `jurisdiction_filter=["Supreme Court"]` → Qdrant search is called with a
+- [x] **4.3.1** — Test: `jurisdiction_filter=["Supreme Court"]` → Qdrant search is called with a
   payload filter restricting `court` to `"Supreme Court"`. Mock `qdrant_client.search`.
 
-- [ ] **4.3.2** — Test: `jurisdiction_filter=[]` (no filter) → Qdrant search is called with
+- [x] **4.3.2** — Test: `jurisdiction_filter=[]` (no filter) → Qdrant search is called with
   `query_filter=None`.
 
-- [ ] **4.3.3** — Test: retriever node populates `state["citations"]` with the correct structure
+- [x] **4.3.3** — Test: retriever node populates `state["citations"]` with the correct structure
   (`text`, `source`, `case_number`, `court`) from Qdrant result payloads.
 
-- [ ] **4.3.4** — Test: responder node emits `citations` in the final answer dict.
+- [x] **4.3.4** — Test: responder node emits `citations` in the final answer dict.
 
 ---
 
-### 4.4 Integration test for the full auth workflow 🟡
+### 4.4 Integration test for the full auth workflow 🟢
 
 **File:** `tests/integration/test_auth_flow.py`
 
-- [ ] **4.4.1** — Test: `POST /register` → `201` with pending message.
+- [x] **4.4.1** — Test: `POST /register` → `201` with pending message.
 
-- [ ] **4.4.2** — Test: `POST /login` with `status=pending` → `403 Account pending administrator
+- [x] **4.4.2** — Test: `POST /login` with `status=pending` → `403 Account pending administrator
   approval`.
 
-- [ ] **4.4.3** — Test: admin calls `POST /approve/{user_id}` → `200`, `activation_token` in
+- [x] **4.4.3** — Test: admin calls `POST /approve/{user_id}` → `200`, `activation_token` in
   response.
 
-- [ ] **4.4.4** — Test: `POST /activate` with valid token and mismatched passwords → `400`.
+- [x] **4.4.4** — Test: `POST /activate` with valid token and mismatched passwords → `400`.
 
-- [ ] **4.4.5** — Test: `POST /activate` with valid token and matching passwords → `200 Account
+- [x] **4.4.5** — Test: `POST /activate` with valid token and matching passwords → `200 Account
   activated`.
 
-- [ ] **4.4.6** — Test: `POST /login` after activation → `200` with valid JWT.
+- [x] **4.4.6** — Test: `POST /login` after activation → `200` with valid JWT.
 
-- [ ] **4.4.7** — Test: admin calls `POST /users/{id}/status` with `action=suspend` → `200`.
+- [x] **4.4.7** — Test: admin calls `POST /users/{id}/status` with `action=suspend` → `200`.
   Then call any authenticated endpoint with the old token → `401` (after Phase 3.2 is implemented).
 
 ---
