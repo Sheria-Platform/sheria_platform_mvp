@@ -28,6 +28,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from prometheus_client import make_asgi_app
 from qdrant_client.http.models import Distance, VectorParams
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
@@ -39,6 +41,7 @@ from services.api.app.clients.neo4j import neo4j_client
 from services.api.app.clients.ollama_client import ollama_client
 from services.api.app.clients.qdrant import qdrant_client
 from services.api.app.config import settings
+from services.api.app.limiter import limiter
 from services.api.app.logging import bind_context
 from services.api.app.memory.postgres import Base, engine, postgres_memory
 from services.api.app.routes import (
@@ -251,6 +254,9 @@ app = FastAPI(
     ),
     lifespan=lifespan,
 )
+
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 app.add_middleware(
     CORSMiddleware,

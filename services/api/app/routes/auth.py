@@ -14,12 +14,14 @@ import uuid
 from datetime import datetime, timedelta
 
 import bcrypt as _bcrypt
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from jose import jwt
 from pydantic import BaseModel
 
+from services.api.app.auth.blacklist import blacklist_user_tokens, store_user_jti
 from services.api.app.auth.jwt import require_admin
 from services.api.app.config import settings
+from services.api.app.limiter import limiter
 from services.api.app.memory.postgres import postgres_memory
 from services.api.app.utils.email import send_activation_email
 
@@ -40,13 +42,14 @@ def _verify_password(plain: str, hashed: str) -> bool:
         return False
 
 
-def _create_token(user_id: str, username: str, role: str, court: str) -> str:
+def _create_token(user_id: str, username: str, role: str, court: str, jti: str) -> str:
     expire = datetime.utcnow() + timedelta(hours=8)
     payload = {
         "sub": user_id,
         "username": username,
         "role": role,
         "court": court,
+        "jti": jti,
         "exp": expire,
     }
     return jwt.encode(
@@ -125,7 +128,8 @@ async def register(req: RegisterRequest) -> dict:
 
 
 @router.post("/login")
-async def login(req: LoginRequest) -> dict:
+@limiter.limit("5/15minutes")
+async def login(request: Request, req: LoginRequest) -> dict:
     """Authenticate and receive a JWT. Account must be active."""
     user = await postgres_memory.get_user_by_username(req.username)
     if not user:
@@ -154,12 +158,15 @@ async def login(req: LoginRequest) -> dict:
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials"
         )
 
+    jti = str(uuid.uuid4())
     token = _create_token(
         user_id=user["id"],
         username=user["username"],
         role=user["role"],
         court=user["court_station"],
+        jti=jti,
     )
+    await store_user_jti(user["id"], jti)
     return {
         "access_token": token,
         "token_type": "bearer",
@@ -290,6 +297,8 @@ async def update_user_status(
         )
 
     await postgres_memory.update_user_status(user_id, req.status)
+    if req.status == "suspended":
+        await blacklist_user_tokens(user_id)
     return {
         "message": f"User status updated to '{req.status}'. "
         f"{'User can no longer log in.' if req.status == 'suspended' else 'User can now log in.'}"
