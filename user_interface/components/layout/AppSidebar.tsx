@@ -29,6 +29,7 @@ import {
   TrendingUp,
   PanelLeftClose,
   PanelLeftOpen,
+  UserCircle,
 } from "lucide-react";
 
 const NAV_ITEMS = [
@@ -224,24 +225,38 @@ export function AppSidebar() {
         {/* ── User + logout ────────────────────────────────────────── */}
         <div className={cn("py-3 shrink-0 space-y-1", collapsed ? "px-2" : "px-3")}>
           {user && !collapsed && (
-            <div className="flex items-center gap-2 px-2 py-1">
-              <RoleBadge role={user.role as UserRole} />
-              <span className="text-xs text-gray-400 truncate flex-1">
-                {user.full_name || user.username}
-              </span>
-            </div>
+            <Link href="/profile">
+              <div className="flex items-center gap-2 px-2 py-1 rounded-lg hover:bg-white/10 transition-colors cursor-pointer">
+                <RoleBadge role={user.role as UserRole} />
+                <span className="text-xs text-gray-400 truncate flex-1">
+                  {user.full_name || user.username}
+                </span>
+              </div>
+            </Link>
           )}
 
           {collapsed ? (
-            <Tooltip>
-              <TooltipTrigger
-                onClick={handleLogout}
-                className="w-full flex items-center justify-center p-2 rounded-lg text-gray-500 hover:text-white hover:bg-white/10 transition-colors"
-              >
-                <LogOut size={16} />
-              </TooltipTrigger>
-              <TooltipContent side="right">Sign out</TooltipContent>
-            </Tooltip>
+            <>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Link href="/profile">
+                    <span className="w-full flex items-center justify-center p-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/10 transition-colors">
+                      <UserCircle size={16} />
+                    </span>
+                  </Link>
+                </TooltipTrigger>
+                <TooltipContent side="right">My Profile</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger
+                  onClick={handleLogout}
+                  className="w-full flex items-center justify-center p-2 rounded-lg text-gray-500 hover:text-white hover:bg-white/10 transition-colors"
+                >
+                  <LogOut size={16} />
+                </TooltipTrigger>
+                <TooltipContent side="right">Sign out</TooltipContent>
+              </Tooltip>
+            </>
           ) : (
             <Button
               variant="ghost"

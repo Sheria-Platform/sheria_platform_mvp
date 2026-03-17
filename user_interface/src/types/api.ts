@@ -14,7 +14,16 @@ export interface UserProfile {
   username: string;
   role: UserRole;
   court?: string;
+  court_station?: string;
   full_name?: string;
+  email?: string;
+  staff_number?: string;
+  status?: string;
+  bio?: string;
+  phone?: string;
+  avatar_presigned_url?: string;
+  created_at?: string;
+  activated_at?: string;
 }
 
 export type UserRole = "judge" | "magistrate" | "registrar" | "clerk" | "admin";

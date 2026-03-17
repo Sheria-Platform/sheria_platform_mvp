@@ -31,5 +31,6 @@ export interface AuthUser {
   role: UserRole;
   court?: string;
   full_name?: string;
+  avatar_url?: string;
   token: string;
 }
