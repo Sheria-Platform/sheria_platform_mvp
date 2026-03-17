@@ -14,14 +14,16 @@ import uuid
 from datetime import datetime, timedelta
 
 import bcrypt as _bcrypt
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from jose import jwt
 from pydantic import BaseModel
 
 from services.api.app.auth.blacklist import blacklist_user_tokens, store_user_jti
 from services.api.app.auth.jwt import require_admin
+from services.api.app.auth.permissions import ROLE_PERMISSIONS
 from services.api.app.config import settings
 from services.api.app.limiter import limiter
+from services.api.app.memory.audit_repository import audit_repository
 from services.api.app.memory.user_repository import user_repository
 from services.api.app.utils.email import send_activation_email
 
@@ -44,6 +46,7 @@ def _verify_password(plain: str, hashed: str) -> bool:
 
 def _create_token(user_id: str, username: str, role: str, court: str, jti: str) -> str:
     expire = datetime.utcnow() + timedelta(hours=8)
+    perms = sorted(ROLE_PERMISSIONS.get(role, frozenset()) - {"*"})
     payload = {
         "sub": user_id,
         "username": username,
@@ -51,6 +54,7 @@ def _create_token(user_id: str, username: str, role: str, court: str, jti: str) 
         "court": court,
         "jti": jti,
         "exp": expire,
+        "permissions": perms,
     }
     return jwt.encode(
         payload, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM
@@ -86,6 +90,10 @@ class ApproveRequest(BaseModel):
 
 class UpdateStatusRequest(BaseModel):
     status: str  # "active" or "suspended"
+
+
+class ChangeRoleRequest(BaseModel):
+    role: str
 
 
 _SAFE_STATUS_TRANSITIONS: dict[str, set[str]] = {
@@ -218,6 +226,8 @@ async def list_pending(admin: dict = Depends(require_admin)) -> list[dict]:
 async def approve_user(
     user_id: str,
     req: ApproveRequest,
+    request: Request,
+    background_tasks: BackgroundTasks,
     admin: dict = Depends(require_admin),
 ) -> dict:
     """Approve a pending user, assign their role, and email an activation link."""
@@ -244,6 +254,16 @@ async def approve_user(
                 activation_link=activation_link,
             )
         )
+
+    ip = request.client.host if request.client else None
+    background_tasks.add_task(
+        audit_repository.log_action,
+        admin_id=admin["id"],
+        action="approve",
+        target_user_id=user_id,
+        detail={"role": req.role},
+        ip_address=ip,
+    )
 
     return {
         "message": "User approved. An activation link has been sent to the user's email.",
@@ -274,6 +294,8 @@ async def list_users(
 async def update_user_status(
     user_id: str,
     req: UpdateStatusRequest,
+    request: Request,
+    background_tasks: BackgroundTasks,
     admin: dict = Depends(require_admin),
 ) -> dict:
     """Suspend or reactivate a user account. Admin only.
@@ -301,7 +323,80 @@ async def update_user_status(
     await user_repository.update_user_status(user_id, req.status)
     if req.status == "suspended":
         await blacklist_user_tokens(user_id)
+
+    ip = request.client.host if request.client else None
+    action = "suspend" if req.status == "suspended" else "reactivate"
+    background_tasks.add_task(
+        audit_repository.log_action,
+        admin_id=admin["id"],
+        action=action,
+        target_user_id=user_id,
+        detail={"new_status": req.status},
+        ip_address=ip,
+    )
+
     return {
         "message": f"User status updated to '{req.status}'. "
         f"{'User can no longer log in.' if req.status == 'suspended' else 'User can now log in.'}"
     }
+
+
+@router.post("/users/{user_id}/role")
+async def change_user_role(
+    user_id: str,
+    req: ChangeRoleRequest,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    admin: dict = Depends(require_admin),
+) -> dict:
+    """Change a user's role and immediately revoke their active token. Admin only.
+
+    The target user must re-login to receive a new JWT reflecting the new role.
+
+    Args:
+        user_id: Primary-key UUID of the user whose role should change.
+        req:     Body containing the new ``role`` string.
+        admin:   Authenticated admin user from JWT.
+
+    Returns:
+        Confirmation message.
+
+    Raises:
+        HTTPException(400): If the role is invalid.
+        HTTPException(404): If the user is not found.
+    """
+    if req.role not in _VALID_ROLES:
+        raise HTTPException(status_code=400, detail="Invalid role")
+
+    user = await user_repository.get_user_by_id(user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    old_role = user["role"]
+    if old_role == req.role:
+        return {"message": f"User already has role '{req.role}'. No change made."}
+
+    await user_repository.update_user_role(user_id, req.role)
+    await blacklist_user_tokens(user_id)
+
+    ip = request.client.host if request.client else None
+    background_tasks.add_task(
+        audit_repository.log_action,
+        admin_id=admin["id"],
+        action="role_change",
+        target_user_id=user_id,
+        detail={"old_role": old_role, "new_role": req.role},
+        ip_address=ip,
+    )
+
+    return {
+        "message": f"Role updated from '{old_role}' to '{req.role}'. User must re-login."
+    }
+
+
+@router.get("/audit-log")
+async def get_audit_log(
+    admin: dict = Depends(require_admin),
+) -> list[dict]:
+    """Return the most recent 200 admin audit log entries. Admin only."""
+    return await audit_repository.get_recent_logs(limit=200)

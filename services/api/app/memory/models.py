@@ -114,6 +114,20 @@ class VerificationActivity(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
+class AdminAuditLog(Base):
+    """ORM model for the ``admin_audit_log`` table -- admin action history."""
+
+    __tablename__ = "admin_audit_log"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    admin_id = Column(String, nullable=False, index=True)
+    target_user_id = Column(String, nullable=True, index=True)
+    action = Column(String(50), nullable=False)   # "approve", "suspend", "reactivate", "role_change"
+    detail = Column(JSON, nullable=True)
+    ip_address = Column(String(45), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+
 class Feedback(Base):
     """ORM model for the ``feedback`` table -- user ratings for assistant responses."""
 

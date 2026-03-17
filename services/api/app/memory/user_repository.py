@@ -262,6 +262,23 @@ class UserRepository:
                     .values(last_login_at=datetime.utcnow())
                 )
 
+    async def update_user_role(self, user_id: str, new_role: str) -> bool:
+        """Update the role for a user account.
+
+        Args:
+            user_id:  Primary-key UUID of the user.
+            new_role: Target role string (must be a value in ``_VALID_ROLES``).
+
+        Returns:
+            ``True`` if a row was matched and updated, ``False`` if not found.
+        """
+        async with AsyncSessionLocal() as session:
+            async with session.begin():
+                result = await session.execute(
+                    update(User).where(User.id == user_id).values(role=new_role)
+                )
+                return result.rowcount > 0  # type: ignore[attr-defined]
+
     async def update_avatar(self, user_id: str, avatar_key: str) -> bool:
         """Store the S3/MinIO object key for the user's profile picture.
 
