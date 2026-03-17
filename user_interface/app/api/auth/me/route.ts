@@ -26,3 +26,26 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "API unavailable" }, { status: 503 });
   }
 }
+
+export async function PATCH(req: NextRequest) {
+  const token = req.cookies.get("sheria_auth")?.value;
+  if (!token) {
+    return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
+  }
+
+  try {
+    const body = await req.text();
+    const res = await fetch(`${API_URL}/api/v1/auth/me`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body,
+    });
+    const data = await res.json();
+    return NextResponse.json(data, { status: res.status });
+  } catch {
+    return NextResponse.json({ error: "API unavailable" }, { status: 503 });
+  }
+}

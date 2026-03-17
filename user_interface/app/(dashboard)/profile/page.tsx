@@ -50,7 +50,7 @@ export default function ProfilePage() {
   useEffect(() => {
     async function load() {
       try {
-        const data = await apiFetch<UserProfile>("/api/v1/auth/me");
+        const data = await apiFetch<UserProfile>("/api/auth/me");
         setProfile(data);
         setFullName(data.full_name ?? "");
         setStaffNumber(data.staff_number ?? "");
@@ -71,7 +71,7 @@ export default function ProfilePage() {
     setSaving(true);
     setSaveMsg(null);
     try {
-      const updated = await apiFetch<UserProfile>("/api/v1/auth/me", {
+      const updated = await apiFetch<UserProfile>("/api/auth/me", {
         method: "PATCH",
         body: JSON.stringify({ full_name: fullName, staff_number: staffNumber, bio, phone }),
       });

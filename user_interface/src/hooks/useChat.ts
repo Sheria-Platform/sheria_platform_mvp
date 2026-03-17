@@ -27,7 +27,7 @@ export function useChat() {
 
       try {
         const response = await apiStream(
-          "/api/v1/chat/stream",
+          "/api/proxy/chat",
           { message: content, session_id: sessionId },
           controller.signal
         );
