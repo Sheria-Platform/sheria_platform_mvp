@@ -1,47 +1,94 @@
 # services/api/app/routes/feedback.py
-from fastapi import APIRouter, Depends, HTTPException
+"""User feedback submission endpoint.
+
+Allows authenticated users to rate individual assistant responses with
+a thumbs-up/thumbs-down score and an optional free-text comment.
+Feedback is persisted to the ``feedback`` table in PostgreSQL via the
+``FeedbackRepository.record_feedback`` method.
+"""
+
+import logging
+
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
-from sqlalchemy import text
 
 from services.api.app.auth.jwt import get_current_user
-from services.api.app.memory.postgres import AsyncSessionLocal
+from services.api.app.dependencies import get_feedback_repo
+from services.api.app.memory.feedback_repository import FeedbackRepository
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 class FeedbackRequest(BaseModel):
-    session_id: str
-    message_id: int  # ID of the assistant message from chat_history
-    score: int  # 1 (Like) or -1 (Dislike)
-    comment: str = None
+    """Request body for submitting response feedback.
 
-
-@router.post("/")
-async def submit_feedback(req: FeedbackRequest, user: dict = Depends(get_current_user)):
+    Attributes:
+        session_id: The conversation session the message belongs to.
+        message_id: Primary-key ID of the assistant ``ChatHistory``
+            row being rated.
+        score: Sentiment integer -- ``1`` for positive (like),
+            ``-1`` for negative (dislike).
+        comment: Optional free-text explanation from the user.
     """
-    Submit user feedback for an AI response.
+
+    session_id: str
+    message_id: int
+    score: int  # 1 = like, -1 = dislike
+    comment: str | None = None
+
+
+@router.post("/", summary="Submit response feedback")
+async def submit_feedback(
+    req: FeedbackRequest,
+    user: dict = Depends(get_current_user),
+    feedback: FeedbackRepository = Depends(get_feedback_repo),
+) -> dict[str, str]:
+    """Record a user's rating for an assistant response.
+
+    Args:
+        req: Feedback payload including session, message, score,
+            and optional comment.
+        user: Authenticated user dict from ``get_current_user``.
+        feedback: Feedback repository dependency.
+
+    Returns:
+        ``{"status": "recorded"}`` on success.
+
+    Raises:
+        HTTPException(500): On any database write failure.
+
+    Example:
+        Request::
+
+            POST /api/v1/feedback/
+            Authorization: Bearer <token>
+            {
+                "session_id": "abc-123",
+                "message_id": 42,
+                "score": 1,
+                "comment": "Very accurate citation."
+            }
     """
     try:
-        async with AsyncSessionLocal() as session:
-            # We create a simple feedback table or add a column to chat_history.
-            # Here, let's assume a 'feedback' table exists (simple raw SQL for demo)
-            await session.execute(
-                text(
-                    """
-                INSERT INTO feedback (session_id, user_id, message_id, score, comment)
-                VALUES (:sid, :uid, :mid, :score, :comment)
-                """
-                ),
-                {
-                    "sid": req.session_id,
-                    "uid": user["id"],
-                    "mid": req.message_id,
-                    "score": req.score,
-                    "comment": req.comment,
-                },
-            )
-            await session.commit()
-            return {"status": "recorded"}
+        await feedback.record_feedback(
+            session_id=req.session_id,
+            user_id=user["id"],
+            message_id=req.message_id,
+            score=req.score,
+            comment=req.comment,
+        )
+        logger.info(
+            "Feedback recorded. session=%s message=%d score=%d",
+            req.session_id,
+            req.message_id,
+            req.score,
+        )
+        return {"status": "recorded"}
 
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as exc:
+        logger.error("Failed to record feedback: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
+        ) from exc

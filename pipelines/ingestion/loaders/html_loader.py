@@ -1,4 +1,4 @@
-# pipelines/ingestion/loaders/html.py
+# pipelines/ingestion/loaders/html_loader.py
 
 from bs4 import BeautifulSoup
 

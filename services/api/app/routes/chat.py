@@ -1,6 +1,7 @@
 # services/api/app/routes/chat.py
 import json
 import logging
+import time
 import uuid
 from collections.abc import AsyncGenerator
 
@@ -8,42 +9,25 @@ from fastapi import APIRouter, BackgroundTasks, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from libs.observability.metrics import CACHE_HITS
 from services.api.app.agents.graph import agent_app
 from services.api.app.agents.state import AgentState
 from services.api.app.auth.jwt import get_current_user
-
-# Import classes for type hinting
 from services.api.app.cache.semantic import SemanticCache
-from services.api.app.cache.semantic import semantic_cache as global_cache
-from services.api.app.clients.ray_llm import RayLLMClient
-from services.api.app.clients.ray_llm import llm_client as global_llm
-from services.api.app.memory.postgres import PostgresMemory
-from services.api.app.memory.postgres import postgres_memory as global_memory
+from services.api.app.clients.ollama_client import OllamaClient
+from services.api.app.dependencies import get_chat_repo, get_llm_client, get_semantic_cache
+from services.api.app.logging import bind_context
+from services.api.app.memory.chat_repository import ChatRepository
+from services.api.app.streaming import iter_agent_events
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
-
-# --- Dependency Providers (DI) ---
-# These wrappers allow us to override dependencies easily in pytest
-# e.g., app.dependency_overrides[get_llm_client] = MockLLMClient
-
-
-def get_semantic_cache() -> SemanticCache:
-    return global_cache
-
-
-def get_memory() -> PostgresMemory:
-    return global_memory
-
-
-def get_llm_client() -> RayLLMClient:
-    return global_llm
 
 
 # --- Schemas ---
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, description="The user's query")
-    session_id: str = Field(
+    session_id: str | None = Field(
         default=None, description="UUID for the conversation thread"
     )
 
@@ -56,10 +40,9 @@ async def chat_stream(
     req: ChatRequest,
     background_tasks: BackgroundTasks,
     user: dict = Depends(get_current_user),
-    # Inject dependencies via FastAPI Depends
     cache: SemanticCache = Depends(get_semantic_cache),
-    memory: PostgresMemory = Depends(get_memory),
-    llm: RayLLMClient = Depends(get_llm_client),
+    memory: ChatRepository = Depends(get_chat_repo),
+    llm: OllamaClient = Depends(get_llm_client),
 ):
     """
     Main Chat Endpoint (Streaming).
@@ -69,22 +52,36 @@ async def chat_stream(
     session_id = req.session_id or str(uuid.uuid4())
     user_id = user["id"]
 
-    logger.info(f"Chat request for session {session_id} from user {user_id}")
+    # Attach session and user to all log records for this request
+    bind_context(session_id=session_id, user_id=user_id)
+
+    request_start = time.perf_counter()
+    logger.info(
+        "Chat request received",
+        extra={"message_length": len(req.message)},
+    )
 
     # 2. Semantic Cache Check (Fast Path)
-    # Check if we have answered a semantically identical question recently.
-    cached_ans = await cache.get_cached_response(req.message)
+    cache_start = time.perf_counter()
+    cached_ans, query_vector = await cache.get_cached_response(req.message)
+    cache_duration_ms = round((time.perf_counter() - cache_start) * 1000, 2)
 
     if cached_ans:
-        logger.info(f"Cache hit for session {session_id}")
+        CACHE_HITS.labels(result="hit").inc()
+        logger.info(
+            "Semantic cache hit",
+            extra={"duration_ms": cache_duration_ms},
+        )
 
-        # Generator for cached response
         async def stream_cache():
-            yield json.dumps(
-                {"type": "answer", "content": cached_ans, "session_id": session_id}
-            ) + "\n"
+            yield (
+                json.dumps(
+                    {"event": "answer", "content": cached_ans, "session_id": session_id}
+                )
+                + "\n"
+            )
+            yield json.dumps({"event": "done", "session_id": session_id}) + "\n"
 
-        # Async Background: Log interaction even if cached
         background_tasks.add_task(
             memory.add_message, session_id, "user", req.message, user_id
         )
@@ -94,74 +91,86 @@ async def chat_stream(
 
         return StreamingResponse(stream_cache(), media_type="application/x-ndjson")
 
+    CACHE_HITS.labels(result="miss").inc()
+    logger.info(
+        "Semantic cache miss",
+        extra={"duration_ms": cache_duration_ms},
+    )
+
     # 3. Load Conversation History (Context Window)
-    # Fetch last 6 turns to give the LLM context of the conversation
     history_objs = await memory.get_history(session_id, limit=6)
-    history_dicts = [{"role": msg.role, "content": msg.content} for msg in history_objs]
-    # Append current user message
+    history_dicts: list[dict[str, str]] = [
+        {"role": msg.role, "content": msg.content}  # type: ignore[dict-item]
+        for msg in history_objs
+    ]
     history_dicts.append({"role": "user", "content": req.message})
 
     # 4. Initialize Agent State (LangGraph)
     initial_state = AgentState(
-        messages=history_dicts, current_query=req.message, documents=[], plan=[]
+        messages=history_dicts,
+        current_query=req.message,
+        documents=[],
+        plan=[],
+        action="",
+        tool_choice="",
+        tool_input="",
+        query_vector=query_vector or [],  # reuse embedding from cache check
+        jurisdiction_filter=[],  # not used by generic chat -- legal-research route only
+        citations=[],
     )
 
     # 5. Define Generator for Streaming Response
-    async def event_generator() -> AsyncGenerator[str]:
+    async def event_generator() -> AsyncGenerator[str, None]:
         final_answer = ""
 
         try:
-            # Run the LangGraph
-            # We pass 'llm' and 'user_id' in the 'configurable' dict.
-            # This allows the Agent Nodes to access the injected client and user context
-            # via `config.get("configurable", {}).get("llm")` if refactored to support it.
-            async for event in agent_app.astream(
-                initial_state, config={"configurable": {"llm": llm, "user_id": user_id}}
+            async for node_name, node_data, status_json in iter_agent_events(
+                agent_app,
+                initial_state,
+                config={"configurable": {"llm": llm, "user_id": user_id}},
+                session_id=session_id,
             ):
-
-                # event is a dict like {'retriever': {...state updates...}}
-                node_name = list(event.keys())[0]
-                node_data = event[node_name]
-
-                # Emit Status Update
-                yield json.dumps(
-                    {
-                        "type": "status",
-                        "node": node_name,
-                        "session_id": session_id,
-                        "info": f"Completed step: {node_name}",
-                    }
-                ) + "\n"
+                yield status_json
 
                 # Capture Final Answer from Responder Node
                 if node_name == "responder":
-                    # The responder node appends the final AI message to state['messages']
-                    if "messages" in node_data and node_data["messages"]:
+                    if node_data.get("messages"):
                         ai_msg = node_data["messages"][-1]
                         final_answer = ai_msg.get("content", "")
+                        yield (
+                            json.dumps(
+                                {
+                                    "event": "answer",
+                                    "content": final_answer,
+                                    "session_id": session_id,
+                                }
+                            )
+                            + "\n"
+                        )
 
-                        # Stream the chunk
-                        yield json.dumps(
-                            {
-                                "type": "answer",
-                                "content": final_answer,
-                                "session_id": session_id,
-                            }
-                        ) + "\n"
-
-            # 6. Post-Processing (Inside Generator Context)
+            # 6. Post-Processing
             if final_answer:
-                # We await these to ensure data consistency before closing the stream
+                total_ms = round((time.perf_counter() - request_start) * 1000, 2)
+                logger.info(
+                    "Chat request completed",
+                    extra={"duration_ms": total_ms, "answer_length": len(final_answer)},
+                )
                 await memory.add_message(session_id, "user", req.message, user_id)
                 await memory.add_message(session_id, "assistant", final_answer, user_id)
-
-                # Update Cache
                 await cache.set_cached_response(req.message, final_answer)
 
-        except Exception as e:
-            logger.error(f"Error in chat stream: {e}", exc_info=True)
-            yield json.dumps(
-                {"type": "error", "content": "An internal error occurred."}
-            ) + "\n"
+            yield json.dumps({"event": "done", "session_id": session_id}) + "\n"
+
+        except Exception:
+            logger.exception("Error in chat stream")
+            yield (
+                json.dumps(
+                    {
+                        "event": "error",
+                        "content": "An internal error occurred.",
+                    }
+                )
+                + "\n"
+            )
 
     return StreamingResponse(event_generator(), media_type="application/x-ndjson")

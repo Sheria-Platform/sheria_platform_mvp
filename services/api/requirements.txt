@@ -14,7 +14,8 @@ typing_extensions==4.15.0
 annotated-types==0.7.0
 mypy_extensions==1.1.0
 
-# Async HTTP Clients
+# Async HTTP Clients & Email
+aiosmtplib==3.0.1
 httpx==0.28.1
 httpcore==1.0.9
 h11==0.16.0
@@ -27,7 +28,7 @@ anyio==4.11.0
 
 # Database & Cache
 sqlalchemy==2.0.44
-asyncpg==0.29.0
+asyncpg==0.31.0
 redis==7.1.0
 neo4j==6.0.3
 psycopg2-binary==2.9.11
@@ -42,6 +43,7 @@ pyasn1==0.6.1
 pyasn1_modules==0.4.2
 oauthlib==3.3.1
 requests-oauthlib==2.0.0
+slowapi>=0.1.9
 
 # Monitoring & Observability
 opentelemetry-api==1.38.0
@@ -52,6 +54,13 @@ opentelemetry-proto==1.38.0
 opentelemetry-semantic-conventions==0.59b0
 prometheus_client==0.23.1
 posthog==5.4.0
+
+# Numeric / Vector
+numpy==1.26.4        # Required by ollama_embeddings.py for Qdrant-compatible arrays
+qdrant-client==1.9.1 # Qdrant Python client (if not already installed via another path)
+
+# LangGraph (Agentic workflow)
+langgraph>=0.2.0     # StateGraph, conditional edges, astream()
 
 # Utilities
 tenacity==9.1.2
@@ -69,13 +78,22 @@ python-json-logger
 Deprecated==1.3.1
 
 # CLI & Tools
+simpleeval==1.0.3
 typer==0.20.0
 click==8.3.0
 shellingham==1.5.4
 
+# Testing
+pytest==8.3.5
+pytest-asyncio==0.25.3
+pytest-mock==3.14.0
+
 # WebSockets
 websockets==15.0.1
 websocket-client==1.9.0
+
+# PDF parsing (Sheria Verify)
+pypdf>=4.0.0
 
 # Serialization
 orjson==3.11.4

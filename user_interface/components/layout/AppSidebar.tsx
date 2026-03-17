@@ -1,0 +1,275 @@
+"use client";
+
+import { useState } from "react";
+import Image from "next/image";
+import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
+import { useChatStore } from "@/store/chatStore";
+import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Separator } from "@/components/ui/separator";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { clearAuth } from "@/lib/auth";
+import { RoleBadge } from "./RoleBadge";
+import { UserRole } from "@/types/api";
+import {
+  MessageSquarePlus,
+  FileText,
+  Activity,
+  LogOut,
+  History,
+  Users,
+  ShieldCheck,
+  TrendingUp,
+  PanelLeftClose,
+  PanelLeftOpen,
+  UserCircle,
+} from "lucide-react";
+
+const NAV_ITEMS = [
+  { href: "/chat",    label: "Sheria Ask",       icon: MessageSquarePlus },
+  { href: "/verify",  label: "Sheria Verify",    icon: ShieldCheck },
+  { href: "/predict", label: "Sheria Predict",   icon: TrendingUp },
+  { href: "/upload",  label: "Sheria Digitize",  icon: FileText },
+  { href: "/history", label: "Activity History", icon: History },
+  { href: "/health",  label: "System Status",    icon: Activity },
+];
+
+const ADMIN_ITEM = { href: "/admin/users", label: "User Management", icon: Users };
+
+export function AppSidebar() {
+  const [collapsed, setCollapsed] = useState(false);
+  const pathname = usePathname();
+  const router = useRouter();
+  const {
+    sessions,
+    activeSessionId,
+    setActiveSession,
+    createSession,
+    deleteSession,
+    user,
+    setUser,
+  } = useChatStore();
+
+  async function handleLogout() {
+    await fetch("/api/auth/logout", { method: "POST" });
+    clearAuth();
+    setUser(null);
+    router.push("/login");
+  }
+
+  const allNavItems = [
+    ...NAV_ITEMS,
+    ...(user?.role === "admin" ? [ADMIN_ITEM] : []),
+  ];
+
+  return (
+    <TooltipProvider delay={200}>
+      <aside
+        className={cn(
+          "bg-[#1a1a1a] text-white flex flex-col shrink-0 transition-[width] duration-200 ease-in-out overflow-hidden",
+          collapsed ? "w-16" : "w-64"
+        )}
+      >
+        {/* ── Logo + toggle ───────────────────────────────────────── */}
+        <div className="h-14 flex items-center shrink-0 px-3 gap-2">
+          {!collapsed && (
+            <div className="flex-1 min-w-0">
+              <Image
+                src="/sheria-logo.jpg"
+                alt="Sheria Platform"
+                width={120}
+                height={32}
+                className="h-8 w-auto object-contain"
+                priority
+              />
+            </div>
+          )}
+          <button
+            onClick={() => setCollapsed((v) => !v)}
+            className={cn(
+              "shrink-0 p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-white/10 transition-colors",
+              collapsed && "mx-auto"
+            )}
+            title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          >
+            {collapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
+          </button>
+        </div>
+
+        <Separator className="opacity-10" />
+
+        {/* ── New chat ────────────────────────────────────────────── */}
+        <div className={cn("py-3 shrink-0", collapsed ? "px-2" : "px-3")}>
+          {collapsed ? (
+            <Tooltip>
+              <TooltipTrigger
+                onClick={() => { createSession(); router.push("/chat"); }}
+                className="w-full flex items-center justify-center p-2 rounded-lg text-gray-300 hover:text-white hover:bg-white/10 transition-colors"
+              >
+                <MessageSquarePlus size={18} />
+              </TooltipTrigger>
+              <TooltipContent side="right">New chat</TooltipContent>
+            </Tooltip>
+          ) : (
+            <Button
+              onClick={() => { createSession(); router.push("/chat"); }}
+              variant="ghost"
+              className="w-full justify-start gap-2 text-sm text-gray-300 hover:text-white hover:bg-white/10 rounded-lg h-9"
+            >
+              <MessageSquarePlus size={16} />
+              New chat
+            </Button>
+          )}
+        </div>
+
+        <Separator className="opacity-10" />
+
+        {/* ── Nav items ───────────────────────────────────────────── */}
+        <nav className={cn("py-2 space-y-0.5 shrink-0", collapsed ? "px-2" : "px-3")}>
+          {allNavItems.map((item) => {
+            const Icon = item.icon;
+            const active = pathname === item.href;
+
+            if (collapsed) {
+              return (
+                <Tooltip key={item.href}>
+                  <TooltipTrigger asChild>
+                    <Link href={item.href}>
+                      <span
+                        className={cn(
+                          "flex items-center justify-center p-2 rounded-lg transition-colors cursor-pointer",
+                          active
+                            ? "bg-white/15 text-white"
+                            : "text-gray-400 hover:text-white hover:bg-white/10"
+                        )}
+                      >
+                        <Icon size={18} />
+                      </span>
+                    </Link>
+                  </TooltipTrigger>
+                  <TooltipContent side="right">{item.label}</TooltipContent>
+                </Tooltip>
+              );
+            }
+
+            return (
+              <Link key={item.href} href={item.href}>
+                <span
+                  className={cn(
+                    "flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors cursor-pointer",
+                    active
+                      ? "bg-white/15 text-white font-medium"
+                      : "text-gray-400 hover:text-white hover:bg-white/10"
+                  )}
+                >
+                  <Icon size={15} />
+                  {item.label}
+                </span>
+              </Link>
+            );
+          })}
+        </nav>
+
+        {/* ── Recent sessions (expanded only) ─────────────────────── */}
+        {!collapsed && (
+          <>
+            <Separator className="opacity-10 mx-3 my-1" />
+            <div className="px-4 pt-2 pb-1 shrink-0">
+              <span className="text-xs text-gray-500 font-medium uppercase tracking-wider">
+                Recent sessions
+              </span>
+            </div>
+            <ScrollArea className="flex-1 px-2">
+              <div className="space-y-0.5 pb-4">
+                {sessions.slice(0, 20).map((sess) => (
+                  <div
+                    key={sess.id}
+                    className={cn(
+                      "group flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs cursor-pointer transition-colors",
+                      sess.id === activeSessionId
+                        ? "bg-white/15 text-white"
+                        : "text-gray-400 hover:text-white hover:bg-white/10"
+                    )}
+                    onClick={() => { setActiveSession(sess.id); router.push("/chat"); }}
+                  >
+                    <span className="flex-1 truncate">{sess.title}</span>
+                    <button
+                      className="opacity-0 group-hover:opacity-100 text-gray-500 hover:text-white ml-1"
+                      onClick={(e) => { e.stopPropagation(); deleteSession(sess.id); }}
+                      title="Delete"
+                    >
+                      ×
+                    </button>
+                  </div>
+                ))}
+                {sessions.length === 0 && (
+                  <p className="text-xs text-gray-600 px-3 py-1">No sessions yet</p>
+                )}
+              </div>
+            </ScrollArea>
+          </>
+        )}
+
+        {/* Spacer in collapsed mode to push user section down */}
+        {collapsed && <div className="flex-1" />}
+
+        <Separator className="opacity-10" />
+
+        {/* ── User + logout ────────────────────────────────────────── */}
+        <div className={cn("py-3 shrink-0 space-y-1", collapsed ? "px-2" : "px-3")}>
+          {user && !collapsed && (
+            <Link href="/profile">
+              <div className="flex items-center gap-2 px-2 py-1 rounded-lg hover:bg-white/10 transition-colors cursor-pointer">
+                <RoleBadge role={user.role as UserRole} />
+                <span className="text-xs text-gray-400 truncate flex-1">
+                  {user.full_name || user.username}
+                </span>
+              </div>
+            </Link>
+          )}
+
+          {collapsed ? (
+            <>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Link href="/profile">
+                    <span className="w-full flex items-center justify-center p-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/10 transition-colors">
+                      <UserCircle size={16} />
+                    </span>
+                  </Link>
+                </TooltipTrigger>
+                <TooltipContent side="right">My Profile</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger
+                  onClick={handleLogout}
+                  className="w-full flex items-center justify-center p-2 rounded-lg text-gray-500 hover:text-white hover:bg-white/10 transition-colors"
+                >
+                  <LogOut size={16} />
+                </TooltipTrigger>
+                <TooltipContent side="right">Sign out</TooltipContent>
+              </Tooltip>
+            </>
+          ) : (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleLogout}
+              className="w-full justify-start gap-2 text-xs text-gray-500 hover:text-white hover:bg-white/10 rounded-lg h-8"
+            >
+              <LogOut size={13} />
+              Sign out
+            </Button>
+          )}
+        </div>
+      </aside>
+    </TooltipProvider>
+  );
+}

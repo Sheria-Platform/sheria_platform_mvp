@@ -3,8 +3,9 @@
 Embedding generation module for Sheria Platform ingestion pipeline.
 
 This module provides the BatchEmbedder class which generates vector embeddings
-for text chunks using Ollama's embedding API. It includes retry logic,
-rate limiting support, and proper resource cleanup.
+for text chunks using Ollama's embedding API. All texts in a batch are embedded
+concurrently via asyncio.gather, so batch latency is bounded by the slowest
+single request rather than the sum of all requests.
 
 Environment Variables:
     OLLAMA_EMBED_ENDPOINT: Ollama embeddings API endpoint
@@ -13,10 +14,11 @@ Environment Variables:
     EMBED_MAX_RETRIES: Maximum retry attempts (default: 3)
     EMBED_RETRY_DELAY: Initial retry delay in seconds (default: 1)
 """
+
+import asyncio
 import logging
 import os
-import time
-from typing import Any, Dict, List
+from typing import Any
 
 import httpx
 
@@ -27,23 +29,8 @@ class BatchEmbedder:
     """
     Generate embeddings for text chunks using Ollama API.
 
-    This class is designed to work with Ray Data map_batches operations.
-    It processes batches of text chunks and adds vector embeddings to each chunk.
-
-    Features:
-        - Automatic retry with exponential backoff
-        - Request timeout handling
-        - Resource cleanup (HTTP client)
-        - Input validation
-        - Detailed error logging
-
-    Attributes:
-        endpoint (str): Ollama embeddings API endpoint URL
-        model (str): Embedding model name
-        timeout (float): Request timeout in seconds
-        max_retries (int): Maximum number of retry attempts
-        retry_delay (float): Initial retry delay in seconds
-        client (httpx.Client): HTTP client for API requests
+    All texts in a batch are embedded concurrently using an async HTTP client,
+    so batch latency is O(1) rather than O(n) sequential round-trips.
 
     Example:
         >>> embedder = BatchEmbedder()
@@ -60,57 +47,138 @@ class BatchEmbedder:
         Raises:
             ValueError: If endpoint or model configuration is invalid
         """
-        # Load configuration from environment
         self.endpoint = os.getenv(
-            "OLLAMA_EMBED_ENDPOINT",
-            "http://192.168.214.22:11436/api/embeddings"
+            "OLLAMA_EMBED_ENDPOINT", "http://192.168.214.22:11436/api/embeddings"
         )
         self.model = os.getenv("OLLAMA_EMBED_MODEL", "nomic-embed-text")
         self.timeout = float(os.getenv("EMBED_TIMEOUT", "120"))
         self.max_retries = int(os.getenv("EMBED_MAX_RETRIES", "3"))
         self.retry_delay = float(os.getenv("EMBED_RETRY_DELAY", "1"))
 
-        # Validate configuration
         if not self.endpoint or not self.endpoint.startswith("http"):
             raise ValueError(f"Invalid OLLAMA_EMBED_ENDPOINT: {self.endpoint}")
         if not self.model:
             raise ValueError("OLLAMA_EMBED_MODEL cannot be empty")
         if self.timeout <= 0 or self.timeout > 600:
-            raise ValueError(f"EMBED_TIMEOUT must be between 0 and 600, got {self.timeout}")
+            raise ValueError(
+                f"EMBED_TIMEOUT must be between 0 and 600, got {self.timeout}"
+            )
 
-        # Initialize HTTP client
-        self.client = httpx.Client(timeout=self.timeout)
+        logger.info(
+            f"BatchEmbedder initialized: endpoint={self.endpoint}, "
+            f"model={self.model}, timeout={self.timeout}s"
+        )
 
-        logger.info(f"BatchEmbedder initialized: endpoint={self.endpoint}, model={self.model}, timeout={self.timeout}s")
-
-    def __call__(self, batch: Dict[str, Any]) -> Dict[str, Any]:
+    async def _embed_one(
+        self,
+        client: httpx.AsyncClient,
+        text: str,
+        idx: int,
+    ) -> tuple[int, list[float] | None]:
         """
-        Generate embeddings for a batch of text chunks.
-
-        This method processes each text in the batch sequentially (Ollama doesn't
-        support true batching in a single API call). Failed embeddings are retried
-        with exponential backoff.
-
-        Args:
-            batch: Dictionary containing:
-                - "text": List[str] - Text chunks to embed
-                - "metadata": List[dict] - Optional metadata for each chunk
+        Embed a single text with retry logic.
 
         Returns:
-            Dictionary containing:
-                - All input fields (text, metadata, etc.)
-                - "vector": List[List[float]] - Generated embeddings
+            (idx, embedding) — embedding is None if all retries failed.
+        """
+        if not text or not isinstance(text, str):
+            logger.warning(f"Skipping invalid text at index {idx}: {type(text)}")
+            return idx, None
+
+        last_error = None
+        for attempt in range(self.max_retries):
+            try:
+                # /api/embed (Ollama >= 0.1.26) uses "input"
+                # /api/embeddings (older Ollama) uses "prompt"
+                use_new_api = (
+                    "/api/embed" in self.endpoint
+                    and "/api/embeddings" not in self.endpoint
+                )
+                payload = {
+                    "model": self.model,
+                    "input" if use_new_api else "prompt": text[:8192],
+                }
+                response = await client.post(self.endpoint, json=payload)
+                response.raise_for_status()
+                response_data = response.json()
+
+                # New API: {"embeddings": [[...float...]]}
+                # Old API: {"embedding": [...float...]}
+                if "embeddings" in response_data:
+                    embeddings_array = response_data["embeddings"]
+                    if not embeddings_array or not isinstance(embeddings_array, list):
+                        raise ValueError(
+                            f"Invalid embeddings format: {type(embeddings_array)}"
+                        )
+                    embedding = embeddings_array[0]
+                elif "embedding" in response_data:
+                    embedding = response_data["embedding"]
+                else:
+                    raise ValueError(
+                        "Invalid response: missing 'embeddings' or 'embedding' field"
+                    )
+
+                if not embedding or not isinstance(embedding, list):
+                    raise ValueError(f"Invalid embedding vector: {type(embedding)}")
+
+                return idx, embedding
+
+            except httpx.TimeoutException as e:
+                last_error = e
+                logger.warning(
+                    f"Embedding timeout for text {idx} (attempt {attempt + 1}/{self.max_retries})"
+                )
+                if attempt < self.max_retries - 1:
+                    await asyncio.sleep(self.retry_delay * (2**attempt))
+
+            except httpx.HTTPStatusError as e:
+                last_error = e
+                logger.warning(
+                    f"HTTP error for text {idx} (attempt {attempt + 1}/{self.max_retries}): "
+                    f"{e.response.status_code}"
+                )
+                if e.response.status_code < 500:
+                    break  # Client error — don't retry
+                if attempt < self.max_retries - 1:
+                    await asyncio.sleep(self.retry_delay * (2**attempt))
+
+            except Exception as e:
+                last_error = e
+                logger.warning(
+                    f"Embedding failed for text {idx} (attempt {attempt + 1}/{self.max_retries}): {e}"
+                )
+                if attempt < self.max_retries - 1:
+                    await asyncio.sleep(self.retry_delay * (2**attempt))
+
+        logger.error(
+            f"Failed to generate embedding for text {idx} after {self.max_retries} attempts: {last_error}"
+        )
+        return idx, None
+
+    async def _embed_all(
+        self, texts: list[str]
+    ) -> list[tuple[int, list[float] | None]]:
+        """Fire all embedding requests concurrently and return results in input order."""
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            tasks = [
+                self._embed_one(client, text, idx) for idx, text in enumerate(texts)
+            ]
+            return await asyncio.gather(*tasks, return_exceptions=True)
+
+    def __call__(self, batch: dict[str, Any]) -> dict[str, Any]:
+        """
+        Generate embeddings for a batch of text chunks (concurrently).
+
+        Args:
+            batch: Dictionary with "text": List[str] and optional "metadata".
+
+        Returns:
+            Input dict with "vector": List[Optional[List[float]]] added.
 
         Raises:
-            ValueError: If batch structure is invalid
-            httpx.HTTPError: If all retry attempts fail
-            Exception: For other unexpected errors
-
-        Note:
-            Ollama processes one text at a time, so batch size affects latency.
-            For better performance, use smaller batches with higher concurrency.
+            ValueError: If batch structure is invalid.
+            Exception: If every single embedding in the batch fails.
         """
-        # Validate input
         if "text" not in batch:
             raise ValueError("Batch must contain 'text' field")
 
@@ -123,105 +191,40 @@ class BatchEmbedder:
             batch["vector"] = []
             return batch
 
-        embeddings = []
-        failed_indices = []
+        raw_results = asyncio.run(self._embed_all(texts))
 
-        # Process each text individually
-        for idx, text in enumerate(texts):
-            if not text or not isinstance(text, str):
-                logger.warning(f"Skipping invalid text at index {idx}: {type(text)}")
+        embeddings: list[list[float] | None] = []
+        failed_indices: list[int] = []
+
+        for i, result in enumerate(raw_results):
+            if isinstance(result, Exception):
+                logger.error(f"Unexpected exception for text {i}: {result}")
                 embeddings.append(None)
-                failed_indices.append(idx)
-                continue
+                failed_indices.append(i)
+            else:
+                _, embedding = result
+                embeddings.append(embedding)
+                if embedding is None:
+                    failed_indices.append(i)
 
-            # Retry loop for this text
-            success = False
-            last_error = None
-
-            for attempt in range(self.max_retries):
-                try:
-                    response = self.client.post(
-                        self.endpoint,
-                        json={
-                            "model": self.model,
-                            "input": text[:8192]  # Truncate to avoid token limits
-                        }
-                    )
-                    response.raise_for_status()
-                    response_data = response.json()
-
-                    # Validate response structure
-                    if "embeddings" not in response_data:
-                        raise ValueError(f"Invalid response: missing 'embeddings' field")
-
-                    embeddings_array = response_data["embeddings"]
-                    if not embeddings_array or not isinstance(embeddings_array, list):
-                        raise ValueError(f"Invalid embeddings format: {type(embeddings_array)}")
-
-                    embedding = embeddings_array[0]
-                    if not embedding or not isinstance(embedding, list):
-                        raise ValueError(f"Invalid embedding vector: {type(embedding)}")
-
-                    embeddings.append(embedding)
-                    success = True
-                    break
-
-                except httpx.TimeoutException as e:
-                    last_error = e
-                    logger.warning(f"Embedding timeout for text {idx} (attempt {attempt + 1}/{self.max_retries})")
-                    if attempt < self.max_retries - 1:
-                        time.sleep(self.retry_delay * (2 ** attempt))  # Exponential backoff
-
-                except httpx.HTTPStatusError as e:
-                    last_error = e
-                    logger.warning(f"HTTP error for text {idx} (attempt {attempt + 1}/{self.max_retries}): {e.response.status_code}")
-                    if attempt < self.max_retries - 1 and e.response.status_code >= 500:
-                        time.sleep(self.retry_delay * (2 ** attempt))
-                    elif e.response.status_code < 500:
-                        # Client error, don't retry
-                        break
-
-                except Exception as e:
-                    last_error = e
-                    logger.warning(f"Embedding failed for text {idx} (attempt {attempt + 1}/{self.max_retries}): {e}")
-                    if attempt < self.max_retries - 1:
-                        time.sleep(self.retry_delay * (2 ** attempt))
-
-            if not success:
-                logger.error(f"Failed to generate embedding for text {idx} after {self.max_retries} attempts: {last_error}")
-                embeddings.append(None)
-                failed_indices.append(idx)
-
-        # Check if all embeddings failed
         if len(failed_indices) == len(texts):
-            raise Exception(f"All embeddings failed in batch. Last error: {last_error}")
+            raise Exception(f"All {len(texts)} embeddings failed in batch.")
 
-        # Log partial failures
         if failed_indices:
-            logger.warning(f"Failed to generate {len(failed_indices)}/{len(texts)} embeddings")
+            logger.warning(
+                f"Failed to generate {len(failed_indices)}/{len(texts)} embeddings"
+            )
 
-        # Add embeddings to batch
         batch["vector"] = embeddings
         return batch
 
     def close(self) -> None:
-        """
-        Clean up resources (close HTTP client).
-
-        Should be called when the embedder is no longer needed to ensure
-        proper connection cleanup.
-        """
-        try:
-            self.client.close()
-            logger.debug("BatchEmbedder HTTP client closed")
-        except Exception as e:
-            logger.warning(f"Error closing HTTP client: {e}")
+        """No-op — async implementation uses per-call clients with context managers."""
+        logger.debug("BatchEmbedder close() called")
 
     def __enter__(self):
-        """Context manager entry."""
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        """Context manager exit with automatic cleanup."""
         self.close()
         return False

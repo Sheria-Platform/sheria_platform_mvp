@@ -13,11 +13,12 @@ Environment Variables:
     QDRANT_TIMEOUT: Request timeout in seconds (default: 60)
     QDRANT_MAX_RETRIES: Maximum retry attempts (default: 3)
 """
+
 import logging
 import os
 import time
 import uuid
-from typing import Any, Dict, List
+from typing import Any
 
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
@@ -79,13 +80,17 @@ class QdrantIndexer:
         # Initialize client
         try:
             self.client = QdrantClient(host=host, port=port, timeout=self.timeout)
-            logger.info(f"QdrantIndexer initialized: host={host}:{port}, collection={self.collection_name}")
+            logger.info(
+                f"QdrantIndexer initialized: host={host}:{port}, collection={self.collection_name}"
+            )
 
             # Verify collection exists
             try:
                 self.client.get_collection(collection_name=self.collection_name)
             except Exception as e:
-                logger.warning(f"Collection '{self.collection_name}' may not exist: {e}")
+                logger.warning(
+                    f"Collection '{self.collection_name}' may not exist: {e}"
+                )
 
         except Exception as e:
             logger.error(f"Failed to connect to Qdrant: {e}")
@@ -114,12 +119,14 @@ class QdrantIndexer:
             return False
 
         if expected_dim and len(vector) != expected_dim:
-            logger.warning(f"Vector dimension mismatch: expected {expected_dim}, got {len(vector)}")
+            logger.warning(
+                f"Vector dimension mismatch: expected {expected_dim}, got {len(vector)}"
+            )
             return False
 
         return True
 
-    def write(self, batch: List[Dict[str, Any]], max_retries: int = None) -> int:
+    def write(self, batch: list[dict[str, Any]], max_retries: int = None) -> int:
         """
         Upload vector points to Qdrant in batch with retry logic.
 
@@ -176,14 +183,18 @@ class QdrantIndexer:
                 metadata = row.get("metadata", {})
                 payload = {
                     "text": row["text"][:10000],  # Truncate very long text
-                    "filename": metadata.get("filename", metadata.get("filepath", "unknown")),
+                    "filename": metadata.get(
+                        "filename", metadata.get("filepath", "unknown")
+                    ),
                     "page": metadata.get("page_number", metadata.get("page", 0)),
                     "type": metadata.get("type", "unknown"),
                 }
 
                 # Add any additional metadata fields
                 for key, value in metadata.items():
-                    if key not in payload and isinstance(value, (str, int, float, bool)):
+                    if key not in payload and isinstance(
+                        value, (str, int, float, bool)
+                    ):
                         payload[key] = value
 
                 # Create Point
@@ -207,25 +218,27 @@ class QdrantIndexer:
         for attempt in range(retries):
             try:
                 self.client.upsert(
-                    collection_name=self.collection_name,
-                    points=points,
-                    wait=True  # Wait for operation to complete
+                    collection_name=self.collection_name, points=points, wait=False
                 )
                 logger.debug(f"Successfully indexed {len(points)} points to Qdrant")
                 return len(points)
 
             except UnexpectedResponse as e:
-                logger.warning(f"Qdrant upsert failed (attempt {attempt + 1}/{retries}): {e}")
+                logger.warning(
+                    f"Qdrant upsert failed (attempt {attempt + 1}/{retries}): {e}"
+                )
                 if attempt < retries - 1:
-                    time.sleep(1 * (2 ** attempt))  # Exponential backoff
+                    time.sleep(1 * (2**attempt))  # Exponential backoff
                 else:
                     logger.error(f"Failed to upsert after {retries} attempts")
                     raise
 
             except Exception as e:
-                logger.error(f"Unexpected error during upsert (attempt {attempt + 1}/{retries}): {e}")
+                logger.error(
+                    f"Unexpected error during upsert (attempt {attempt + 1}/{retries}): {e}"
+                )
                 if attempt < retries - 1:
-                    time.sleep(1 * (2 ** attempt))
+                    time.sleep(1 * (2**attempt))
                 else:
                     raise
 
@@ -251,3 +264,22 @@ class QdrantIndexer:
         """Context manager exit with automatic cleanup."""
         self.close()
         return False
+
+
+# from qdrant_client import QdrantClient
+# from qdrant_client.http import models
+
+# client = QdrantClient(host="192.168.214.21", port=6333)
+
+# # Drop old collection (2560-dim)
+# client.delete_collection("kenya_law_reports")
+
+# # Recreate with nomic-embed-text dimensions (768-dim)
+# client.create_collection(
+#     collection_name="kenya_law_reports",
+#     vectors_config=models.VectorParams(
+#         size=768,
+#         distance=models.Distance.COSINE
+#     )
+# )
+# print("Collection recreated at 768 dimensions")

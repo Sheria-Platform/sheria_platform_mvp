@@ -2,20 +2,18 @@
 Test connectivity to remote infrastructure.
 Run this before executing the ingestion pipeline.
 """
+
 import os
 import sys
 
 import httpx
-from qdrant_client import QdrantClient
 from neo4j import GraphDatabase
+from qdrant_client import QdrantClient
 
 
 def test_ollama_llm():
     """Test Ollama LLM endpoint."""
-    endpoint = os.getenv(
-        "OLLAMA_LLM_ENDPOINT",
-        "http://192.168.214.22:11435/api/chat"
-    )
+    endpoint = os.getenv("OLLAMA_LLM_ENDPOINT", "http://192.168.214.22:11435/api/chat")
     print(f"\n[1/4] Testing Ollama LLM endpoint: {endpoint}")
 
     try:
@@ -35,8 +33,7 @@ def test_ollama_llm():
 def test_ollama_embed():
     """Test Ollama embedding endpoint."""
     endpoint = os.getenv(
-        "OLLAMA_EMBED_ENDPOINT",
-        "http://192.168.214.22:11436/api/embeddings"
+        "OLLAMA_EMBED_ENDPOINT", "http://192.168.214.22:11436/api/embeddings"
     )
     print(f"\n[2/4] Testing Ollama embedding endpoint: {endpoint}")
 

@@ -1,22 +1,26 @@
 #!/usr/bin/env python3
 """Quick test of PDF parsing"""
+
 import sys
-import os
-sys.path.insert(0, '/Users/danielmalungu/Documents/sheria_platform_mvp')
+
+sys.path.insert(0, "/Users/danielmalungu/Documents/sheria_platform_mvp")
+
+from minio import Minio
 
 from pipelines.ingestion.loaders.pdf_loader import parse_pdf_bytes
-from minio import Minio
 
 # Connect to MinIO
 client = Minio(
     "192.168.214.21:9000",
     access_key="minioadmin",
     secret_key="minioadmin",
-    secure=False
+    secure=False,
 )
 
 # List first file
-objects = list(client.list_objects("srtmanager", prefix="kenya_law_data/case/", recursive=True))
+objects = list(
+    client.list_objects("srtmanager", prefix="kenya_law_data/case/", recursive=True)
+)
 if not objects:
     print("No files found!")
     sys.exit(1)
@@ -41,4 +45,5 @@ try:
 except Exception as e:
     print(f"✗ Parse failed: {e}")
     import traceback
+
     traceback.print_exc()

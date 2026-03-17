@@ -84,6 +84,19 @@ services:
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
       MINIO_BROWSER_REDIRECT_URL: ${MINIO_BROWSER_REDIRECT_URL:-http://localhost:9001}
       MINIO_SERVER_URL: ${MINIO_SERVER_URL:-http://localhost:9000}
+#       # Production security settings
+#       MINIO_BROWSER_REDIRECT_URL: ${MINIO_BROWSER_REDIRECT_URL:-http://0.0.0.0:9001}
+#       MINIO_SERVER_URL: ${MINIO_SERVER_URL:-http://0.0.0.0:9000}
+
+#       # Performance and reliability settings
+#       MINIO_CACHE: "on"
+#       MINIO_CACHE_DRIVES: "/data/cache"
+#       MINIO_CACHE_EXCLUDE: "*.pdf"
+#       MINIO_CACHE_QUOTA: "80"
+      # Health check settings
+      #MINIO_NOTIFY_WEBHOOK_ENABLE_PRIMARY: "on"
+      # Additional security headers
+      MINIO_API_CORS_ALLOW_ORIGIN: "*"
     volumes:
       - minio-data:/data
     restart: unless-stopped
@@ -92,20 +105,8 @@ services:
       interval: 30s
       timeout: 20s
       retries: 3
-  
-  openmaxio-browser:
-    image: ghcr.io/astrateam-net/minio-browser:1.7.6
-    container_name: openmaxio-browser
-    restart: unless-stopped
-    ports:
-      - "8080:9090"
-    command: ./console server
-    environment:
-      CONSOLE_MINIO_SERVER: http://localhost:9000
-    depends_on:
-      - minio_server
 
-  # 6. Ollama (Local LLM for Embeddings & Graph Extraction)
+  # 6. Ollama (Local LLM for Embeddings, Graph Extraction & API Inference)
   ollama:
     image: ollama/ollama:latest
     container_name: sheria-ollama
@@ -127,7 +128,8 @@ services:
       timeout: 10s
       retries: 3
 
-  # 6b. Ollama Nginx Proxy (Load Balancer for Remote Ollama Cluster)
+  # 7. Ollama Nginx Proxy (Load Balancer for Remote Ollama Cluster)
+  # Used by pipelines/ingestion/ which targets separate remote endpoints
   ollama-proxy:
     image: nginx:alpine
     container_name: sheria-ollama-proxy
@@ -136,17 +138,78 @@ services:
       - "11435:11435"  # LLM endpoint
       - "11436:11436"  # Embedding endpoint
       - "11437:11437"  # Reranker endpoint
-      - "8080:8080"    # Status/health endpoint
+      - "8081:8080"    # Status/health endpoint (changed to 8081 to avoid conflict)
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
-    network_mode: host  # Required to reach remote hosts
+    depends_on:
+      - ollama
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8080/health || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
 
-  # 7. Open WebUI (Web Interface for Ollama - Development)
+  # 8. Sheria API (FastAPI Agentic RAG Service)
+  sheria-api:
+    build:
+      context: .
+      dockerfile: services/api/Dockerfile
+    container_name: sheria-api
+    ports:
+      - "${API_PORT:-8000}:8000"
+    environment:
+      # App
+      ENV: ${ENV:-prod}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      # Postgres
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-ragadmin}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-rag_db}
+      # Redis
+      REDIS_URL: redis://redis:6379/0
+      # Qdrant
+      QDRANT_HOST: qdrant
+      QDRANT_PORT: 6333
+      QDRANT_COLLECTION: ${QDRANT_COLLECTION:-kenya_law_reports}
+      # Neo4j
+      NEO4J_URI: bolt://neo4j:7687
+      NEO4J_USER: ${NEO4J_USER:-neo4j}
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD:-password}
+      # Ollama (replaces Ray Serve endpoints)
+      OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_LLM_MODEL: ${OLLAMA_LLM_MODEL:-llama3.3}
+      OLLAMA_EMBEDDING_MODEL: ${OLLAMA_EMBEDDING_MODEL:-nomic-embed-text}
+      OLLAMA_TIMEOUT: ${OLLAMA_TIMEOUT:-60}
+      # Security
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
+      # Observability
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      # SMTP — routes activation emails to MailHog in dev
+      SMTP_HOST: ${SMTP_HOST:-mailhog}
+      SMTP_PORT: ${SMTP_PORT:-1025}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-noreply@judiciary.go.ke}
+      APP_BASE_URL: ${APP_BASE_URL:-http://localhost:3000}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
+      mailhog:
+        condition: service_started
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  # 9. Open WebUI (Web Interface for Ollama - Development)
   open-webui:
     image: ghcr.io/open-webui/open-webui:main
     container_name: sheria-open-webui
@@ -155,35 +218,111 @@ services:
     environment:
       # Ollama connection
       OLLAMA_BASE_URL: ${OLLAMA_HOST:-http://ollama:11434}
-
       # Security
       WEBUI_SECRET_KEY: ${WEBUI_SECRET_KEY:-change-me-to-random-string}
-
-      # Database (optional - uses SQLite by default)
+      # Database
       DATABASE_URL: postgresql://${POSTGRES_USER:-ragadmin}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-rag_db}
-
-      # Redis cache (optional)
+      # Redis cache
       REDIS_URL: redis://redis:6379/1
-
       # Authentication
       ENABLE_SIGNUP: ${ENABLE_SIGNUP:-true}
       DEFAULT_USER_ROLE: ${DEFAULT_USER_ROLE:-user}
       WEBUI_AUTH: ${WEBUI_AUTH:-true}
-
       # RAG Configuration
       ENABLE_RAG: ${ENABLE_RAG:-true}
       RAG_EMBEDDING_ENGINE: ${RAG_EMBEDDING_ENGINE:-ollama}
       RAG_EMBEDDING_MODEL: ${RAG_EMBEDDING_MODEL:-nomic-embed-text}
-
-      # Vector DB - Can integrate with Qdrant if needed
+      # Vector DB
       VECTOR_DB: qdrant
       QDRANT_URL: http://qdrant:6333
+      # Web Search
+      ENABLE_WEB_SEARCH: ${ENABLE_WEB_SEARCH:-false}
+      # UI Customization
+      WEBUI_NAME: ${WEBUI_NAME:-Sheria Legal Research}
+      # CORS
+      CORS_ALLOW_ORIGIN: "*"
+    volumes:
+      - open-webui:/app/backend/data
+    depends_on:
+      - ollama
+      - postgres
+      - qdrant
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    restart: unless-stopped
+
+  # 10. MailHog (Local SMTP for Dev — captures outgoing activation emails)
+  mailhog:
+    image: mailhog/mailhog:v1.0.1
+    container_name: sheria-mailhog
+    ports:
+      - "1025:1025"   # SMTP — point SMTP_HOST=mailhog, SMTP_PORT=1025
+      - "8025:8025"   # Web UI — http://localhost:8025 to inspect emails
+    restart: unless-stopped
+
+  # 6. Ollama (Local LLMs) server GPU support
+  ollama:
+    image: ollama/ollama
+    container_name: ollama
+    ports:
+      - "11433:11434"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    volumes:
+      - ollama:/root/.ollama
+      - ./entrypoint.sh:/entrypoint.sh:ro   # mount your script read-only
+    entrypoint: ["/bin/bash", "/entrypoint.sh"]
+    #TODO: Configure health checks
+    # override to run our script
+    # healthcheck:
+    #   test: ["CMD-SHELL", "timeout 5 bash -c 'echo > /dev/tcp/127.0.0.1/11434' || exit 1"]
+    #   interval: 10s
+    #   timeout: 5s
+    #   retries: 6
+    #   start_period: 30s
+
+  # 7. Open WebUI (Web interface for Ollama)
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: open-webui
+    ports:
+      - "3000:8080"
+    environment:
+      # Ollama connection
+      OLLAMA_BASE_URL: http://ollama:11434
+
+      # Security
+      WEBUI_SECRET_KEY: ${WEBUI_SECRET_KEY:-change-me-to-random-string}
+
+      # Database (optional - uses SQLite by default, can use your Postgres)
+      # DATABASE_URL: postgresql://ragadmin:changeme@postgres:5432/rag_db
+
+      # Redis cache (optional - can leverage your existing Redis)
+      # REDIS_URL: redis://redis:6379/1
+
+      # Authentication
+      ENABLE_SIGNUP: ${ENABLE_SIGNUP:-true}
+      DEFAULT_USER_ROLE: ${DEFAULT_USER_ROLE:-user}
+
+      # RAG Configuration
+      ENABLE_RAG: ${ENABLE_RAG:-true}
+      RAG_EMBEDDING_ENGINE: ollama
+      RAG_EMBEDDING_MODEL: ${RAG_EMBEDDING_MODEL:-nomic-embed-text}
+
+      # Vector DB - Can integrate with your Qdrant if needed
+      # VECTOR_DB: qdrant
+      # QDRANT_URL: http://qdrant:6333
 
       # Web Search (optional)
       ENABLE_WEB_SEARCH: ${ENABLE_WEB_SEARCH:-false}
 
       # UI Customization
-      WEBUI_NAME: ${WEBUI_NAME:-Sheria Legal Research}
+      WEBUI_NAME: ${WEBUI_NAME:-Sheria Platform Chat}
 
       # CORS (for local dev)
       CORS_ALLOW_ORIGIN: "*"

@@ -1,23 +1,61 @@
 # libs/observability/metrics.py
 from prometheus_client import Counter, Histogram
 
-# 1. Counter: Only goes up (e.g., Total Requests)
+# ── Request Metrics ────────────────────────────────────────────────────────
+
 REQUEST_COUNT = Counter(
     "rag_api_requests_total",
-    "Total number of requests",
+    "Total number of HTTP requests",
     ["method", "endpoint", "status"],
 )
 
-# 2. Histogram: Tracks distribution (e.g., Latency, Token Count)
-REQUEST_LATENCY = Histogram("rag_api_latency_seconds", "Request latency", ["endpoint"])
+REQUEST_LATENCY = Histogram(
+    "rag_api_latency_seconds",
+    "End-to-end HTTP request latency",
+    ["endpoint"],
+)
 
+# ── Cache Metrics ──────────────────────────────────────────────────────────
+
+CACHE_HITS = Counter(
+    "rag_semantic_cache_total",
+    "Semantic cache hit and miss counts",
+    ["result"],  # "hit" | "miss"
+)
+
+# ── LLM / Token Metrics ────────────────────────────────────────────────────
+
+# TODO: Increment TOKEN_USAGE after each ollama_client.chat_completion() call.
+# Ollama's response includes token counts under data["eval_count"] (completion)
+# and data["prompt_eval_count"] (prompt).  Wire these in OllamaClient once the
+# Ollama token-counting API is stable across model versions.
 TOKEN_USAGE = Counter(
     "rag_llm_tokens_total",
     "Total LLM tokens consumed",
-    ["model", "type"],  # type=prompt vs completion
+    ["model", "type"],  # type = "prompt" | "completion"
+)
+
+# ── Agent Node Metrics ─────────────────────────────────────────────────────
+
+NODE_LATENCY = Histogram(
+    "rag_node_latency_seconds",
+    "LangGraph agent node execution latency",
+    ["node"],  # "planner" | "retriever" | "responder" | "tool"
+)
+
+# ── Retrieval Metrics ──────────────────────────────────────────────────────
+
+RETRIEVAL_DOCS = Histogram(
+    "rag_retrieval_docs_count",
+    "Number of documents returned per retrieval source",
+    ["source"],  # "vector" | "graph" | "combined"
+    buckets=[0, 1, 2, 3, 5, 8, 10, 15, 20],
 )
 
 
-def track_request(method: str, endpoint: str, status: int):
-    """Helper to increment request counter"""
+# ── Helpers ────────────────────────────────────────────────────────────────
+
+
+def track_request(method: str, endpoint: str, status: int) -> None:
+    """Increment the HTTP request counter."""
     REQUEST_COUNT.labels(method=method, endpoint=endpoint, status=status).inc()

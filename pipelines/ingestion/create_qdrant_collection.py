@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 """Create Qdrant collection for Kenya Law Reports"""
+
 import os
+
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams
 
 # Load environment variables
 try:
     from dotenv import load_dotenv
+
     load_dotenv()
 except ImportError:
     pass
@@ -22,7 +25,9 @@ COLLECTION_NAME = os.getenv("QDRANT_COLLECTION", "kenya_law_reports")
 # - mxbai-embed-large: 1024 dimensions
 # - qwen3-embedding:4b: 2560 dimensions
 # Check your OLLAMA_EMBED_MODEL and update accordingly
-VECTOR_SIZE = int(os.getenv("QDRANT_VECTOR_SIZE", "768"))  # Default for nomic-embed-text
+VECTOR_SIZE = int(
+    os.getenv("QDRANT_VECTOR_SIZE", "768")
+)  # Default for nomic-embed-text
 
 # Connect to Qdrant
 client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
@@ -47,8 +52,8 @@ client.create_collection(
     collection_name=COLLECTION_NAME,
     vectors_config=VectorParams(
         size=VECTOR_SIZE,
-        distance=Distance.COSINE  # Cosine similarity for semantic search
-    )
+        distance=Distance.COSINE,  # Cosine similarity for semantic search
+    ),
 )
 
 print(f"✓ Collection '{COLLECTION_NAME}' created successfully!")

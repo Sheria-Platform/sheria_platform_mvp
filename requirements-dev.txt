@@ -1,0 +1,14 @@
+# Development tooling — NOT in production Docker images
+pre-commit==4.2.0
+ruff==0.11.4
+mypy==1.15.0
+types-redis==4.6.0.20241004
+types-pyyaml==6.0.12.20250915
+types-passlib==1.7.7.20260211
+types-requests==2.32.4.20260107
+detect-secrets==1.5.0
+shellcheck-py==0.10.0.1
+pytest==8.3.5
+pytest-asyncio==0.25.3
+pytest-mock==3.14.0
+pytest-cov==7.0.0

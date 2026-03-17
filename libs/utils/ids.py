@@ -13,7 +13,7 @@ def generate_file_id(content: bytes) -> str:
     Generate a deterministic ID based on file content.
     Prevents uploading the exact same file twice.
     """
-    return hashlib.md5(content).hexdigest()
+    return hashlib.md5(content).hexdigest()  # noqa: S324
 
 
 def generate_trace_id() -> str:

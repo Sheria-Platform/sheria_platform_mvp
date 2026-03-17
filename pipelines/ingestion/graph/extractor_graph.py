@@ -13,20 +13,63 @@ Environment Variables:
     LLM_MAX_RETRIES: Maximum retry attempts (default: 3)
     LLM_RETRY_DELAY: Initial retry delay in seconds (default: 2)
     LLM_TEMPERATURE: LLM temperature for deterministic output (default: 0.0)
-    LLM_MAX_TOKENS: Maximum tokens for generation (default: 1024)
+    LLM_MAX_TOKENS: Maximum tokens for generation (default: 4096)
+    GRAPH_CONCURRENCY: Max concurrent LLM requests in-flight (default: 10)
 """
+
+import asyncio
 import json
 import logging
 import os
 import re
-import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import httpx
 
-from pipelines.ingestion.graph.schema_graph import GraphSchema
+from pipelines.ingestion.graph.schema_graph import VALID_NODE_LABELS, GraphSchema
+from pipelines.ingestion.graph.schema_graph import (
+    VALID_RELATION_TYPES as _SCHEMA_RELATION_TYPES,
+)
 
 logger = logging.getLogger(__name__)
+
+# JSON schema for constrained decoding via Ollama's format field.
+# Guarantees the LLM always returns {"nodes": [...], "edges": [...]} structure,
+# even for short or non-legal chunks that would otherwise produce explanatory text.
+# Enum constraints on `type` fields force the model to only produce valid schema
+# values, eliminating "Skipping edge with unknown relationship type" warnings.
+_NODE_TYPE_ENUM = list(VALID_NODE_LABELS.__args__)
+_RELATION_TYPE_ENUM = list(_SCHEMA_RELATION_TYPES.__args__)
+
+GRAPH_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "nodes": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string"},
+                    "type": {"type": "string", "enum": _NODE_TYPE_ENUM},
+                },
+                "required": ["id", "type"],
+            },
+        },
+        "edges": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "source": {"type": "string"},
+                    "target": {"type": "string"},
+                    "type": {"type": "string", "enum": _RELATION_TYPE_ENUM},
+                },
+                "required": ["source", "target", "type"],
+            },
+        },
+    },
+    "required": ["nodes", "edges"],
+}
 
 
 class GraphExtractor:
@@ -38,11 +81,13 @@ class GraphExtractor:
     handles JSON parsing robustness.
 
     Features:
+        - Concurrent LLM requests via asyncio.gather (batch latency = slowest chunk,
+          not sum of all chunks)
+        - Semaphore-bounded concurrency to avoid overwhelming the Ollama server
         - Automatic retry with exponential backoff
         - Robust JSON parsing (handles markdown code blocks)
         - Schema validation
         - Request timeout handling
-        - Resource cleanup (HTTP client)
         - Detailed error logging
 
     Attributes:
@@ -53,7 +98,7 @@ class GraphExtractor:
         retry_delay (float): Initial retry delay in seconds
         temperature (float): LLM temperature (0.0 for deterministic)
         max_tokens (int): Maximum tokens for generation
-        client (httpx.Client): HTTP client for API requests
+        concurrency (int): Max simultaneous LLM requests (GRAPH_CONCURRENCY env var)
 
     Example:
         >>> extractor = GraphExtractor()
@@ -72,15 +117,15 @@ class GraphExtractor:
         """
         # Load configuration from environment
         self.llm_endpoint = os.getenv(
-            "OLLAMA_LLM_ENDPOINT",
-            "http://192.168.214.22:11435/api/chat"
+            "OLLAMA_LLM_ENDPOINT", "http://192.168.214.22:11435/api/chat"
         )
         self.model = os.getenv("OLLAMA_LLM_MODEL", "llama3")
         self.timeout = float(os.getenv("LLM_TIMEOUT", "180"))
         self.max_retries = int(os.getenv("LLM_MAX_RETRIES", "3"))
         self.retry_delay = float(os.getenv("LLM_RETRY_DELAY", "2"))
         self.temperature = float(os.getenv("LLM_TEMPERATURE", "0.0"))
-        self.max_tokens = int(os.getenv("LLM_MAX_TOKENS", "1024"))
+        self.max_tokens = int(os.getenv("LLM_MAX_TOKENS", "4096"))
+        self.concurrency = int(os.getenv("GRAPH_CONCURRENCY", "10"))
 
         # Validate configuration
         if not self.llm_endpoint or not self.llm_endpoint.startswith("http"):
@@ -88,14 +133,20 @@ class GraphExtractor:
         if not self.model:
             raise ValueError("OLLAMA_LLM_MODEL cannot be empty")
         if self.timeout <= 0 or self.timeout > 600:
-            raise ValueError(f"LLM_TIMEOUT must be between 0 and 600, got {self.timeout}")
+            raise ValueError(
+                f"LLM_TIMEOUT must be between 0 and 600, got {self.timeout}"
+            )
+        if self.concurrency < 1 or self.concurrency > 64:
+            raise ValueError(
+                f"GRAPH_CONCURRENCY must be between 1 and 64, got {self.concurrency}"
+            )
 
-        # Initialize HTTP client
-        self.client = httpx.Client(timeout=self.timeout)
+        logger.info(
+            f"GraphExtractor initialized: endpoint={self.llm_endpoint}, model={self.model}, "
+            f"timeout={self.timeout}s, concurrency={self.concurrency}"
+        )
 
-        logger.info(f"GraphExtractor initialized: endpoint={self.llm_endpoint}, model={self.model}, timeout={self.timeout}s")
-
-    def _extract_json_from_response(self, content: str) -> Optional[Dict[str, Any]]:
+    def _extract_json_from_response(self, content: str) -> dict[str, Any] | None:
         """
         Extract and parse JSON from LLM response, handling various formats.
 
@@ -114,6 +165,9 @@ class GraphExtractor:
         if not content or not content.strip():
             return None
 
+        # Strip Qwen3 thinking blocks if /no_think was not honoured
+        content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+
         # Try direct JSON parsing first
         try:
             return json.loads(content)
@@ -122,25 +176,31 @@ class GraphExtractor:
 
         # Try extracting from markdown code blocks
         patterns = [
-            r'```json\s*\n(.*?)\n```',  # ```json ... ```
-            r'```\s*\n(.*?)\n```',       # ``` ... ```
-            r'{.*}',                      # Any JSON object
+            r"```json\s*\n(.*?)\n```",  # ```json ... ```
+            r"```\s*\n(.*?)\n```",  # ``` ... ```
+            r"{.*}",  # Any JSON object
         ]
 
         for pattern in patterns:
             try:
                 match = re.search(pattern, content, re.DOTALL)
                 if match:
-                    json_str = match.group(1) if len(match.groups()) > 0 else match.group(0)
+                    json_str = (
+                        match.group(1) if len(match.groups()) > 0 else match.group(0)
+                    )
                     return json.loads(json_str.strip())
             except (json.JSONDecodeError, AttributeError):
                 continue
 
-        # Log failure for debugging
-        logger.debug(f"Failed to parse JSON. Content preview: {content[:200]}")
+        # Log failure for diagnosing any remaining edge cases
+        logger.warning(
+            f"Failed to parse JSON from LLM response. Preview: {content[:300]!r}"
+        )
         return None
 
-    def _validate_graph_data(self, graph_data: Dict[str, Any]) -> Tuple[List[dict], List[dict]]:
+    def _validate_graph_data(
+        self, graph_data: dict[str, Any]
+    ) -> tuple[list[dict], list[dict]]:
         """
         Validate and extract nodes and edges from graph data.
 
@@ -172,12 +232,153 @@ class GraphExtractor:
 
         return nodes, edges
 
-    def __call__(self, batch: Dict[str, Any]) -> Dict[str, Any]:
+    async def _extract_one(
+        self,
+        client: httpx.AsyncClient,
+        text: str,
+        idx: int,
+        semaphore: asyncio.Semaphore,
+    ) -> tuple[int, list[dict], list[dict]]:
         """
-        Extract graph data from a batch of text chunks.
+        Extract graph data from a single text chunk with retry logic.
 
-        Uses Ollama's chat API with structured prompts to extract legal entities
-        (cases, judges, statutes) and relationships (CITES, OVERRULES, etc.).
+        Runs concurrently with other chunks via asyncio.gather. The semaphore
+        caps in-flight requests to GRAPH_CONCURRENCY to avoid overloading Ollama.
+
+        Args:
+            client: Shared async HTTP client for the batch.
+            text: Text chunk to extract from.
+            idx: Chunk index (preserved for result ordering).
+            semaphore: Bounds the number of simultaneous requests.
+
+        Returns:
+            (idx, nodes, edges) — nodes/edges are empty lists on failure.
+        """
+        if not text or not isinstance(text, str):
+            logger.warning(f"Skipping invalid text at index {idx}: {type(text)}")
+            return idx, [], []
+
+        last_error = None
+        truncated_text = text[:4000]
+        # /no_think disables Qwen3 chain-of-thought (<think> blocks)
+        prompt = f"""/no_think
+
+{GraphSchema.get_system_prompt()}
+
+Input Text:
+{truncated_text}"""
+
+        payload = {
+            "model": self.model,
+            "think": False,
+            "messages": [
+                {
+                    "role": "system",
+                    "content": "You are a knowledge graph extraction assistant for legal documents. Extract entities and relationships from the given text and return ONLY valid JSON.",
+                },
+                {"role": "user", "content": prompt},
+            ],
+            "stream": False,
+            # Constrained decoding: guarantees nodes/edges structure even for
+            # short or non-legal chunks that would otherwise return plain text.
+            "format": GRAPH_OUTPUT_SCHEMA,
+            "options": {
+                "temperature": self.temperature,
+                "num_predict": self.max_tokens,
+            },
+        }
+
+        async with semaphore:
+            for attempt in range(self.max_retries):
+                try:
+                    response = await client.post(self.llm_endpoint, json=payload)
+                    response.raise_for_status()
+
+                    response_data = response.json()
+                    content = response_data.get("message", {}).get("content", "")
+
+                    # Detect token limit truncation — retrying produces the same result
+                    if response_data.get("done_reason") == "length":
+                        logger.error(
+                            f"LLM truncated response for text {idx} due to token limit "
+                            f"(num_predict={self.max_tokens}). Increase LLM_MAX_TOKENS."
+                        )
+                        return idx, [], []
+
+                    if not content or not content.strip():
+                        logger.warning(
+                            f"Empty LLM response for text {idx} "
+                            f"(attempt {attempt + 1}/{self.max_retries})"
+                        )
+                        if attempt < self.max_retries - 1:
+                            await asyncio.sleep(self.retry_delay * (2**attempt))
+                            continue
+                        return idx, [], []
+
+                    graph_data = self._extract_json_from_response(content)
+                    if graph_data is None:
+                        raise ValueError("Failed to parse JSON from LLM response")
+
+                    nodes, edges = self._validate_graph_data(graph_data)
+                    return idx, nodes, edges
+
+                except httpx.TimeoutException as e:
+                    last_error = e
+                    logger.warning(
+                        f"LLM timeout for text {idx} (attempt {attempt + 1}/{self.max_retries})"
+                    )
+                    if attempt < self.max_retries - 1:
+                        await asyncio.sleep(self.retry_delay * (2**attempt))
+
+                except httpx.HTTPStatusError as e:
+                    last_error = e
+                    logger.warning(
+                        f"HTTP error for text {idx} (attempt {attempt + 1}/{self.max_retries}): "
+                        f"{e.response.status_code}"
+                    )
+                    if e.response.status_code < 500:
+                        break  # Client error — don't retry
+                    if attempt < self.max_retries - 1:
+                        await asyncio.sleep(self.retry_delay * (2**attempt))
+
+                except Exception as e:
+                    last_error = e
+                    logger.warning(
+                        f"Graph extraction failed for text {idx} "
+                        f"(attempt {attempt + 1}/{self.max_retries}): {e}"
+                    )
+                    if attempt < self.max_retries - 1:
+                        await asyncio.sleep(self.retry_delay * (2**attempt))
+
+        logger.error(
+            f"Failed to extract graph for text {idx} after {self.max_retries} attempts: {last_error}"
+        )
+        return idx, [], []
+
+    async def _extract_all(
+        self, texts: list[str]
+    ) -> list[tuple[int, list[dict], list[dict]]]:
+        """
+        Fire all LLM extraction requests concurrently and return results in input order.
+
+        Batch latency is bounded by the slowest single chunk, not the sum of all chunks.
+        A semaphore caps simultaneous in-flight requests to self.concurrency.
+        """
+        semaphore = asyncio.Semaphore(self.concurrency)
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            tasks = [
+                self._extract_one(client, text, idx, semaphore)
+                for idx, text in enumerate(texts)
+            ]
+            return await asyncio.gather(*tasks, return_exceptions=True)
+
+    def __call__(self, batch: dict[str, Any]) -> dict[str, Any]:
+        """
+        Extract graph data from a batch of text chunks (concurrently).
+
+        All chunks in the batch are sent to the LLM simultaneously (bounded by
+        GRAPH_CONCURRENCY), so batch latency is O(1) rather than O(n) serial
+        round-trips.
 
         Args:
             batch: Dictionary containing:
@@ -191,14 +392,8 @@ class GraphExtractor:
                 - "graph_edges": List[List[dict]] - Extracted edges per chunk
 
         Raises:
-            ValueError: If batch structure is invalid
-            Exception: For critical failures
-
-        Note:
-            Failed extractions return empty nodes/edges lists rather than failing
-            the entire batch.
+            ValueError: If batch structure is invalid.
         """
-        # Validate input
         if "text" not in batch:
             raise ValueError("Batch must contain 'text' field")
 
@@ -212,126 +407,28 @@ class GraphExtractor:
             batch["graph_edges"] = []
             return batch
 
-        nodes_list = []
-        edges_list = []
+        raw_results = asyncio.run(self._extract_all(texts))
 
-        # Process each text chunk
-        for idx, text in enumerate(texts):
-            if not text or not isinstance(text, str):
-                logger.warning(f"Skipping invalid text at index {idx}: {type(text)}")
-                nodes_list.append([])
-                edges_list.append([])
+        # Re-order by idx to guarantee output matches input order
+        nodes_list: list[list[dict]] = [[] for _ in texts]
+        edges_list: list[list[dict]] = [[] for _ in texts]
+
+        for result in raw_results:
+            if isinstance(result, Exception):
+                logger.error(f"Unexpected exception in graph extraction task: {result}")
+                # slot already initialised to [] above — nothing to do
                 continue
+            idx, nodes, edges = result
+            nodes_list[idx] = nodes
+            edges_list[idx] = edges
 
-            # Retry loop for this text
-            success = False
-            last_error = None
-
-            for attempt in range(self.max_retries):
-                try:
-                    # 1. Construct Prompt
-                    prompt = f"""{GraphSchema.get_system_prompt()}
-
-Input Text:
-{text[:4000]}  # Truncate to avoid token limits
-"""
-
-                    # 2. Call Ollama LLM
-                    response = self.client.post(
-                        self.llm_endpoint,
-                        json={
-                            "model": self.model,
-                            "messages": [
-                                {
-                                    "role": "system",
-                                    "content": "You are a knowledge graph extraction assistant for legal documents. Extract entities and relationships from the given text and return ONLY valid JSON."
-                                },
-                                {
-                                    "role": "user",
-                                    "content": prompt
-                                }
-                            ],
-                            "stream": False,
-                            "options": {
-                                "temperature": self.temperature,
-                                "num_predict": self.max_tokens,
-                            },
-                            "format": "json"  # Request JSON response format
-                        },
-                    )
-                    response.raise_for_status()
-
-                    # 3. Parse JSON Output
-                    response_data = response.json()
-                    content = response_data.get("message", {}).get("content", "")
-
-                    if not content or not content.strip():
-                        logger.warning(f"Empty response from LLM for text {idx} (attempt {attempt + 1}/{self.max_retries})")
-                        if attempt < self.max_retries - 1:
-                            time.sleep(self.retry_delay * (2 ** attempt))
-                            continue
-                        else:
-                            nodes_list.append([])
-                            edges_list.append([])
-                            break
-
-                    # Parse JSON (with fallback handling)
-                    graph_data = self._extract_json_from_response(content)
-
-                    if graph_data is None:
-                        raise ValueError("Failed to parse JSON from LLM response")
-
-                    # Validate and extract nodes/edges
-                    nodes, edges = self._validate_graph_data(graph_data)
-                    nodes_list.append(nodes)
-                    edges_list.append(edges)
-
-                    success = True
-                    break
-
-                except httpx.TimeoutException as e:
-                    last_error = e
-                    logger.warning(f"LLM timeout for text {idx} (attempt {attempt + 1}/{self.max_retries})")
-                    if attempt < self.max_retries - 1:
-                        time.sleep(self.retry_delay * (2 ** attempt))
-
-                except httpx.HTTPStatusError as e:
-                    last_error = e
-                    logger.warning(f"HTTP error for text {idx} (attempt {attempt + 1}/{self.max_retries}): {e.response.status_code}")
-                    if attempt < self.max_retries - 1 and e.response.status_code >= 500:
-                        time.sleep(self.retry_delay * (2 ** attempt))
-                    elif e.response.status_code < 500:
-                        # Client error, don't retry
-                        break
-
-                except Exception as e:
-                    last_error = e
-                    logger.warning(f"Graph extraction failed for text {idx} (attempt {attempt + 1}/{self.max_retries}): {e}")
-                    if attempt < self.max_retries - 1:
-                        time.sleep(self.retry_delay * (2 ** attempt))
-
-            if not success:
-                logger.error(f"Failed to extract graph for text {idx} after {self.max_retries} attempts: {last_error}")
-                nodes_list.append([])
-                edges_list.append([])
-
-        # Add graph data to batch
         batch["graph_nodes"] = nodes_list
         batch["graph_edges"] = edges_list
         return batch
 
     def close(self) -> None:
-        """
-        Clean up resources (close HTTP client).
-
-        Should be called when the extractor is no longer needed to ensure
-        proper connection cleanup.
-        """
-        try:
-            self.client.close()
-            logger.debug("GraphExtractor HTTP client closed")
-        except Exception as e:
-            logger.warning(f"Error closing HTTP client: {e}")
+        """No-op — async implementation uses per-call clients with context managers."""
+        logger.debug("GraphExtractor close() called")
 
     def __enter__(self):
         """Context manager entry."""

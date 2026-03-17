@@ -2,7 +2,7 @@
 import json
 
 from services.api.app.clients.neo4j import neo4j_client
-from services.api.app.clients.ray_llm import llm_client
+from services.api.app.clients.ollama_client import ollama_client as llm_client
 
 SYSTEM_PROMPT = """
 You are a Knowledge Graph Helper.
@@ -55,4 +55,4 @@ async def search_graph_tool(question: str) -> str:
         return str(results)
 
     except Exception as e:
-        return f"Graph search error: {str(e)}"
+        return f"Graph search error: {e!s}"

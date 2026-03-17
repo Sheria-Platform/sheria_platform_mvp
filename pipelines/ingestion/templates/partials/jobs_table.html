@@ -1,0 +1,5 @@
+{% for job in jobs %}
+  {% include "partials/job_row.html" %}
+{% else %}
+  <tr><td colspan="6" class="muted center">No jobs yet.</td></tr>
+{% endfor %}

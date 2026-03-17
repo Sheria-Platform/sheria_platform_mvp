@@ -17,4 +17,4 @@ def calculate(expression: str) -> str:
         result = simple_eval(expression)
         return str(result)
     except Exception as e:
-        return f"Error: {str(e)}"
+        return f"Error: {e!s}"
