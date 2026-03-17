@@ -45,6 +45,7 @@ from services.api.app.routes import (
     history,
     legal_research,
     predict,
+    profile,
     upload,
     verify,
 )
@@ -138,6 +139,7 @@ app.include_router(feedback.router, prefix="/api/v1/feedback", tags=["Feedback"]
 app.include_router(health.router, prefix="/health", tags=["Health"])
 app.include_router(history.router, prefix="/api/v1/history", tags=["History"])
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["Auth"])
+app.include_router(profile.router, prefix="/api/v1/auth", tags=["Profile"])
 app.include_router(
     legal_research.router,
     prefix="/api/v1/legal-research",
