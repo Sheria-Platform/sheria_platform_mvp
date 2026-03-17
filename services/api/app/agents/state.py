@@ -48,6 +48,10 @@ class AgentState(TypedDict):
         tool_choice: Name of the tool to invoke when
             ``action == "tool_use"`` (e.g. ``"calculator"``).
         tool_input: Raw string input passed to the selected tool.
+        web_search_enabled: When True, the planner system prompt is augmented
+            to include ``"web_search"`` as an available tool_choice, allowing
+            the agent to fetch live results from https://new.kenyalaw.org/.
+            Set from ``ChatRequest.web_search``. Defaults to False.
     """
 
     messages: Annotated[list[dict], operator.add]
@@ -66,3 +70,5 @@ class AgentState(TypedDict):
     jurisdiction_filter: list[str]
     # Structured citations extracted by the retriever for the legal-research response
     citations: list[dict]
+    # Set from ChatRequest.web_search; gates web search routing in the planner prompt
+    web_search_enabled: bool

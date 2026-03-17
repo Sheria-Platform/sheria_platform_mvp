@@ -30,6 +30,10 @@ class ChatRequest(BaseModel):
     session_id: str | None = Field(
         default=None, description="UUID for the conversation thread"
     )
+    web_search: bool = Field(
+        default=False,
+        description="When True, the agent may query https://new.kenyalaw.org for live results",
+    )
 
 
 # --- Routes ---
@@ -117,6 +121,7 @@ async def chat_stream(
         query_vector=query_vector or [],  # reuse embedding from cache check
         jurisdiction_filter=[],  # not used by generic chat -- legal-research route only
         citations=[],
+        web_search_enabled=req.web_search,
     )
 
     # 5. Define Generator for Streaming Response
