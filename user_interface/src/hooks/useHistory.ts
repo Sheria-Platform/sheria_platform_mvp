@@ -12,7 +12,7 @@ export function useHistory() {
   const [messagesLoading, setMessagesLoading] = useState(false);
 
   useEffect(() => {
-    apiFetch<SessionSummary[]>("/api/v1/history/sessions")
+    apiFetch<SessionSummary[]>("/api/proxy/history/sessions")
       .then(setSessions)
       .catch(() => setSessions([]))
       .finally(() => setLoading(false));
@@ -21,7 +21,7 @@ export function useHistory() {
   const selectSession = useCallback((id: string) => {
     setSelectedId(id);
     setMessagesLoading(true);
-    apiFetch<MessageRecord[]>(`/api/v1/history/sessions/${id}`)
+    apiFetch<MessageRecord[]>(`/api/proxy/history/sessions/${id}`)
       .then(setMessages)
       .catch(() => setMessages([]))
       .finally(() => setMessagesLoading(false));

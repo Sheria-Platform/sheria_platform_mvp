@@ -42,7 +42,7 @@ export function useUpload() {
       try {
         // 1. Get presigned URL
         const presign = await apiFetch<UploadPresignResponse>(
-          "/api/v1/upload/generate-presigned-url",
+          "/api/proxy/upload/generate-presigned-url",
           {
             method: "POST",
             body: JSON.stringify({
@@ -69,7 +69,7 @@ export function useUpload() {
 
         // 3. Trigger ingestion pipeline
         const job = await apiFetch<{ job_id: string; status: string }>(
-          "/api/v1/upload/ingest",
+          "/api/proxy/upload/ingest",
           {
             method: "POST",
             body: JSON.stringify({

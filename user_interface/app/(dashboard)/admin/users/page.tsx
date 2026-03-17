@@ -78,28 +78,28 @@ export default function AdminUsersPage() {
   // ── Data fetchers ──────────────────────────────────────────────────────
   const fetchPending = useCallback(async () => {
     setLoading(true); setFetchError("");
-    try { setPending(await apiFetch<PendingUser[]>("/api/v1/auth/pending")); }
+    try { setPending(await apiFetch<PendingUser[]>("/api/proxy/admin/pending")); }
     catch (err) { setFetchError((err as Error).message); }
     finally { setLoading(false); }
   }, []);
 
   const fetchApprovedUsers = useCallback(async () => {
     setApprovedLoading(true); setApprovedError("");
-    try { setApprovedUsers(await apiFetch<ActiveUser[]>("/api/v1/auth/users?status=approved")); }
+    try { setApprovedUsers(await apiFetch<ActiveUser[]>("/api/proxy/admin/users?status=approved")); }
     catch (err) { setApprovedError((err as Error).message); }
     finally { setApprovedLoading(false); }
   }, []);
 
   const fetchActiveUsers = useCallback(async () => {
     setActiveLoading(true); setActiveError("");
-    try { setActiveUsers(await apiFetch<ActiveUser[]>("/api/v1/auth/users?status=active")); }
+    try { setActiveUsers(await apiFetch<ActiveUser[]>("/api/proxy/admin/users?status=active")); }
     catch (err) { setActiveError((err as Error).message); }
     finally { setActiveLoading(false); }
   }, []);
 
   const fetchDeactivatedUsers = useCallback(async () => {
     setDeactivatedLoading(true); setDeactivatedError("");
-    try { setDeactivatedUsers(await apiFetch<ActiveUser[]>("/api/v1/auth/users?status=suspended")); }
+    try { setDeactivatedUsers(await apiFetch<ActiveUser[]>("/api/proxy/admin/users?status=suspended")); }
     catch (err) { setDeactivatedError((err as Error).message); }
     finally { setDeactivatedLoading(false); }
   }, []);
@@ -128,7 +128,7 @@ export default function AdminUsersPage() {
     setApproving(userId);
     setApproveErrors((e) => ({ ...e, [userId]: "" }));
     try {
-      const data = await apiFetch<ApproveResult>(`/api/v1/auth/approve/${userId}`, {
+      const data = await apiFetch<ApproveResult>(`/api/proxy/admin/approve/${userId}`, {
         method: "POST",
         body: JSON.stringify({ role }),
       });
@@ -147,7 +147,7 @@ export default function AdminUsersPage() {
     setResendErrors((e) => ({ ...e, [userId]: "" }));
     try {
       // Re-calling approve regenerates the activation token and resends the email
-      const data = await apiFetch<ApproveResult>(`/api/v1/auth/approve/${userId}`, {
+      const data = await apiFetch<ApproveResult>(`/api/proxy/admin/approve/${userId}`, {
         method: "POST",
         body: JSON.stringify({ role: currentRole }),
       });
@@ -163,7 +163,7 @@ export default function AdminUsersPage() {
     setSuspending(userId);
     setSuspendErrors((e) => ({ ...e, [userId]: "" }));
     try {
-      await apiFetch(`/api/v1/auth/users/${userId}/status`, {
+      await apiFetch(`/api/proxy/admin/users/${userId}/status`, {
         method: "POST",
         body: JSON.stringify({ status: "suspended" }),
       });
@@ -179,7 +179,7 @@ export default function AdminUsersPage() {
     setReactivating(userId);
     setReactivateErrors((e) => ({ ...e, [userId]: "" }));
     try {
-      await apiFetch(`/api/v1/auth/users/${userId}/status`, {
+      await apiFetch(`/api/proxy/admin/users/${userId}/status`, {
         method: "POST",
         body: JSON.stringify({ status: "active" }),
       });

@@ -11,7 +11,7 @@ export function useVerifyHistory() {
 
   const refresh = useCallback(() => {
     setLoading(true);
-    apiFetch<VerificationActivity[]>("/api/v1/verify/history")
+    apiFetch<VerificationActivity[]>("/api/proxy/verify/history")
       .then((data) => {
         setActivities(data);
         setError(null);
