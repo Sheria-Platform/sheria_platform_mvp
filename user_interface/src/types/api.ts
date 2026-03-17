@@ -172,6 +172,9 @@ export interface PendingUser {
   staff_number?: string;
   status: "pending" | "approved" | "active" | "suspended";
   created_at: string;
+  bio?: string;
+  phone?: string;
+  avatar_url?: string;
 }
 
 /** A user returned by GET /api/v1/auth/users (active, suspended, or approved). */
@@ -186,4 +189,8 @@ export interface ActiveUser {
   status: "approved" | "active" | "suspended";
   created_at: string;
   activated_at?: string;
+  last_login_at?: string;
+  bio?: string;
+  phone?: string;
+  avatar_url?: string;
 }
