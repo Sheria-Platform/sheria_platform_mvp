@@ -27,6 +27,10 @@ interface ChatStore {
 
   // Auth
   setUser: (user: AuthUser | null) => void;
+
+  // Web search toggle
+  webSearchEnabled: boolean;
+  toggleWebSearch: () => void;
 }
 
 export const useChatStore = create<ChatStore>()(
@@ -37,6 +41,7 @@ export const useChatStore = create<ChatStore>()(
       isStreaming: false,
       streamingMessageId: null,
       user: null,
+      webSearchEnabled: false,
 
       createSession: () => {
         const id = generateId();
@@ -169,6 +174,8 @@ export const useChatStore = create<ChatStore>()(
         set({ isStreaming: value, streamingMessageId: messageId ?? null }),
 
       setUser: (user) => set({ user }),
+
+      toggleWebSearch: () => set((s) => ({ webSearchEnabled: !s.webSearchEnabled })),
     }),
     {
       name: "sheria-chat",
@@ -177,6 +184,7 @@ export const useChatStore = create<ChatStore>()(
         sessions: state.sessions,
         activeSessionId: state.activeSessionId,
         user: state.user,
+        webSearchEnabled: state.webSearchEnabled,
       }),
     }
   )

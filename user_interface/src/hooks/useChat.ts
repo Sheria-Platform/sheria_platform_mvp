@@ -10,7 +10,7 @@ export function useChat() {
   const abortRef = useRef<AbortController | null>(null);
 
   const sendMessage = useCallback(
-    async (content: string) => {
+    async (content: string, options?: { webSearch?: boolean }) => {
       if (store.isStreaming || !content.trim()) return;
 
       let sessionId = store.activeSessionId;
@@ -28,7 +28,11 @@ export function useChat() {
       try {
         const response = await apiStream(
           "/api/proxy/chat",
-          { message: content, session_id: sessionId },
+          {
+            message: content,
+            session_id: sessionId,
+            web_search: options?.webSearch ?? store.webSearchEnabled,
+          },
           controller.signal
         );
 
