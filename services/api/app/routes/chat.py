@@ -158,6 +158,8 @@ async def chat_stream(
                 await memory.add_message(session_id, "assistant", final_answer, user_id)
                 await cache.set_cached_response(req.message, final_answer)
 
+            yield json.dumps({"event": "done", "session_id": session_id}) + "\n"
+
         except Exception:
             logger.exception("Error in chat stream")
             yield (

@@ -194,6 +194,8 @@ async def legal_research(
                 await memory.add_message(session_id, "assistant", final_answer, user_id)
                 await cache.set_cached_response(req.query, final_answer)
 
+            yield json.dumps({"event": "done", "session_id": session_id}) + "\n"
+
         except Exception:
             logger.exception("Error in legal research stream")
             yield (
