@@ -41,6 +41,8 @@ from scraper.crawlers.legal_sites import (  # noqa: E402
 )
 from scraper.storage.minio_client import MinIOClient  # noqa: E402
 
+log = logging.getLogger(__name__)
+
 console = Console()
 
 _VALID_COURTS = list(COURT_NAMES.keys())
@@ -117,6 +119,33 @@ async def _run_kenya_law(args, settings, minio, site_config) -> None:
         )
         sys.exit(1)
 
+    # Resolve ingest settings: CLI flags override env/settings
+    auto_ingest = not getattr(args, "no_ingest", False)
+    ingest_batch_size = getattr(args, "ingest_every", None)
+    if ingest_batch_size is not None:
+        if ingest_batch_size == 0:
+            auto_ingest = False
+        else:
+            settings.ingest_batch_size = ingest_batch_size
+    if not auto_ingest:
+        settings.ingest_batch_size = settings.ingest_batch_size  # keep default
+
+    # Build registry (gracefully degrade if DB is unavailable)
+    registry = None
+    if auto_ingest or True:  # always try registry for resumability
+        try:
+            from scraper.db.registry import DocumentRegistry
+            registry = DocumentRegistry(settings.database_url)
+            registry.ensure_tables()
+        except Exception as exc:
+            log.warning(
+                "DocumentRegistry unavailable (%s) — falling back to MinIO-only dedup", exc
+            )
+            registry = None
+
+    pages_display = str(args.pages) if args.pages > 0 else "unlimited"
+    loop = asyncio.get_event_loop()
+
     crawler = KenyaLawCrawler(
         site_config=site_config,
         settings=settings,
@@ -125,18 +154,23 @@ async def _run_kenya_law(args, settings, minio, site_config) -> None:
         max_pages=args.pages,
         mode=mode,
         courts=courts,
+        registry=registry,
+        auto_ingest=auto_ingest,
+        loop=loop,
     )
 
     if mode == "court":
         court_labels = [COURT_NAMES.get(c, c) for c in courts]
         console.print(
             f"[cyan]Kenya Law[/cyan] — mode: court | "
-            f"courts: {court_labels} | max pages/court: {args.pages}"
+            f"courts: {court_labels} | max pages/court: {pages_display} | "
+            f"auto-ingest: {'every ' + str(settings.ingest_batch_size) if auto_ingest else 'disabled'}"
         )
     else:
         console.print(
             f"[cyan]Kenya Law[/cyan] — mode: search | "
-            f"terms: {terms} | max pages/term: {args.pages}"
+            f"terms: {terms} | max pages/term: {pages_display} | "
+            f"auto-ingest: {'every ' + str(settings.ingest_batch_size) if auto_ingest else 'disabled'}"
         )
 
     with Progress(
@@ -149,6 +183,12 @@ async def _run_kenya_law(args, settings, minio, site_config) -> None:
         task = progress.add_task("Crawling Kenya Law…", total=None)
         report = await crawler.crawl()
         progress.update(task, description="Crawl complete", total=1, completed=1)
+
+    if registry is not None:
+        try:
+            registry.close()
+        except Exception:
+            pass
 
     stats = minio.get_bucket_stats()
     _print_report(report, stats)
@@ -232,7 +272,22 @@ def _build_parser() -> argparse.ArgumentParser:
         type=int,
         default=10,
         metavar="N",
-        help="Max pages to fetch per court/term (default: 10).",
+        help="Max pages to fetch per court/term. 0 = unlimited (crawl until no Next page). Default: 10.",
+    )
+    kl_group.add_argument(
+        "--ingest-every",
+        type=int,
+        default=None,
+        metavar="N",
+        dest="ingest_every",
+        help="Trigger ingestion every N new documents (overrides INGEST_BATCH_SIZE). 0 = disable.",
+    )
+    kl_group.add_argument(
+        "--no-ingest",
+        action="store_true",
+        default=False,
+        dest="no_ingest",
+        help="Scrape only; skip all ingestion triggering (useful for testing/CI).",
     )
 
     # Generic crawler options

@@ -13,12 +13,47 @@ Architecture:
     3. Fork A: Generate embeddings (Ollama) -> Index to Qdrant
     4. Fork B: Extract graph data (Ollama LLM) -> Index to Neo4j
 
-Usage:
-    python main.py <bucket_name> <prefix> [max_workers] [--enable-graph]
+Entry Points:
+    main()                 — full pipeline; scans a bucket prefix. Called from CLI
+                             or directly for bulk ingestion runs.
+    ingest_specific_files() — lightweight entry point for a named list of MinIO paths.
+                             Used by KenyaLawCrawler (data_scrapper/scraper/crawlers/
+                             legal_sites.py) to auto-ingest every INGEST_BATCH_SIZE
+                             newly scraped documents without a prefix scan.
 
-Example:
+Crawler Integration:
+    The modular scraper (data_scrapper/scraper/) calls ingest_specific_files()
+    automatically during a crawl run when auto_ingest=True (the default).
+
+    Flow:
+        KenyaLawCrawler._download_and_store()
+            -> _maybe_trigger_ingest()          # batches paths in memory
+            -> _run_ingest_batch()              # fires when batch is full
+            -> ingest_specific_files()          # this module
+            -> DocumentRegistry.complete_run()  # records result in PostgreSQL
+
+    Ingest batching is controlled by:
+        INGEST_BATCH_SIZE env var (default 5)   — or --ingest-every N CLI flag
+        AUTO_INGEST env var (default true)       — or --no-ingest CLI flag
+
+    A circuit breaker in the crawler stops further ingest attempts after
+    3 consecutive failures, preventing a broken Qdrant/Ollama stack from
+    stalling a multi-day crawl.
+
+Usage (CLI):
+    python main.py <bucket_name> <prefix> [--max-workers N] [--enable-graph]
+
+Examples:
+    # Full prefix scan (bulk / scheduled runs)
     python main.py legal-documents legal/kenya_law/ 4
     python main.py legal-documents legal/kenya_law/ 4 --enable-graph
+
+    # Programmatic use from crawler (specific files, no CLI)
+    from pipelines.ingestion.main import ingest_specific_files
+    exit_code, stats = ingest_specific_files(
+        "legal-documents",
+        ["legal/kenya_law/2024/republic-v-kamau/kesc_2024_1.pdf"],
+    )
 
 Environment Variables:
     See .env.example for required configuration
@@ -798,6 +833,171 @@ def main(
     except Exception as e:
         logger.error(f"Fatal error in ingestion pipeline: {e}", exc_info=True)
         return 1, {}
+
+
+def _download_specific(
+    client: Minio,
+    bucket_name: str,
+    object_names: list,
+    config: dict,
+    stats: dict,
+) -> list:
+    """
+    Download only the listed object_names from MinIO (no prefix scan).
+
+    Private helper for ingest_specific_files(). Uses the same
+    ThreadPoolExecutor + as_completed pattern as _iter_file_batches but
+    skips the list_objects() phase — the caller supplies the exact paths,
+    which the crawler already knows from its own download step.
+
+    Args:
+        client: Minio client instance
+        bucket_name: Bucket containing the objects
+        object_names: Explicit list of object paths to download
+        config: Pipeline config dict (max_workers used for concurrency)
+        stats: Shared stats dict mutated in-place (files_seen, files_downloaded,
+               files_failed)
+
+    Returns:
+        List of (object_name, file_bytes) tuples for successfully downloaded files
+    """
+    supported = [
+        name
+        for name in object_names
+        if (("." + name.lower().rsplit(".", 1)[-1]) if "." in name else "") in SUPPORTED_EXTENSIONS
+    ]
+    skipped = len(object_names) - len(supported)
+    if skipped:
+        logger.debug("_download_specific: skipping %d unsupported-extension paths", skipped)
+    stats["files_seen"] += len(supported)
+
+    def _download(name: str):
+        resp = client.get_object(bucket_name, name)
+        data = resp.read()
+        resp.close()
+        return name, data
+
+    results = []
+    with ThreadPoolExecutor(max_workers=config["max_workers"]) as pool:
+        futures = {pool.submit(_download, name): name for name in supported}
+        for future in as_completed(futures):
+            name = futures[future]
+            try:
+                results.append(future.result())
+                stats["files_downloaded"] += 1
+            except Exception as e:
+                logger.error("Failed to download %s: %s", name, e)
+                stats["files_failed"] += 1
+    return results
+
+
+def ingest_specific_files(
+    bucket_name: str,
+    object_names: list,
+    max_workers: int | None = None,
+    enable_graph: bool | None = None,
+) -> tuple:
+    """
+    Ingest a specific list of MinIO paths, bypassing the prefix listing phase.
+
+    This is the crawler-facing entry point. KenyaLawCrawler calls it via
+    run_in_executor (sync-safe) every INGEST_BATCH_SIZE newly scraped documents.
+    Unlike main(), it does NOT install signal handlers or print a summary table,
+    making it safe to call from a thread inside an async crawl loop.
+
+    Called by:
+        data_scrapper/scraper/crawlers/legal_sites.py :: KenyaLawCrawler._run_ingest_batch()
+
+    Args:
+        bucket_name: MinIO bucket name containing the objects
+        object_names: Explicit list of MinIO object paths to download and ingest.
+                      Unsupported extensions are silently skipped.
+        max_workers: Override MAX_WORKERS env var for this call only (1-32)
+        enable_graph: Override ENABLE_GRAPH env var for this call only
+
+    Returns:
+        Tuple of (exit_code, stats_dict).
+        exit_code: 0 if at least one file was processed, 1 otherwise.
+        stats_dict keys: files_seen, files_downloaded, files_processed, files_failed,
+                         chunks_created, vectors_indexed, vectors_failed,
+                         graph_indexed, graph_failed.
+    """
+    if not object_names:
+        return 0, {}
+
+    stats: dict = {
+        "files_seen": 0,
+        "files_downloaded": 0,
+        "files_processed": 0,
+        "files_failed": 0,
+        "chunks_created": 0,
+        "vectors_indexed": 0,
+        "vectors_failed": 0,
+        "graph_indexed": 0,
+        "graph_failed": 0,
+    }
+
+    try:
+        config = validate_config()
+    except Exception as e:
+        logger.error("ingest_specific_files: config validation failed: %s", e)
+        return 1, stats
+
+    if max_workers is not None:
+        config["max_workers"] = max(1, min(32, max_workers))
+    if enable_graph is not None:
+        config["enable_graph"] = enable_graph
+
+    try:
+        client = Minio(
+            config["minio_endpoint"],
+            access_key=config["minio_access_key"],
+            secret_key=config["minio_secret_key"],
+            secure=config["minio_secure"],
+        )
+        if not client.bucket_exists(bucket_name):
+            raise ValueError(f"Bucket '{bucket_name}' does not exist")
+
+        file_batch = _download_specific(client, bucket_name, object_names, config, stats)
+        if not file_batch:
+            logger.warning("ingest_specific_files: no supported files downloaded")
+            return 0, stats
+
+        qdrant_indexer = QdrantIndexer()
+        neo4j_indexer = Neo4jIndexer() if config["enable_graph"] else None
+        embedder = BatchEmbedder()
+        extractor = GraphExtractor() if config["enable_graph"] else None
+
+        try:
+            _process_file_batch(
+                file_batch,
+                config,
+                stats,
+                qdrant_indexer,
+                neo4j_indexer,
+                batch_num=1,
+                embedder=embedder,
+                extractor=extractor,
+            )
+        finally:
+            qdrant_indexer.close()
+            if neo4j_indexer:
+                neo4j_indexer.close()
+            embedder.close()
+            if extractor:
+                extractor.close()
+
+        logger.info(
+            "ingest_specific_files done: processed=%d vectors=%d failed=%d",
+            stats["files_processed"],
+            stats["vectors_indexed"],
+            stats["files_failed"],
+        )
+        return (0 if stats["files_processed"] > 0 else 1), stats
+
+    except Exception as e:
+        logger.error("ingest_specific_files fatal error: %s", e, exc_info=True)
+        return 1, stats
 
 
 if __name__ == "__main__":

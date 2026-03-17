@@ -22,8 +22,10 @@ No public JSON/REST API is available. All parsing is HTML-based (BeautifulSoup).
 import asyncio
 import logging
 import re
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from typing import Dict, List, Optional
+from typing import TYPE_CHECKING, Dict, List, Optional
 from urllib.parse import quote_plus, urljoin, urlparse
 
 import aiohttp
@@ -34,6 +36,9 @@ from scraper.crawlers.base import BaseCrawler, CrawlReport
 from scraper.parsers.document_parser import DocumentMetadata, build_minio_path
 from scraper.storage.minio_client import MinIOClient
 from scraper.utils.validators import compute_sha256, validate_pdf
+
+if TYPE_CHECKING:
+    from scraper.db.registry import DocumentRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -248,6 +253,9 @@ class KenyaLawCrawler(BaseCrawler):
     # Default courts to crawl when mode="court"
     DEFAULT_COURTS = ["KESC", "KECA", "KEHC", "KEELRC", "KEELC"]
 
+    # Circuit breaker: open after this many consecutive ingest failures
+    _CIRCUIT_BREAKER_THRESHOLD = 3
+
     def __init__(
         self,
         site_config: dict,
@@ -257,12 +265,25 @@ class KenyaLawCrawler(BaseCrawler):
         max_pages: int = 10,
         mode: str = "court",
         courts: Optional[List[str]] = None,
+        registry: Optional["DocumentRegistry"] = None,
+        auto_ingest: bool = True,
+        loop: Optional[asyncio.AbstractEventLoop] = None,
     ) -> None:
         super().__init__(site_config, settings, minio_client)
         self.terms = terms or []
         self.max_pages = max_pages
         self.mode = mode  # "court" | "search"
         self.courts = [c.upper() for c in courts] if courts else self.DEFAULT_COURTS
+        self.registry = registry
+        self.auto_ingest = auto_ingest
+        self._loop = loop
+
+        # Ingest batching state
+        self._pending_ingest: List[str] = []
+        self._ingest_lock = threading.Lock()
+        self._executor = ThreadPoolExecutor(max_workers=2)
+        self._ingest_circuit_open = False
+        self._consecutive_ingest_failures = 0
 
     # ------------------------------------------------------------------
     # Entry point
@@ -271,6 +292,19 @@ class KenyaLawCrawler(BaseCrawler):
     async def crawl(
         self, start_urls: Optional[List[str]] = None, depth: int = 1
     ) -> CrawlReport:
+        # Pre-load known paths/hashes from DB for O(1) dedup during the run
+        if self.registry is not None:
+            try:
+                self._seen_paths = self.registry.load_known_paths()
+                self._seen_hashes = self.registry.load_known_hashes()
+                logger.info(
+                    "Registry pre-loaded: %d paths, %d hashes",
+                    len(self._seen_paths),
+                    len(self._seen_hashes),
+                )
+            except Exception as exc:
+                logger.warning("Failed to pre-load registry (continuing without): %s", exc)
+
         connector = aiohttp.TCPConnector(limit=10)
         headers = {
             "User-Agent": "SheriaBot/1.0 (+https://sheriaplatform.go.ke/bot)",
@@ -301,6 +335,15 @@ class KenyaLawCrawler(BaseCrawler):
 
             await asyncio.gather(*tasks, return_exceptions=True)
 
+        # Flush any remaining pending documents
+        with self._ingest_lock:
+            remaining = list(self._pending_ingest)
+            self._pending_ingest.clear()
+        if remaining and self.auto_ingest and not self._ingest_circuit_open:
+            logger.info("Flushing %d remaining documents to ingest", len(remaining))
+            await self._run_ingest_batch(remaining)
+
+        self._executor.shutdown(wait=True)
         return report
 
     # ------------------------------------------------------------------
@@ -318,7 +361,11 @@ class KenyaLawCrawler(BaseCrawler):
         logger.info("Crawling court: %s (%s)", court_name, court_code)
         listing_path = self.COURT_LISTING_URL.format(court_code=court_code)
 
-        for page in range(1, self.max_pages + 1):
+        page = 0
+        while True:
+            page += 1
+            if self.max_pages > 0 and page > self.max_pages:
+                break
             url = f"{self.BASE_URL}{listing_path}?page={page}"
             html = await self._fetch_html(url, session)
             if html is None:
@@ -356,7 +403,11 @@ class KenyaLawCrawler(BaseCrawler):
         logger.info("Searching for term: '%s'", term)
         encoded_term = quote_plus(term)
 
-        for page in range(1, self.max_pages + 1):
+        page = 0
+        while True:
+            page += 1
+            if self.max_pages > 0 and page > self.max_pages:
+                break
             url = f"{self.BASE_URL}{self.SEARCH_URL}?q={encoded_term}&page={page}"
             html = await self._fetch_html(url, session)
             if html is None:
@@ -456,12 +507,18 @@ class KenyaLawCrawler(BaseCrawler):
             )
             minio_path = build_minio_path(meta, stable_filename)
 
+            # Fast-path dedup: check in-memory set pre-loaded from registry (or MinIO)
+            if self.registry is not None and minio_path in self._seen_paths:
+                report.documents_skipped_duplicate += 1
+                return
+
             if self.minio.document_exists(minio_path):
                 report.documents_skipped_duplicate += 1
                 self._seen_hashes.add(sha)
                 return
 
             await self._upload(content, minio_path, meta, report)
+            self._seen_paths.add(minio_path)
             self._seen_hashes.add(sha)
             report.documents_downloaded += 1
             logger.info(
@@ -472,6 +529,103 @@ class KenyaLawCrawler(BaseCrawler):
                 jl.title or stable_filename,
                 minio_path,
             )
+
+            # Record in registry
+            source_url = jl.pdf_url if doc_type == "pdf" else jl.docx_url
+            if self.registry is not None:
+                try:
+                    self.registry.mark_scraped(
+                        minio_path, sha, source_url, court_name, jl.year, jl.title
+                    )
+                except Exception as exc:
+                    logger.warning("Registry mark_scraped failed: %s", exc)
+
+            # Trigger batched ingest if enabled
+            if self.auto_ingest and not self._ingest_circuit_open:
+                await self._maybe_trigger_ingest(minio_path)
+
+    # ------------------------------------------------------------------
+    # Batched auto-ingest
+    # ------------------------------------------------------------------
+
+    async def _maybe_trigger_ingest(self, minio_path: str) -> None:
+        """Append path to pending buffer; fire ingest when batch size is reached."""
+        batch_to_run: Optional[List[str]] = None
+        with self._ingest_lock:
+            self._pending_ingest.append(minio_path)
+            if len(self._pending_ingest) >= self.settings.ingest_batch_size:
+                batch_to_run = list(self._pending_ingest)
+                self._pending_ingest.clear()
+
+        if batch_to_run is not None:
+            await self._run_ingest_batch(batch_to_run)
+
+    async def _run_ingest_batch(self, batch: List[str]) -> None:
+        """Run ingestion for a batch of MinIO paths in a thread pool executor."""
+        if self._ingest_circuit_open:
+            logger.warning(
+                "Ingest circuit open — skipping batch of %d documents", len(batch)
+            )
+            return
+
+        if self.registry is None:
+            logger.warning("auto_ingest=True but no registry; cannot track ingest runs")
+            return
+
+        run_id: Optional[int] = None
+        try:
+            run_id = self.registry.create_run(doc_count=len(batch))
+        except Exception as exc:
+            logger.warning("Failed to create ingestion run record: %s", exc)
+
+        try:
+            from pipelines.ingestion.main import ingest_specific_files
+
+            loop = self._loop or asyncio.get_event_loop()
+            exit_code, stats = await loop.run_in_executor(
+                self._executor,
+                lambda: ingest_specific_files(
+                    self.settings.minio_bucket, batch
+                ),
+            )
+
+            if run_id is not None:
+                try:
+                    self.registry.complete_run(run_id, stats)
+                    self.registry.mark_ingested(batch, run_id)
+                except Exception as exc:
+                    logger.warning("Registry update after ingest failed: %s", exc)
+
+            if exit_code == 0:
+                self._consecutive_ingest_failures = 0
+                logger.info(
+                    "Ingest batch complete: %d docs, vectors_indexed=%s",
+                    len(batch),
+                    stats.get("vectors_indexed", "?"),
+                )
+            else:
+                raise RuntimeError(f"ingest_specific_files returned exit_code={exit_code}")
+
+        except Exception as exc:
+            self._consecutive_ingest_failures += 1
+            logger.error(
+                "Ingest batch failed (consecutive failures: %d/%d): %s",
+                self._consecutive_ingest_failures,
+                self._CIRCUIT_BREAKER_THRESHOLD,
+                exc,
+            )
+            if run_id is not None:
+                try:
+                    self.registry.fail_run(run_id, str(exc))
+                except Exception:
+                    pass
+            if self._consecutive_ingest_failures >= self._CIRCUIT_BREAKER_THRESHOLD:
+                self._ingest_circuit_open = True
+                logger.error(
+                    "Ingest circuit breaker OPEN after %d consecutive failures. "
+                    "No further ingest attempts will be made this run.",
+                    self._consecutive_ingest_failures,
+                )
 
     # ------------------------------------------------------------------
     # Shared HTML fetcher

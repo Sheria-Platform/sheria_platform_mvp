@@ -29,6 +29,8 @@ class Settings(BaseSettings):
     max_concurrent_downloads: int = Field(default=5, alias="MAX_CONCURRENT_DOWNLOADS")
     default_rate_limit_rps: float = Field(default=0.5, alias="DEFAULT_RATE_LIMIT_RPS")
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
+    ingest_batch_size: int = Field(default=5, alias="INGEST_BATCH_SIZE")
+    auto_ingest: bool = Field(default=True, alias="AUTO_INGEST")
 
 
 def get_settings() -> Settings:
