@@ -156,6 +156,21 @@ async def predict_case_duration(tool_input: str) -> str:
         report = json.loads(_extract_json(raw))
         # Ensure similar_cases_found reflects actual Qdrant result, not LLM hallucination
         report["similar_cases_found"] = similar_cases_found
+
+        # Compute confidence deterministically so it actually varies with inputs.
+        # Base: how many historical analogies did Qdrant find?
+        _base_by_hits = {0: 0.25, 1: 0.45, 2: 0.60, 3: 0.72, 4: 0.82}
+        base = _base_by_hits.get(similar_cases_found, 0.88 if similar_cases_found >= 5 else 0.25)
+
+        # Adjust for complexity — more complex cases are harder to forecast accurately
+        _complexity_delta = {"low": +0.07, "medium": 0.0, "high": -0.07, "very_high": -0.13}
+        delta = _complexity_delta.get(complexity, 0.0)
+
+        # Boost slightly if the user provided a description (more context = better prediction)
+        description_boost = 0.03 if description else 0.0
+
+        confidence = round(max(0.10, min(0.95, base + delta + description_boost)), 2)
+        report["confidence"] = confidence
     except Exception as exc:
         logger.error("LLM prediction synthesis failed: %s", exc)
         return json.dumps({"error": f"Prediction synthesis failed: {exc}"})
