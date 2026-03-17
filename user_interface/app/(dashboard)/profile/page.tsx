@@ -3,12 +3,10 @@
 import { useEffect, useRef, useState } from "react";
 import { UserCircle, Camera, Loader2, CheckCircle } from "lucide-react";
 import { apiFetch } from "@/lib/api";
-import { getAuthToken, getAuthUser, setAuthUser } from "@/lib/auth";
+import { getAuthUser, setAuthUser } from "@/lib/auth";
 import { useChatStore } from "@/store/chatStore";
 import { UserProfile } from "@/types/api";
 import { UserRole } from "@/types/api";
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -106,10 +104,10 @@ export default function ProfilePage() {
     formData.append("file", file);
 
     try {
-      const token = getAuthToken();
-      const res = await fetch(`${API_BASE}/api/v1/auth/me/avatar`, {
+      // Route through Next.js proxy so the httpOnly sheria_auth cookie is
+      // forwarded as a Bearer token server-side.
+      const res = await fetch("/api/proxy/avatar", {
         method: "POST",
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
         body: formData,
       });
 

@@ -32,5 +32,4 @@ export interface AuthUser {
   court?: string;
   full_name?: string;
   avatar_url?: string;
-  token: string;
 }

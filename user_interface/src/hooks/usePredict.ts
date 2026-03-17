@@ -1,10 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { getAuthToken } from "@/lib/auth";
 import { PredictionRequest, PredictionReport } from "@/types/api";
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 export type PredictState = "idle" | "predicting" | "done" | "error";
 
@@ -25,13 +22,11 @@ export function usePredict() {
     setReport(null);
 
     try {
-      const token = getAuthToken();
-      const res = await fetch(`${API_BASE}/api/v1/predict`, {
+      // Route through Next.js proxy so the httpOnly sheria_auth cookie is
+      // forwarded as a Bearer token to FastAPI server-side.
+      const res = await fetch("/api/proxy/predict", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(req),
       });
 

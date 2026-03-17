@@ -1,10 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { getAuthToken } from "@/lib/auth";
 import { DocumentType, VerificationReport } from "@/types/api";
-
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 export type VerifyState = "idle" | "verifying" | "done" | "error";
 
@@ -41,10 +38,10 @@ export function useVerify() {
     body.append("case_number", caseNumber);
 
     try {
-      const token = getAuthToken();
-      const res = await fetch(`${API_BASE}/api/v1/verify`, {
+      // Route through Next.js proxy so the httpOnly sheria_auth cookie is
+      // forwarded as a Bearer token to FastAPI server-side.
+      const res = await fetch("/api/proxy/verify", {
         method: "POST",
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
         body,
       });
 
