@@ -13,7 +13,10 @@ from urllib.robotparser import RobotFileParser
 import aiohttp
 
 from scraper.config.settings import Settings
-from scraper.parsers.document_parser import DocumentMetadata, build_minio_path, build_metadata_json
+from scraper.parsers.document_parser import (
+    DocumentMetadata,
+    build_minio_path,
+)
 from scraper.storage.minio_client import MinIOClient
 from scraper.utils.rate_limiter import RateLimiterRegistry
 
@@ -113,7 +116,9 @@ class BaseCrawler(ABC):
                 except Exception as exc:
                     logger.warning("Link extraction failed for %s: %s", url, exc)
             if next_links:
-                await self._crawl_recursive(next_links, remaining_depth - 1, session, report)
+                await self._crawl_recursive(
+                    next_links, remaining_depth - 1, session, report
+                )
 
     async def _process_url(
         self,
@@ -169,7 +174,9 @@ class BaseCrawler(ABC):
     ) -> Optional[aiohttp.ClientResponse]:
         """GET `url` with retry + rate limiting. Returns response or None."""
         domain = urlparse(url).netloc
-        rps = self.site_config.get("rate_limit_rps", self.settings.default_rate_limit_rps)
+        rps = self.site_config.get(
+            "rate_limit_rps", self.settings.default_rate_limit_rps
+        )
         limiter = RateLimiterRegistry.get(domain, rps)
 
         for attempt in range(_MAX_RETRIES):
@@ -177,28 +184,34 @@ class BaseCrawler(ABC):
                 try:
                     resp = await session.get(url, allow_redirects=True)
                     if resp.status == 401 or resp.status == 403:
-                        raise AuthenticationError(
-                            f"HTTP {resp.status} from {url}"
-                        )
+                        raise AuthenticationError(f"HTTP {resp.status} from {url}")
                     resp.raise_for_status()
                     return resp
                 except AuthenticationError:
                     raise
                 except aiohttp.ClientResponseError as exc:
                     if exc.status in (429, 503) or attempt < _MAX_RETRIES - 1:
-                        delay = _RETRY_BASE_DELAY * (2 ** attempt)
+                        delay = _RETRY_BASE_DELAY * (2**attempt)
                         logger.warning(
                             "Attempt %d/%d failed for %s (status %d). Retrying in %.1fs.",
-                            attempt + 1, _MAX_RETRIES, url, exc.status, delay,
+                            attempt + 1,
+                            _MAX_RETRIES,
+                            url,
+                            exc.status,
+                            delay,
                         )
                         await asyncio.sleep(delay)
                     else:
                         raise
                 except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
-                    delay = _RETRY_BASE_DELAY * (2 ** attempt)
+                    delay = _RETRY_BASE_DELAY * (2**attempt)
                     logger.warning(
                         "Attempt %d/%d network error for %s: %s. Retrying in %.1fs.",
-                        attempt + 1, _MAX_RETRIES, url, exc, delay,
+                        attempt + 1,
+                        _MAX_RETRIES,
+                        url,
+                        exc,
+                        delay,
                     )
                     if attempt < _MAX_RETRIES - 1:
                         await asyncio.sleep(delay)
@@ -230,8 +243,8 @@ class BaseCrawler(ABC):
         meta: DocumentMetadata,
         report: CrawlReport,
     ) -> None:
-        from scraper.utils.validators import detect_mime_type
         from scraper.parsers.document_parser import build_metadata_json
+        from scraper.utils.validators import detect_mime_type
 
         content_type = detect_mime_type(content, minio_path)
         try:
@@ -244,7 +257,9 @@ class BaseCrawler(ABC):
             self.minio.upload_metadata_json(build_metadata_json(meta), minio_path)
         except Exception as exc:
             logger.warning(
-                "MinIO upload failed for %s: %s. Falling back to local temp dir.", minio_path, exc
+                "MinIO upload failed for %s: %s. Falling back to local temp dir.",
+                minio_path,
+                exc,
             )
             report.upload_failures.append(minio_path)
             self._save_local_fallback(content, minio_path)
@@ -262,7 +277,9 @@ class BaseCrawler(ABC):
     # robots.txt
     # ------------------------------------------------------------------
 
-    def _check_robots(self, url: str, session: Optional[aiohttp.ClientSession] = None) -> bool:
+    def _check_robots(
+        self, url: str, session: Optional[aiohttp.ClientSession] = None
+    ) -> bool:
         """Return True if the URL is allowed by robots.txt (synchronous check via cache)."""
         if not self.site_config.get("robots_txt", True):
             return True
@@ -299,7 +316,7 @@ class BaseCrawler(ABC):
         self, url: str, content: bytes, filename: str
     ) -> Optional[DocumentMetadata]:
         """Validate content and delegate to _extract_metadata."""
-        from scraper.utils.validators import validate_pdf, validate_docx, compute_sha256
+        from scraper.utils.validators import compute_sha256, validate_docx, validate_pdf
 
         ext = filename.rsplit(".", 1)[-1].lower()
         if ext == "pdf" and not validate_pdf(content):

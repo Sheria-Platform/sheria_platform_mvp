@@ -43,6 +43,7 @@ pyasn1==0.6.1
 pyasn1_modules==0.4.2
 oauthlib==3.3.1
 requests-oauthlib==2.0.0
+slowapi>=0.1.9
 
 # Monitoring & Observability
 opentelemetry-api==1.38.0
@@ -90,6 +91,9 @@ pytest-mock==3.14.0
 # WebSockets
 websockets==15.0.1
 websocket-client==1.9.0
+
+# PDF parsing (Sheria Verify)
+pypdf>=4.0.0
 
 # Serialization
 orjson==3.11.4

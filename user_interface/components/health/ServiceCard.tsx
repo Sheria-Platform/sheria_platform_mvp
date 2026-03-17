@@ -3,10 +3,10 @@ import { StatusBadge } from "./StatusBadge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 const SERVICE_ICONS: Record<string, string> = {
-  redis: "🔴",
-  qdrant: "🔵",
-  neo4j: "🟢",
   postgres: "🐘",
+  redis: "⚡",
+  qdrant: "🔍",
+  neo4j: "🕸️",
   ollama: "🤖",
   minio: "🪣",
 };

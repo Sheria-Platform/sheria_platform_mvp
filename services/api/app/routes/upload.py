@@ -23,9 +23,10 @@ import boto3
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
+from services.api.app.auth.permissions import require_role
 from services.api.app.auth.jwt import get_current_user
 from services.api.app.config import settings
-from services.api.app.memory.postgres import postgres_memory
+from services.api.app.memory.ingestion_repository import ingestion_repository
 
 router = APIRouter()
 
@@ -128,9 +129,7 @@ async def generate_upload_url(
         )
 
     file_id = str(uuid.uuid4())
-    extension = (
-        req.filename.rsplit(".", 1)[-1] if "." in req.filename else "bin"
-    )
+    extension = req.filename.rsplit(".", 1)[-1] if "." in req.filename else "bin"
     s3_key = f"uploads/{user['id']}/{file_id}.{extension}"
 
     try:
@@ -143,9 +142,7 @@ async def generate_upload_url(
             },
             ExpiresIn=_PRESIGNED_URL_TTL,
         )
-        return PresignedURLResponse(
-            upload_url=url, file_id=file_id, s3_key=s3_key
-        )
+        return PresignedURLResponse(upload_url=url, file_id=file_id, s3_key=s3_key)
 
     except Exception as exc:
         raise HTTPException(
@@ -155,7 +152,7 @@ async def generate_upload_url(
 
 
 # ---------------------------------------------------------------------------
-# In-memory job store — live status cache; persisted to PostgreSQL for durability
+# In-memory job store -- live status cache; persisted to PostgreSQL for durability
 # ---------------------------------------------------------------------------
 _jobs: dict[str, dict[str, Any]] = {}
 _jobs_lock = threading.Lock()
@@ -172,7 +169,7 @@ class JobStatus(BaseModel):
     status: str  # pending | running | done | failed
     filename: str = ""
     s3_key: str = ""
-    started_at: float | None = None   # unix timestamp
+    started_at: float | None = None  # unix timestamp
     completed_at: float | None = None
     duration_s: float | None = None
     stats: dict = {}
@@ -183,9 +180,10 @@ def _run_ingest(job_id: str, bucket: str, s3_key: str, user_id: str) -> None:
     with _jobs_lock:
         _jobs[job_id]["status"] = "running"
         _jobs[job_id]["started_at"] = time.time()
-    asyncio.run(postgres_memory.update_ingestion_job(job_id, status="running"))
+    asyncio.run(ingestion_repository.update_ingestion_job(job_id, status="running"))
     try:
         from pipelines.ingestion.main import main as ingest_main  # lazy import
+
         exit_code, stats = ingest_main(bucket_name=bucket, prefix=s3_key)
         completed = time.time()
         final_status = "done" if exit_code == 0 else "failed"
@@ -196,13 +194,15 @@ def _run_ingest(job_id: str, bucket: str, s3_key: str, user_id: str) -> None:
             _jobs[job_id]["duration_s"] = round(
                 completed - (_jobs[job_id].get("started_at") or completed), 1
             )
-        asyncio.run(postgres_memory.update_ingestion_job(
-            job_id,
-            status=final_status,
-            completed_at=datetime.utcfromtimestamp(completed),
-            duration_s=_jobs[job_id]["duration_s"],
-            stats=stats,
-        ))
+        asyncio.run(
+            ingestion_repository.update_ingestion_job(
+                job_id,
+                status=final_status,
+                completed_at=datetime.utcfromtimestamp(completed),
+                duration_s=_jobs[job_id]["duration_s"],
+                stats=stats,
+            )
+        )
     except Exception as exc:
         completed = time.time()
         duration = round(completed - (_jobs[job_id].get("started_at") or completed), 1)
@@ -211,19 +211,25 @@ def _run_ingest(job_id: str, bucket: str, s3_key: str, user_id: str) -> None:
             _jobs[job_id]["error"] = str(exc)
             _jobs[job_id]["completed_at"] = completed
             _jobs[job_id]["duration_s"] = duration
-        asyncio.run(postgres_memory.update_ingestion_job(
-            job_id,
-            status="failed",
-            completed_at=datetime.utcfromtimestamp(completed),
-            duration_s=duration,
-            error=str(exc),
-        ))
+        asyncio.run(
+            ingestion_repository.update_ingestion_job(
+                job_id,
+                status="failed",
+                completed_at=datetime.utcfromtimestamp(completed),
+                duration_s=duration,
+                error=str(exc),
+            )
+        )
 
 
-@router.post("/ingest", response_model=JobStatus, summary="Trigger ingestion for an uploaded file")
+@router.post(
+    "/ingest",
+    response_model=JobStatus,
+    summary="Trigger ingestion for an uploaded file",
+)
 async def trigger_ingest(
     req: IngestRequest,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_role("registrar", "clerk")),
 ) -> JobStatus:
     """Start the ingestion pipeline for a file that was just uploaded to MinIO."""
     if not settings.S3_BUCKET_NAME:
@@ -247,7 +253,7 @@ async def trigger_ingest(
             "error": "",
         }
 
-    await postgres_memory.create_ingestion_job(
+    await ingestion_repository.create_ingestion_job(
         job_id=job_id,
         user_id=user["id"],
         filename=filename,
@@ -261,20 +267,24 @@ async def trigger_ingest(
         daemon=True,
     )
     t.start()
-    return JobStatus(job_id=job_id, status="pending", **{
-        k: _jobs[job_id][k] for k in ("filename", "s3_key", "started_at")
-    })
+    return JobStatus(
+        job_id=job_id,
+        status="pending",
+        **{k: _jobs[job_id][k] for k in ("filename", "s3_key", "started_at")},
+    )
 
 
 @router.get("/jobs", response_model=list[JobStatus], summary="List all ingestion jobs")
 async def list_jobs(
     user: dict = Depends(get_current_user),
 ) -> list[JobStatus]:
-    rows = await postgres_memory.get_all_ingestion_jobs(user["id"])
+    rows = await ingestion_repository.get_all_ingestion_jobs(user["id"])
     return [JobStatus(**r) for r in rows]
 
 
-@router.get("/jobs/{job_id}", response_model=JobStatus, summary="Poll ingestion job status")
+@router.get(
+    "/jobs/{job_id}", response_model=JobStatus, summary="Poll ingestion job status"
+)
 async def get_job_status(
     job_id: str,
     user: dict = Depends(get_current_user),
@@ -288,7 +298,9 @@ async def get_job_status(
             **{k: v for k, v in job.items() if k != "user_id"},
         )
     # Fall back to DB for completed / pre-restart jobs
-    row = await postgres_memory.get_ingestion_job(job_id, user["id"])
+    row = await ingestion_repository.get_ingestion_job(job_id, user["id"])
     if not row:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Job not found"
+        )
     return JobStatus(**row)

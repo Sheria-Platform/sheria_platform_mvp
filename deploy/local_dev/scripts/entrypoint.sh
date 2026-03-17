@@ -35,7 +35,8 @@ echo "[entrypoint] Ollama API is ready."
 # Pull and warm up each model listed in MODELS_TO_PULL
 # Accepts comma-separated or space-separated list (e.g. "qwen3:8b,nomic-embed-text")
 if [ -n "${MODELS_TO_PULL:-}" ]; then
-    for model in $(echo "${MODELS_TO_PULL}" | tr ',' ' '); do
+    IFS=',' read -ra MODELS <<< "${MODELS_TO_PULL}"
+    for model in "${MODELS[@]}"; do
         echo "[entrypoint] Pulling model: $model"
 
         # Retry loop — transient network errors must not crash the container.

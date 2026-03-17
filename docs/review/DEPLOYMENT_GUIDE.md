@@ -113,7 +113,7 @@ volumes:
 
 **Pull required models after startup:**
 ```bash
-docker exec -it ollama ollama pull llama3.3
+docker exec -it ollama ollama pull qwen3:8b
 docker exec -it ollama ollama pull nomic-embed-text
 ```
 
@@ -219,7 +219,7 @@ QDRANT_COLLECTION=kenya_law_reports
 
 # Ollama
 OLLAMA_BASE_URL=http://localhost:11434
-OLLAMA_LLM_MODEL=llama3.3
+OLLAMA_LLM_MODEL=qwen3:8b
 OLLAMA_EMBEDDING_MODEL=nomic-embed-text
 
 # MinIO (for presigned URLs)
@@ -261,7 +261,7 @@ make up
 docker compose ps
 
 # 4. Pull Ollama models (first time only, takes ~10 minutes)
-docker exec -it ollama ollama pull llama3.3
+docker exec -it ollama ollama pull qwen3:8b
 docker exec -it ollama ollama pull nomic-embed-text
 
 # 5. Start API server with hot reload
@@ -299,7 +299,7 @@ sheria-api
   ├── qdrant (REQUIRED: vector search + semantic cache)
   ├── neo4j (REQUIRED: graph search)
   └── ollama (REQUIRED: LLM + embeddings)
-        └── [models: llama3.3, nomic-embed-text]
+        └── [models: qwen3:8b, nomic-embed-text]
 
 open-webui
   └── ollama (optional integration)
@@ -331,7 +331,7 @@ volumes:
 | `qdrant_data` | 5-20 GB (depends on corpus size) |
 | `neo4j_data` | 1-5 GB |
 | `minio_data` | 10-500 GB (court documents) |
-| `ollama_data` | 8 GB (llama3.3) + 0.5 GB (nomic-embed-text) |
+| `ollama_data` | 8 GB (qwen3:8b) + 0.5 GB (nomic-embed-text) |
 
 ---
 

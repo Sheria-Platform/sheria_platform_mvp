@@ -55,6 +55,7 @@ RETRIEVAL_DOCS = Histogram(
 
 # ── Helpers ────────────────────────────────────────────────────────────────
 
+
 def track_request(method: str, endpoint: str, status: int) -> None:
     """Increment the HTTP request counter."""
     REQUEST_COUNT.labels(method=method, endpoint=endpoint, status=status).inc()

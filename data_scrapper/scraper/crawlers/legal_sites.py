@@ -22,9 +22,11 @@ No public JSON/REST API is available. All parsing is HTML-based (BeautifulSoup).
 import asyncio
 import logging
 import re
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
-from typing import Dict, List, Optional
-from urllib.parse import urljoin, urlparse, quote_plus
+from typing import TYPE_CHECKING, Dict, List, Optional
+from urllib.parse import quote_plus, urljoin, urlparse
 
 import aiohttp
 from bs4 import BeautifulSoup
@@ -35,6 +37,9 @@ from scraper.parsers.document_parser import DocumentMetadata, build_minio_path
 from scraper.storage.minio_client import MinIOClient
 from scraper.utils.validators import compute_sha256, validate_pdf
 
+if TYPE_CHECKING:
+    from scraper.db.registry import DocumentRegistry
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -42,22 +47,22 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 COURT_CODES: Dict[str, str] = {
-    "supreme_court":              "KESC",
-    "court_of_appeal":            "KECA",
-    "high_court":                 "KEHC",
-    "employment_labour":          "KEELRC",
-    "environment_land":           "KEELC",
-    "industrial_court":           "KEIC",
+    "supreme_court": "KESC",
+    "court_of_appeal": "KECA",
+    "high_court": "KEHC",
+    "employment_labour": "KEELRC",
+    "environment_land": "KEELC",
+    "industrial_court": "KEIC",
 }
 
 # Human-readable names for metadata
 COURT_NAMES: Dict[str, str] = {
-    "KESC":   "Supreme Court of Kenya",
-    "KECA":   "Court of Appeal of Kenya",
-    "KEHC":   "High Court of Kenya",
+    "KESC": "Supreme Court of Kenya",
+    "KECA": "Court of Appeal of Kenya",
+    "KEHC": "High Court of Kenya",
     "KEELRC": "Employment and Labour Relations Court",
-    "KEELC":  "Environment and Land Court",
-    "KEIC":   "Industrial Court of Kenya",
+    "KEELC": "Environment and Land Court",
+    "KEIC": "Industrial Court of Kenya",
 }
 
 # AKN URL pattern for individual judgments
@@ -80,6 +85,7 @@ _ANCHOR_TEXT_RE = re.compile(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _clean_text(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip() if text else ""
@@ -138,10 +144,11 @@ def _akn_to_docx_url(base_url: str, akn_href: str) -> str:
 @dataclass
 class JudgmentLink:
     """Parsed judgment link extracted from a listing or search page."""
-    akn_href: str          # e.g. /akn/ke/judgment/kesc/2026/20/eng@2026-02-20
+
+    akn_href: str  # e.g. /akn/ke/judgment/kesc/2026/20/eng@2026-02-20
     pdf_url: str
     docx_url: str
-    court_code: str        # e.g. KESC
+    court_code: str  # e.g. KESC
     year: str
     citation_number: str
     date: str
@@ -170,25 +177,32 @@ def _extract_judgment_links(html: str, base_url: str) -> List[JudgmentLink]:
         if not m:
             continue
 
-        court_raw, year, citation_num, date = m.group(1), m.group(2), m.group(3), m.group(4)
+        court_raw, year, citation_num, date = (
+            m.group(1),
+            m.group(2),
+            m.group(3),
+            m.group(4),
+        )
         court_code = court_raw.upper()
 
         anchor_text = _clean_text(anchor.get_text(separator=" "))
         meta = _parse_anchor_metadata(anchor_text)
 
-        links.append(JudgmentLink(
-            akn_href=href,
-            pdf_url=_akn_to_pdf_url(base_url, href),
-            docx_url=_akn_to_docx_url(base_url, href),
-            court_code=court_code,
-            year=year,
-            citation_number=citation_num,
-            date=date,
-            title=meta.get("title") or anchor_text,
-            case_number=meta.get("case_number"),
-            citation=meta.get("citation"),
-            doc_type_label=meta.get("doc_type"),
-        ))
+        links.append(
+            JudgmentLink(
+                akn_href=href,
+                pdf_url=_akn_to_pdf_url(base_url, href),
+                docx_url=_akn_to_docx_url(base_url, href),
+                court_code=court_code,
+                year=year,
+                citation_number=citation_num,
+                date=date,
+                title=meta.get("title") or anchor_text,
+                case_number=meta.get("case_number"),
+                citation=meta.get("citation"),
+                doc_type_label=meta.get("doc_type"),
+            )
+        )
 
     return links
 
@@ -210,6 +224,7 @@ def _has_next_page(html: str) -> bool:
 # ---------------------------------------------------------------------------
 # Kenya Law Crawler
 # ---------------------------------------------------------------------------
+
 
 class KenyaLawCrawler(BaseCrawler):
     """
@@ -238,6 +253,9 @@ class KenyaLawCrawler(BaseCrawler):
     # Default courts to crawl when mode="court"
     DEFAULT_COURTS = ["KESC", "KECA", "KEHC", "KEELRC", "KEELC"]
 
+    # Circuit breaker: open after this many consecutive ingest failures
+    _CIRCUIT_BREAKER_THRESHOLD = 3
+
     def __init__(
         self,
         site_config: dict,
@@ -247,18 +265,46 @@ class KenyaLawCrawler(BaseCrawler):
         max_pages: int = 10,
         mode: str = "court",
         courts: Optional[List[str]] = None,
+        registry: Optional["DocumentRegistry"] = None,
+        auto_ingest: bool = True,
+        loop: Optional[asyncio.AbstractEventLoop] = None,
     ) -> None:
         super().__init__(site_config, settings, minio_client)
         self.terms = terms or []
         self.max_pages = max_pages
         self.mode = mode  # "court" | "search"
         self.courts = [c.upper() for c in courts] if courts else self.DEFAULT_COURTS
+        self.registry = registry
+        self.auto_ingest = auto_ingest
+        self._loop = loop
+
+        # Ingest batching state
+        self._pending_ingest: List[str] = []
+        self._ingest_lock = threading.Lock()
+        self._executor = ThreadPoolExecutor(max_workers=2)
+        self._ingest_circuit_open = False
+        self._consecutive_ingest_failures = 0
 
     # ------------------------------------------------------------------
     # Entry point
     # ------------------------------------------------------------------
 
-    async def crawl(self, start_urls: Optional[List[str]] = None, depth: int = 1) -> CrawlReport:
+    async def crawl(
+        self, start_urls: Optional[List[str]] = None, depth: int = 1
+    ) -> CrawlReport:
+        # Pre-load known paths/hashes from DB for O(1) dedup during the run
+        if self.registry is not None:
+            try:
+                self._seen_paths = self.registry.load_known_paths()
+                self._seen_hashes = self.registry.load_known_hashes()
+                logger.info(
+                    "Registry pre-loaded: %d paths, %d hashes",
+                    len(self._seen_paths),
+                    len(self._seen_hashes),
+                )
+            except Exception as exc:
+                logger.warning("Failed to pre-load registry (continuing without): %s", exc)
+
         connector = aiohttp.TCPConnector(limit=10)
         headers = {
             "User-Agent": "SheriaBot/1.0 (+https://sheriaplatform.go.ke/bot)",
@@ -289,6 +335,15 @@ class KenyaLawCrawler(BaseCrawler):
 
             await asyncio.gather(*tasks, return_exceptions=True)
 
+        # Flush any remaining pending documents
+        with self._ingest_lock:
+            remaining = list(self._pending_ingest)
+            self._pending_ingest.clear()
+        if remaining and self.auto_ingest and not self._ingest_circuit_open:
+            logger.info("Flushing %d remaining documents to ingest", len(remaining))
+            await self._run_ingest_batch(remaining)
+
+        self._executor.shutdown(wait=True)
         return report
 
     # ------------------------------------------------------------------
@@ -306,7 +361,11 @@ class KenyaLawCrawler(BaseCrawler):
         logger.info("Crawling court: %s (%s)", court_name, court_code)
         listing_path = self.COURT_LISTING_URL.format(court_code=court_code)
 
-        for page in range(1, self.max_pages + 1):
+        page = 0
+        while True:
+            page += 1
+            if self.max_pages > 0 and page > self.max_pages:
+                break
             url = f"{self.BASE_URL}{listing_path}?page={page}"
             html = await self._fetch_html(url, session)
             if html is None:
@@ -320,7 +379,9 @@ class KenyaLawCrawler(BaseCrawler):
 
             logger.info(
                 "[%s] page %d — found %d judgment links",
-                court_code, page, len(links),
+                court_code,
+                page,
+                len(links),
             )
             await self._process_links(links, session, report, sem)
 
@@ -342,7 +403,11 @@ class KenyaLawCrawler(BaseCrawler):
         logger.info("Searching for term: '%s'", term)
         encoded_term = quote_plus(term)
 
-        for page in range(1, self.max_pages + 1):
+        page = 0
+        while True:
+            page += 1
+            if self.max_pages > 0 and page > self.max_pages:
+                break
             url = f"{self.BASE_URL}{self.SEARCH_URL}?q={encoded_term}&page={page}"
             html = await self._fetch_html(url, session)
             if html is None:
@@ -351,12 +416,16 @@ class KenyaLawCrawler(BaseCrawler):
 
             links = _extract_judgment_links(html, self.BASE_URL)
             if not links:
-                logger.debug("No judgment links on search page %d for '%s'.", page, term)
+                logger.debug(
+                    "No judgment links on search page %d for '%s'.", page, term
+                )
                 break
 
             logger.info(
                 "[search:'%s'] page %d — found %d judgment links",
-                term, page, len(links),
+                term,
+                page,
+                len(links),
             )
             await self._process_links(links, session, report, sem)
 
@@ -374,10 +443,7 @@ class KenyaLawCrawler(BaseCrawler):
         report: CrawlReport,
         sem: asyncio.Semaphore,
     ) -> None:
-        tasks = [
-            self._download_and_store(jl, session, report, sem)
-            for jl in links
-        ]
+        tasks = [self._download_and_store(jl, session, report, sem) for jl in links]
         await asyncio.gather(*tasks, return_exceptions=True)
 
     async def _download_and_store(
@@ -408,7 +474,9 @@ class KenyaLawCrawler(BaseCrawler):
                     report.documents_failed += 1
                     return
                 doc_type = "docx"
-                filename = filename if filename.endswith(".docx") else f"{filename}.docx"
+                filename = (
+                    filename if filename.endswith(".docx") else f"{filename}.docx"
+                )
             else:
                 doc_type = "pdf"
                 if not filename.endswith(".pdf"):
@@ -439,19 +507,125 @@ class KenyaLawCrawler(BaseCrawler):
             )
             minio_path = build_minio_path(meta, stable_filename)
 
+            # Fast-path dedup: check in-memory set pre-loaded from registry (or MinIO)
+            if self.registry is not None and minio_path in self._seen_paths:
+                report.documents_skipped_duplicate += 1
+                return
+
             if self.minio.document_exists(minio_path):
                 report.documents_skipped_duplicate += 1
                 self._seen_hashes.add(sha)
                 return
 
             await self._upload(content, minio_path, meta, report)
+            self._seen_paths.add(minio_path)
             self._seen_hashes.add(sha)
             report.documents_downloaded += 1
             logger.info(
                 "Stored [%s %s/%s] %s → %s",
-                jl.court_code, jl.year, jl.citation_number,
-                jl.title or stable_filename, minio_path,
+                jl.court_code,
+                jl.year,
+                jl.citation_number,
+                jl.title or stable_filename,
+                minio_path,
             )
+
+            # Record in registry
+            source_url = jl.pdf_url if doc_type == "pdf" else jl.docx_url
+            if self.registry is not None:
+                try:
+                    self.registry.mark_scraped(
+                        minio_path, sha, source_url, court_name, jl.year, jl.title
+                    )
+                except Exception as exc:
+                    logger.warning("Registry mark_scraped failed: %s", exc)
+
+            # Trigger batched ingest if enabled
+            if self.auto_ingest and not self._ingest_circuit_open:
+                await self._maybe_trigger_ingest(minio_path)
+
+    # ------------------------------------------------------------------
+    # Batched auto-ingest
+    # ------------------------------------------------------------------
+
+    async def _maybe_trigger_ingest(self, minio_path: str) -> None:
+        """Append path to pending buffer; fire ingest when batch size is reached."""
+        batch_to_run: Optional[List[str]] = None
+        with self._ingest_lock:
+            self._pending_ingest.append(minio_path)
+            if len(self._pending_ingest) >= self.settings.ingest_batch_size:
+                batch_to_run = list(self._pending_ingest)
+                self._pending_ingest.clear()
+
+        if batch_to_run is not None:
+            await self._run_ingest_batch(batch_to_run)
+
+    async def _run_ingest_batch(self, batch: List[str]) -> None:
+        """Run ingestion for a batch of MinIO paths in a thread pool executor."""
+        if self._ingest_circuit_open:
+            logger.warning(
+                "Ingest circuit open — skipping batch of %d documents", len(batch)
+            )
+            return
+
+        if self.registry is None:
+            logger.warning("auto_ingest=True but no registry; cannot track ingest runs")
+            return
+
+        run_id: Optional[int] = None
+        try:
+            run_id = self.registry.create_run(doc_count=len(batch))
+        except Exception as exc:
+            logger.warning("Failed to create ingestion run record: %s", exc)
+
+        try:
+            from pipelines.ingestion.main import ingest_specific_files
+
+            loop = self._loop or asyncio.get_event_loop()
+            exit_code, stats = await loop.run_in_executor(
+                self._executor,
+                lambda: ingest_specific_files(
+                    self.settings.minio_bucket, batch
+                ),
+            )
+
+            if run_id is not None:
+                try:
+                    self.registry.complete_run(run_id, stats)
+                    self.registry.mark_ingested(batch, run_id)
+                except Exception as exc:
+                    logger.warning("Registry update after ingest failed: %s", exc)
+
+            if exit_code == 0:
+                self._consecutive_ingest_failures = 0
+                logger.info(
+                    "Ingest batch complete: %d docs, vectors_indexed=%s",
+                    len(batch),
+                    stats.get("vectors_indexed", "?"),
+                )
+            else:
+                raise RuntimeError(f"ingest_specific_files returned exit_code={exit_code}")
+
+        except Exception as exc:
+            self._consecutive_ingest_failures += 1
+            logger.error(
+                "Ingest batch failed (consecutive failures: %d/%d): %s",
+                self._consecutive_ingest_failures,
+                self._CIRCUIT_BREAKER_THRESHOLD,
+                exc,
+            )
+            if run_id is not None:
+                try:
+                    self.registry.fail_run(run_id, str(exc))
+                except Exception:
+                    pass
+            if self._consecutive_ingest_failures >= self._CIRCUIT_BREAKER_THRESHOLD:
+                self._ingest_circuit_open = True
+                logger.error(
+                    "Ingest circuit breaker OPEN after %d consecutive failures. "
+                    "No further ingest attempts will be made this run.",
+                    self._consecutive_ingest_failures,
+                )
 
     # ------------------------------------------------------------------
     # Shared HTML fetcher
@@ -503,6 +677,7 @@ class KenyaLawCrawler(BaseCrawler):
 # ---------------------------------------------------------------------------
 # Generic Legal Crawler (unchanged)
 # ---------------------------------------------------------------------------
+
 
 class GenericLegalCrawler(BaseCrawler):
     """
@@ -573,15 +748,19 @@ class GenericLegalCrawler(BaseCrawler):
 
                     links = await self._extract_links(resp, url)
                     doc_links = [
-                        lk for lk in links
+                        lk
+                        for lk in links
                         if any(lk.lower().endswith(ext) for ext in self._SUPPORTED_EXTS)
                     ]
                     page_links = [
-                        lk for lk in links
-                        if not any(lk.lower().endswith(ext) for ext in self._SUPPORTED_EXTS)
+                        lk
+                        for lk in links
+                        if not any(
+                            lk.lower().endswith(ext) for ext in self._SUPPORTED_EXTS
+                        )
                     ]
 
-                    sem = asyncio.Semaphore(self.settings.max_concurrent_downloads)
+                    _sem = asyncio.Semaphore(self.settings.max_concurrent_downloads)
                     tasks = [
                         self._process_url(doc_url, session, report)
                         for doc_url in doc_links

@@ -54,4 +54,4 @@ if __name__ == "__main__":
 
     upload_directory(sys.argv[1], sys.argv[2])
 # kenya_law_data/case_law
-# 
+#

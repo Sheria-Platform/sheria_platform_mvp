@@ -1,0 +1,70 @@
+default_language_version:
+  python: python3.11
+
+repos:
+  # ── General hygiene ──────────────────────────────────────────────────────
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md]
+      - id: end-of-file-fixer
+      - id: check-yaml
+        args: [--unsafe]   # Ray cluster YAML uses custom tags
+      - id: check-json
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: [--maxkb=1000]   # prevent court PDFs being committed to git
+      - id: debug-statements   # catches pdb/ipdb/breakpoint() left in code
+      - id: mixed-line-ending
+        args: [--fix=lf]
+      - id: check-case-conflict
+
+  # ── Python linting + formatting (replaces black + isort + flake8) ────────
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.11.4
+    hooks:
+      - id: ruff
+        args: [--fix, --exit-non-zero-on-fix]
+        types_or: [python, pyi]
+      - id: ruff-format
+        types_or: [python, pyi]
+
+  # ── Type checking — scoped to typed services only ────────────────────────
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.15.0
+    hooks:
+      - id: mypy
+        name: mypy (services/api + libs)
+        args: [--config-file=pyproject.toml, --no-error-summary]
+        files: ^(services/api|libs)/
+        additional_dependencies:
+          - pydantic==2.12.4
+          - pydantic-settings==2.12.0
+          - fastapi==0.128.0
+          - sqlalchemy==2.0.44
+          - redis==7.1.0
+          - types-redis==4.6.0.20241004
+          - types-pyyaml==6.0.12.20250915
+          - types-passlib==1.7.7.20260211
+          - types-requests==2.32.4.20260107
+
+  # ── Secret detection (critical for judicial platform) ────────────────────
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.5.0
+    hooks:
+      - id: detect-secrets
+        args:
+          - --baseline
+          - .secrets.baseline
+          - --exclude-files
+          - "(tests/conftest\\.py|\\.env\\.example)"
+
+  # ── Shell script linting ─────────────────────────────────────────────────
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.10.0.1
+    hooks:
+      - id: shellcheck
+        files: \.(sh|bash)$
+        args: [--severity=warning]

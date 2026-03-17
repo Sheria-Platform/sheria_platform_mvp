@@ -1,5 +1,3 @@
-import { getAuthToken } from "./auth";
-
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 interface FetchOptions extends RequestInit {
@@ -10,19 +8,22 @@ export async function apiFetch<T>(
   path: string,
   options: FetchOptions = {}
 ): Promise<T> {
-  const { skipAuth, ...fetchOptions } = options;
-  const token = skipAuth ? null : getAuthToken();
+  const { skipAuth: _skipAuth, ...fetchOptions } = options;
 
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     ...(fetchOptions.headers as Record<string, string>),
   };
 
-  if (token) {
-    headers["Authorization"] = `Bearer ${token}`;
-  }
+  // Authorization is handled server-side via the httpOnly sheria_auth cookie.
+  // Calls that reach FastAPI directly must be routed through a Next.js API
+  // proxy route (app/api/proxy/...) which reads the httpOnly cookie and adds
+  // the Bearer header before forwarding.
 
-  const url = path.startsWith("http") ? path : `${API_BASE}${path}`;
+  // Paths routed through Next.js (/api/auth/... or /api/proxy/...) are same-origin.
+  const url = path.startsWith("http") || path.startsWith("/api/auth") || path.startsWith("/api/proxy")
+    ? path
+    : `${API_BASE}${path}`;
   const res = await fetch(url, { ...fetchOptions, headers });
 
   if (!res.ok) {
@@ -47,16 +48,17 @@ export async function apiStream(
   body: unknown,
   signal?: AbortSignal
 ): Promise<Response> {
-  const token = getAuthToken();
-  const url = path.startsWith("http")
+  // Proxy paths (/api/proxy/...) are same-origin Next.js routes — never prepend API_BASE.
+  const url = path.startsWith("http") || path.startsWith("/api/proxy")
     ? path
     : `${API_BASE}${path}`;
 
+  // Authorization is handled server-side via the httpOnly sheria_auth cookie.
+  // Route this call through a Next.js proxy endpoint that forwards the token.
   const res = await fetch(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
     body: JSON.stringify(body),
     signal,

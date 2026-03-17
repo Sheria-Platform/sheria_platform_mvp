@@ -719,4 +719,3 @@ The `eval/` directory contains tools for measuring RAG pipeline quality:
 - `test_data/` - Sample data for testing
 - `kenya_law_data/` - Kenya law documents (case law, regulations, statutes) for ingestion
 - `data_scrapper/` - Web scraping tools for collecting legal documents
-

@@ -7,6 +7,7 @@ Wraps Ollama's /api/embed endpoint with:
 - Numpy array output for Qdrant compatibility
 - Short timeout (10s for single queries, 60s for batches)
 """
+
 import logging
 
 import httpx
@@ -78,7 +79,9 @@ class OllamaEmbeddingsClient:
         for batch_start in range(0, len(texts), _BATCH_SIZE):
             batch = texts[batch_start : batch_start + _BATCH_SIZE]
 
-            async with httpx.AsyncClient(base_url=self.base_url, timeout=60.0) as client:
+            async with httpx.AsyncClient(
+                base_url=self.base_url, timeout=60.0
+            ) as client:
                 response = await client.post(
                     "/api/embed",
                     json={"model": self.model, "input": batch},

@@ -4,21 +4,22 @@
 Exposes persisted conversation data from the ``chat_history`` PostgreSQL table
 to authenticated users.  Two endpoints:
 
-- ``GET /sessions``        — list all sessions for the current user
-- ``GET /sessions/{id}``   — all messages within a specific session
+- ``GET /sessions``        -- list all sessions for the current user
+- ``GET /sessions/{id}``   -- all messages within a specific session
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
 from services.api.app.auth.jwt import get_current_user
-from services.api.app.dependencies import get_memory
-from services.api.app.memory.postgres import PostgresMemory
+from services.api.app.dependencies import get_chat_repo
+from services.api.app.memory.chat_repository import ChatRepository
 
 router = APIRouter()
 
 
-# ── Pydantic response models ──────────────────────────────────────────────────
+# -- Pydantic response models -------------------------------------------------
+
 
 class SessionSummary(BaseModel):
     session_id: str
@@ -35,12 +36,13 @@ class MessageRecord(BaseModel):
     created_at: str
 
 
-# ── Routes ────────────────────────────────────────────────────────────────────
+# -- Routes --------------------------------------------------------------------
+
 
 @router.get("/sessions", response_model=list[SessionSummary])
 async def list_sessions(
     user: dict = Depends(get_current_user),
-    memory: PostgresMemory = Depends(get_memory),
+    memory: ChatRepository = Depends(get_chat_repo),
 ) -> list[SessionSummary]:
     """Return all sessions for the authenticated user, newest-first."""
     rows = await memory.get_user_sessions(user["id"])
@@ -51,7 +53,7 @@ async def list_sessions(
 async def get_session(
     session_id: str,
     user: dict = Depends(get_current_user),
-    memory: PostgresMemory = Depends(get_memory),
+    memory: ChatRepository = Depends(get_chat_repo),
 ) -> list[MessageRecord]:
     """Return all messages in a session.
 

@@ -55,9 +55,7 @@ class Neo4jClient:
                 settings.NEO4J_URI,
                 auth=(settings.NEO4J_USER, settings.NEO4J_PASSWORD),
             )
-            logger.info(
-                "Neo4j driver initialised. uri=%s", settings.NEO4J_URI
-            )
+            logger.info("Neo4j driver initialised. uri=%s", settings.NEO4J_URI)
         except Exception as exc:
             logger.error("Failed to initialise Neo4j driver: %s", exc)
             raise
@@ -98,14 +96,10 @@ class Neo4jClient:
             ... )
         """
         if not self._driver:
-            raise RuntimeError(
-                "Neo4jClient not connected. Call connect() first."
-            )
+            raise RuntimeError("Neo4jClient not connected. Call connect() first.")
 
         async with self._driver.session() as session:
-            result = await session.run(
-                cypher_query, parameters or {}
-            )
+            result = await session.run(cypher_query, parameters or {})
             return [record.data() async for record in result]
 
 

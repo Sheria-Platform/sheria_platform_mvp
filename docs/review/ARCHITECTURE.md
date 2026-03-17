@@ -50,7 +50,7 @@
 │  │PostgreSQL│  │  │  │ Ollama  │  │  │  │MinIO │  │  │  │ Redis  │  │
 │  │ Port 5432│  │  │  │Port11434│  │  │  │ 9000 │  │  │  │  6379  │  │
 │  └──────────┘  │  │  └─────────┘  │  │  └──────┘  │  │  └────────┘  │
-│                │  │    llama3.3   │  │            │  │              │
+│                │  │   qwen3:8b    │  │            │  │              │
 │  ┌──────────┐  │  │  nomic-embed  │  └────────────┘  └──────────────┘
 │  │  Qdrant  │  │  └───────────────┘
 │  │6333/6334 │  │
@@ -87,9 +87,12 @@ The single FastAPI application that handles all user-facing requests.
 | Lifespan context manager | `main.py` | Clean client init/teardown |
 | Dependency injection | All routes | FastAPI `Depends()` for auth, DB access |
 | Async-first | All I/O | Non-blocking DB, LLM, cache, graph calls |
-| Background tasks | Chat route | Non-blocking history save + cache update |
+| Background tasks | Chat, verify routes | Non-blocking history save + cache update |
 | Context variables | `logging.py` | Zero-overhead trace context propagation |
-| State machine | `agents/graph.py` | Deterministic agent routing |
+| State machine | `agents/graph.py` | Deterministic agent routing (chat) |
+| Dedicated retrieval graph | `agents/legal_research_graph.py` | Always-retrieves graph for structured legal research |
+| Shared streaming helper | `app/streaming.py` | `iter_agent_events()` generator reused by chat and legal-research routes |
+| Query enhancement | `app/enhancers/query_rewriter.py` | Pre-retrieval query rewriting for improved recall |
 
 ### 2.2 Data Ingestion Pipeline (`pipelines/ingestion/`)
 
@@ -118,8 +121,13 @@ Next.js application providing the judge/staff interface.
 - `/register` — Staff registration (status: pending)
 - `/activate` — Account activation via emailed token
 - `/chat` — Main legal research interface (streaming NDJSON)
-- `/history` — Past conversation sessions
-- `/admin` — User management (admin only)
+- `/history` — Past conversation sessions (with ingestion jobs and verification tabs)
+- `/upload` — Document upload to MinIO/S3
+- `/jobs` — Ingestion job tracking
+- `/verify` — Document verification (Sheria Verify) with upload form and report
+- `/health` — Service health dashboard
+- `/admin/users` — User management (admin only)
+- `/profile` — Self-service profile page: view account details, edit bio/phone/name, upload avatar
 
 ---
 
@@ -167,8 +175,8 @@ activated_at TIMESTAMPTZ         job_id VARCHAR PK
 
 | Collection | Dimensions | Distance | Purpose |
 |-----------|-----------|---------|---------|
-| `kenya_law_reports` | 2560 | Cosine | Kenya Law Reports embeddings for semantic search |
-| `semantic_cache` | 2560 | Cosine | Cache of past Q&A pairs indexed by query vector |
+| `kenya_law_reports` | 768 | Cosine | Kenya Law Reports embeddings for semantic search |
+| `semantic_cache` | 768 | Cosine | Cache of past Q&A pairs indexed by query vector |
 
 **Payload schema for `kenya_law_reports`:**
 ```json
@@ -281,7 +289,7 @@ bind_context(trace_id, session_id, user_id)
   │
   ▼
 Semantic Cache Check (Qdrant)
-  │ Embed query → 2560-dim vector
+  │ Embed query → 768-dim vector
   │ Search semantic_cache collection
   │ Cosine similarity > 0.95 AND created_at < 30 days?
   │
@@ -321,7 +329,7 @@ Semantic Cache Check (Qdrant)
               │
               ├──→ Responder Node
               │     │ Build IRAC prompt (Issue/Rule/Application/Conclusion)
-              │     │ Ollama llama3.3 (temperature=0.3, max_tokens=1024)
+              │     │ Ollama qwen3:8b (temperature=0.3, max_tokens=1024)
               │     │ Stream tokens to client
               │     │
               │     └──→ END
@@ -388,7 +396,7 @@ OllamaEmbeddingsClient.embed(text)
     │ Timeout: 60s
     │
     ▼
-Vector: list[float], dim=2560
+Vector: list[float], dim=768
     │
     ├──→ Qdrant (semantic search / cache insert)
     └──→ AgentState.query_vector (reused across nodes, avoiding re-embedding)
@@ -430,12 +438,25 @@ services/api/main.py
     ├── app/routes/chat.py
     │       ├── app/cache/semantic.py ──→ clients/qdrant.py
     │       │                          └─ clients/ollama_embeddings.py
+    │       ├── app/streaming.py ──────→ iter_agent_events() shared generator
     │       ├── app/agents/graph.py
     │       │       ├── nodes/planner.py ──→ clients/ollama_client.py
     │       │       ├── nodes/retriever.py ─→ clients/qdrant.py
     │       │       │                      └─ clients/neo4j.py
     │       │       └── nodes/responder.py ─→ clients/ollama_client.py
     │       └── app/memory/postgres.py
+    │
+    ├── app/routes/legal_research.py
+    │       ├── app/cache/semantic.py
+    │       ├── app/streaming.py ──────→ iter_agent_events() (shared)
+    │       ├── app/agents/legal_research_graph.py
+    │       │       ├── nodes/retriever.py (jurisdiction_filter-aware)
+    │       │       └── nodes/responder.py (emits structured citations)
+    │       └── app/memory/postgres.py
+    │
+    ├── app/routes/verify.py
+    │       ├── app/tools/verify_document.py (LLM + Qdrant pipeline)
+    │       └── app/memory/postgres.py (VerificationActivity)
     │
     ├── app/routes/auth.py
     │       ├── app/auth/jwt.py
@@ -445,5 +466,19 @@ services/api/main.py
     ├── app/routes/upload.py ──→ boto3 (S3/MinIO)
     ├── app/routes/history.py ─→ app/memory/postgres.py
     ├── app/routes/feedback.py → app/memory/postgres.py
+    ├── app/routes/profile.py ─→ app/memory/user_repository.py
+    │       └──────────────────→ boto3 (S3/MinIO, avatar upload + presigned GET)
     └── app/routes/health.py
 ```
+
+---
+
+## 9. SOLID Principles Assessment
+
+| Principle | Assessment | Notes |
+|-----------|-----------|-------|
+| **Single Responsibility (SRP)** | Partial | `memory/postgres.py` owns ORM model definitions AND all persistence methods (chat, users, verification, ingestion jobs). Consider extracting repositories per domain in a future refactor. |
+| **Open/Closed (OCP)** | Good | Tool node uses a `TOOLS = {"calculator": ..., ...}` registry — new tools are added via dict insertion without modifying existing node logic. |
+| **Liskov Substitution (LSP)** | Good | All Ollama clients (`OllamaClient`, `OllamaEmbeddingsClient`) expose consistent async interfaces; swappable without breaking callers. |
+| **Interface Segregation (ISP)** | Partial | `PostgresMemory` exposes methods for chat, auth, users, verification, and ingestion jobs. No consumer needs all of these — consider splitting into `ChatMemory`, `UserRepository`, `VerificationRepository` interfaces. |
+| **Dependency Inversion (DIP)** | Good | All routes depend on abstractions via `fastapi.Depends()` (`get_current_user`, `get_memory`, `get_semantic_cache`, `get_llm_client`). Concrete implementations injected at startup via app state. |

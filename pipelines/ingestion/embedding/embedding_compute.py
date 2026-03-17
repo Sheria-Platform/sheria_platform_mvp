@@ -14,10 +14,11 @@ Environment Variables:
     EMBED_MAX_RETRIES: Maximum retry attempts (default: 3)
     EMBED_RETRY_DELAY: Initial retry delay in seconds (default: 1)
 """
+
 import asyncio
 import logging
 import os
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import httpx
 
@@ -47,8 +48,7 @@ class BatchEmbedder:
             ValueError: If endpoint or model configuration is invalid
         """
         self.endpoint = os.getenv(
-            "OLLAMA_EMBED_ENDPOINT",
-            "http://192.168.214.22:11436/api/embeddings"
+            "OLLAMA_EMBED_ENDPOINT", "http://192.168.214.22:11436/api/embeddings"
         )
         self.model = os.getenv("OLLAMA_EMBED_MODEL", "nomic-embed-text")
         self.timeout = float(os.getenv("EMBED_TIMEOUT", "120"))
@@ -60,7 +60,9 @@ class BatchEmbedder:
         if not self.model:
             raise ValueError("OLLAMA_EMBED_MODEL cannot be empty")
         if self.timeout <= 0 or self.timeout > 600:
-            raise ValueError(f"EMBED_TIMEOUT must be between 0 and 600, got {self.timeout}")
+            raise ValueError(
+                f"EMBED_TIMEOUT must be between 0 and 600, got {self.timeout}"
+            )
 
         logger.info(
             f"BatchEmbedder initialized: endpoint={self.endpoint}, "
@@ -72,7 +74,7 @@ class BatchEmbedder:
         client: httpx.AsyncClient,
         text: str,
         idx: int,
-    ) -> Tuple[int, Optional[List[float]]]:
+    ) -> tuple[int, list[float] | None]:
         """
         Embed a single text with retry logic.
 
@@ -88,7 +90,10 @@ class BatchEmbedder:
             try:
                 # /api/embed (Ollama >= 0.1.26) uses "input"
                 # /api/embeddings (older Ollama) uses "prompt"
-                use_new_api = "/api/embed" in self.endpoint and "/api/embeddings" not in self.endpoint
+                use_new_api = (
+                    "/api/embed" in self.endpoint
+                    and "/api/embeddings" not in self.endpoint
+                )
                 payload = {
                     "model": self.model,
                     "input" if use_new_api else "prompt": text[:8192],
@@ -102,12 +107,16 @@ class BatchEmbedder:
                 if "embeddings" in response_data:
                     embeddings_array = response_data["embeddings"]
                     if not embeddings_array or not isinstance(embeddings_array, list):
-                        raise ValueError(f"Invalid embeddings format: {type(embeddings_array)}")
+                        raise ValueError(
+                            f"Invalid embeddings format: {type(embeddings_array)}"
+                        )
                     embedding = embeddings_array[0]
                 elif "embedding" in response_data:
                     embedding = response_data["embedding"]
                 else:
-                    raise ValueError("Invalid response: missing 'embeddings' or 'embedding' field")
+                    raise ValueError(
+                        "Invalid response: missing 'embeddings' or 'embedding' field"
+                    )
 
                 if not embedding or not isinstance(embedding, list):
                     raise ValueError(f"Invalid embedding vector: {type(embedding)}")
@@ -120,7 +129,7 @@ class BatchEmbedder:
                     f"Embedding timeout for text {idx} (attempt {attempt + 1}/{self.max_retries})"
                 )
                 if attempt < self.max_retries - 1:
-                    await asyncio.sleep(self.retry_delay * (2 ** attempt))
+                    await asyncio.sleep(self.retry_delay * (2**attempt))
 
             except httpx.HTTPStatusError as e:
                 last_error = e
@@ -131,7 +140,7 @@ class BatchEmbedder:
                 if e.response.status_code < 500:
                     break  # Client error — don't retry
                 if attempt < self.max_retries - 1:
-                    await asyncio.sleep(self.retry_delay * (2 ** attempt))
+                    await asyncio.sleep(self.retry_delay * (2**attempt))
 
             except Exception as e:
                 last_error = e
@@ -139,20 +148,24 @@ class BatchEmbedder:
                     f"Embedding failed for text {idx} (attempt {attempt + 1}/{self.max_retries}): {e}"
                 )
                 if attempt < self.max_retries - 1:
-                    await asyncio.sleep(self.retry_delay * (2 ** attempt))
+                    await asyncio.sleep(self.retry_delay * (2**attempt))
 
         logger.error(
             f"Failed to generate embedding for text {idx} after {self.max_retries} attempts: {last_error}"
         )
         return idx, None
 
-    async def _embed_all(self, texts: List[str]) -> List[Tuple[int, Optional[List[float]]]]:
+    async def _embed_all(
+        self, texts: list[str]
+    ) -> list[tuple[int, list[float] | None]]:
         """Fire all embedding requests concurrently and return results in input order."""
         async with httpx.AsyncClient(timeout=self.timeout) as client:
-            tasks = [self._embed_one(client, text, idx) for idx, text in enumerate(texts)]
+            tasks = [
+                self._embed_one(client, text, idx) for idx, text in enumerate(texts)
+            ]
             return await asyncio.gather(*tasks, return_exceptions=True)
 
-    def __call__(self, batch: Dict[str, Any]) -> Dict[str, Any]:
+    def __call__(self, batch: dict[str, Any]) -> dict[str, Any]:
         """
         Generate embeddings for a batch of text chunks (concurrently).
 
@@ -180,8 +193,8 @@ class BatchEmbedder:
 
         raw_results = asyncio.run(self._embed_all(texts))
 
-        embeddings: List[Optional[List[float]]] = []
-        failed_indices: List[int] = []
+        embeddings: list[list[float] | None] = []
+        failed_indices: list[int] = []
 
         for i, result in enumerate(raw_results):
             if isinstance(result, Exception):
@@ -198,7 +211,9 @@ class BatchEmbedder:
             raise Exception(f"All {len(texts)} embeddings failed in batch.")
 
         if failed_indices:
-            logger.warning(f"Failed to generate {len(failed_indices)}/{len(texts)} embeddings")
+            logger.warning(
+                f"Failed to generate {len(failed_indices)}/{len(texts)} embeddings"
+            )
 
         batch["vector"] = embeddings
         return batch

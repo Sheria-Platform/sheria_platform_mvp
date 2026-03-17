@@ -342,7 +342,7 @@ def insert_case(conn, case_data: dict, search_term_id: int) -> int | None:
             return None
 
         if not case_data.get("doc_id"):
-            rprint(f"[red]  Missing doc_id for case[/red]")
+            rprint("[red]  Missing doc_id for case[/red]")
             return None
 
         case_url = f"https://new.kenyalaw.org{case_data['expression_frbr_uri']}"
@@ -586,7 +586,7 @@ def download_single_pdf(
         )
 
         rprint(
-            f"[bold green]  ✓ Downloaded: {pdf_filename} ({file_size/1024:.1f} KB)[/bold green]"
+            f"[bold green]  ✓ Downloaded: {pdf_filename} ({file_size / 1024:.1f} KB)[/bold green]"
         )
         return True
 
@@ -612,9 +612,9 @@ def scrape_and_download(conn):
     }
 
     for search_term in SEARCH_TERMS:
-        rprint(f"\n[bold cyan]{'='*60}[/bold cyan]")
+        rprint(f"\n[bold cyan]{'=' * 60}[/bold cyan]")
         rprint(f"[bold cyan]Search Term: '{search_term}'[/bold cyan]")
-        rprint(f"[bold cyan]{'='*60}[/bold cyan]")
+        rprint(f"[bold cyan]{'=' * 60}[/bold cyan]")
 
         search_term_id = insert_search_term(conn, search_term)
         term_stats = {"cases": 0, "pdfs": 0}
@@ -644,13 +644,13 @@ def scrape_and_download(conn):
                         case_data = normalize_case_data(doc)
 
                         if not case_data.get("doc_id"):
-                            rprint(f"[red]  ✗ Skipping case with missing doc_id[/red]")
+                            rprint("[red]  ✗ Skipping case with missing doc_id[/red]")
                             continue
 
                         case_id = insert_case(conn, case_data, search_term_id)
 
                         if not case_id:
-                            rprint(f"[red]  ✗ Failed to insert case metadata[/red]")
+                            rprint("[red]  ✗ Failed to insert case metadata[/red]")
                             continue
 
                         overall_stats["total_cases"] += 1
@@ -707,9 +707,9 @@ def scrape_and_download(conn):
         )
 
     # Final summary
-    rprint(f"\n[bold blue]{'='*60}[/bold blue]")
-    rprint(f"[bold blue]SCRAPING COMPLETE - SUMMARY[/bold blue]")
-    rprint(f"[bold blue]{'='*60}[/bold blue]")
+    rprint(f"\n[bold blue]{'=' * 60}[/bold blue]")
+    rprint("[bold blue]SCRAPING COMPLETE - SUMMARY[/bold blue]")
+    rprint(f"[bold blue]{'=' * 60}[/bold blue]")
     rprint(f"[cyan]Total cases processed: {overall_stats['total_cases']}[/cyan]")
     rprint(f"[green]✓ PDFs downloaded: {overall_stats['pdfs_downloaded']}[/green]")
     rprint(f"[yellow]○ PDFs skipped: {overall_stats['pdfs_skipped']}[/yellow]")

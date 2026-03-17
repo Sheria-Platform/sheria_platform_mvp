@@ -16,7 +16,7 @@ The compiled ``legal_research_app`` is imported by the legal-research
 route and used identically to ``agent_app`` in the chat route.
 """
 
-from langgraph.graph import END, StateGraph
+from langgraph.graph import END, START, StateGraph
 
 from services.api.app.agents.nodes.responder import generate_node
 from services.api.app.agents.nodes.retriever import retrieve_node
@@ -27,7 +27,7 @@ _workflow = StateGraph(AgentState)
 _workflow.add_node("retriever", retrieve_node)
 _workflow.add_node("responder", generate_node)
 
-_workflow.set_entry_point("retriever")
+_workflow.add_edge(START, "retriever")
 _workflow.add_edge("retriever", "responder")
 _workflow.add_edge("responder", END)
 

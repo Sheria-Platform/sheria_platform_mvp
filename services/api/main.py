@@ -19,150 +19,38 @@ Example:
 """
 
 import logging
-import time
-import uuid
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from prometheus_client import make_asgi_app
-from qdrant_client.http.models import Distance, VectorParams
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.requests import Request
-from starlette.responses import Response
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 
-from libs.observability.metrics import REQUEST_COUNT, REQUEST_LATENCY
 from libs.observability.tracing import configure_tracing
 from services.api.app.cache.redis import redis_client
 from services.api.app.clients.neo4j import neo4j_client
 from services.api.app.clients.ollama_client import ollama_client
 from services.api.app.clients.qdrant import qdrant_client
 from services.api.app.config import settings
-from services.api.app.logging import bind_context
-from services.api.app.memory.postgres import Base, engine, postgres_memory
-from services.api.app.routes import auth, chat, feedback, health, history, legal_research, upload
+from services.api.app.limiter import limiter
+from services.api.app.middleware import RequestLoggingMiddleware
+from services.api.app.startup import create_db_tables, ensure_qdrant_collections, seed_admin
+from services.api.app.routes import (
+    auth,
+    chat,
+    feedback,
+    health,
+    history,
+    legal_research,
+    predict,
+    profile,
+    upload,
+    verify,
+)
 
 logger = logging.getLogger(__name__)
-
-# Dimension produced by nomic-embed-text (must match OLLAMA_EMBEDDING_MODEL)
-_EMBEDDING_DIM = 768
-
-
-# ── Request Logging Middleware ─────────────────────────────────────────────
-
-class RequestLoggingMiddleware(BaseHTTPMiddleware):
-    """Attaches a trace_id to every request and logs start/end with latency.
-
-    For each incoming request this middleware:
-    1. Generates a unique ``trace_id`` (UUID4).
-    2. Calls ``bind_context(trace_id=...)`` so the ID appears in every log
-       record emitted anywhere in the request's async task.
-    3. Logs request start (method, path).
-    4. After the handler returns, logs completion with HTTP status and
-       ``duration_ms``.
-    5. Increments Prometheus ``REQUEST_COUNT`` and ``REQUEST_LATENCY``.
-    """
-
-    async def dispatch(self, request: Request, call_next) -> Response:
-        trace_id = str(uuid.uuid4())
-        bind_context(trace_id=trace_id)
-
-        start = time.perf_counter()
-        logger.info(
-            "Request started",
-            extra={"method": request.method, "path": str(request.url.path)},
-        )
-
-        response = await call_next(request)
-
-        duration_ms = round((time.perf_counter() - start) * 1000, 2)
-        endpoint = str(request.url.path)
-
-        REQUEST_LATENCY.labels(endpoint=endpoint).observe(duration_ms / 1000)
-        REQUEST_COUNT.labels(
-            method=request.method,
-            endpoint=endpoint,
-            status=response.status_code,
-        ).inc()
-
-        logger.info(
-            "Request completed",
-            extra={
-                "path": endpoint,
-                "status_code": response.status_code,
-                "duration_ms": duration_ms,
-            },
-        )
-
-        return response
-
-
-# ── Startup Helpers ────────────────────────────────────────────────────────
-
-async def _ensure_qdrant_collections() -> None:
-    """Create required Qdrant collections if they do not already exist.
-
-    ``semantic_cache`` — stores Q&A embedding pairs for semantic deduplication.
-    Uses cosine distance at threshold 0.95 (see cache/semantic.py).
-
-    Safe to call on every startup; existing collections are left untouched.
-    """
-    existing = {
-        c.name
-        for c in (await qdrant_client.client.get_collections()).collections
-    }
-
-    if "semantic_cache" not in existing:
-        await qdrant_client.client.create_collection(
-            collection_name="semantic_cache",
-            vectors_config=VectorParams(
-                size=_EMBEDDING_DIM,
-                distance=Distance.COSINE,
-            ),
-        )
-        logger.info("Created Qdrant collection: semantic_cache")
-
-
-async def _create_db_tables() -> None:
-    """Create all database tables if they do not already exist.
-
-    Runs ``CREATE TABLE IF NOT EXISTS`` for every SQLAlchemy ORM model
-    registered under ``Base`` (``chat_history``, ``ingestion_jobs``,
-    ``users``, ``feedback``).  Safe to call on every startup — existing
-    tables are left untouched.
-    """
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-
-
-async def _seed_admin() -> None:
-    """Create the default admin account on first boot if none exists.
-
-    Credentials are read from ``ADMIN_*`` environment variables so they
-    can be rotated without code changes.  The seed is skipped when any
-    admin already exists, making it safe to call on every startup.
-    """
-    import bcrypt  # use bcrypt directly — passlib 1.7.4 is incompatible with bcrypt>=4
-
-    hashed = bcrypt.hashpw(
-        settings.ADMIN_PASSWORD.encode("utf-8"),
-        bcrypt.gensalt(),
-    ).decode("utf-8")
-
-    created = await postgres_memory.seed_admin(
-        username=settings.ADMIN_USERNAME,
-        email=settings.ADMIN_EMAIL,
-        full_name=settings.ADMIN_FULL_NAME,
-        hashed_password=hashed,
-    )
-    if created:
-        logger.info(
-            "Default admin account created",
-            extra={"username": settings.ADMIN_USERNAME},
-        )
-    else:
-        logger.info("Admin account already exists — skipping seed")
 
 
 @asynccontextmanager
@@ -191,12 +79,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """
     # ── Startup ──────────────────────────────────────────────────────
     logger.info("Initializing clients...")
-    await _create_db_tables()
-    await _seed_admin()
+    await create_db_tables()
+    await seed_admin()
     neo4j_client.connect()
     await redis_client.connect()
     await qdrant_client.connect()
-    await _ensure_qdrant_collections()
+    try:
+        await ensure_qdrant_collections()
+    except Exception as exc:
+        logger.warning(
+            "Qdrant collection setup skipped — Qdrant unreachable at startup. "
+            "Collections will be created on the next successful connection. error=%s",
+            exc,
+        )
     await ollama_client.start()
     logger.info("All clients initialized successfully")
 
@@ -225,14 +120,12 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "http://192.168.100.104:3000",
-        "http://0.0.0.0:3000",
-    ],
+    allow_origins=[o.strip() for o in settings.ALLOWED_ORIGINS.split(",") if o.strip()],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -240,24 +133,20 @@ app.add_middleware(
 app.add_middleware(RequestLoggingMiddleware)
 
 # ── Route Registration ────────────────────────────────────────────────────
-@app.get("/api/v1/health")
-async def api_v1_health() -> dict[str, str]:
-    # Simple compatibility alias for legacy health checks.
-    return {"status": "ok"}
-
 app.include_router(chat.router, prefix="/api/v1/chat", tags=["Chat"])
 app.include_router(upload.router, prefix="/api/v1/upload", tags=["Upload"])
-app.include_router(
-    feedback.router, prefix="/api/v1/feedback", tags=["Feedback"]
-)
+app.include_router(feedback.router, prefix="/api/v1/feedback", tags=["Feedback"])
 app.include_router(health.router, prefix="/health", tags=["Health"])
 app.include_router(history.router, prefix="/api/v1/history", tags=["History"])
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["Auth"])
+app.include_router(profile.router, prefix="/api/v1/auth", tags=["Profile"])
 app.include_router(
     legal_research.router,
     prefix="/api/v1/legal-research",
     tags=["Legal Research"],
 )
+app.include_router(verify.router, prefix="/api/v1/verify", tags=["Verify"])
+app.include_router(predict.router, prefix="/api/v1/predict", tags=["Predict"])
 
 # ── Prometheus Metrics Endpoint ───────────────────────────────────────────
 # Mounted as a sub-application so prometheus_client handles content
@@ -269,4 +158,4 @@ if __name__ == "__main__":
     import uvicorn
 
     # Development convenience — production uses the Docker CMD
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8000)  # noqa: S104

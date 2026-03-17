@@ -56,9 +56,14 @@ Analyze the user's query and conversation history. Decide the next action:
 
 3. "tool_use"       — Requests requiring computation or structured external data:
                        - Case duration prediction or delay risk assessment
+                         (tool: predict_case_duration — inputs: case_type, court,
+                          parties_count, complexity, description)
                        - Judge workload analytics
                        - Document authenticity verification (court orders, title deeds)
+                         (tool: verify_document — inputs: document_text, document_type,
+                          case_number)
                        - Mathematical or statistical calculations
+                         (tool: calculator — inputs: expression string)
 
 When writing "refined_query":
 - Resolve coreferences using conversation history ("that case" → full case name and citation)
@@ -121,7 +126,7 @@ async def planner_node(state: AgentState) -> dict:
                 *recent_messages,
             ],
             temperature=0.0,  # deterministic planning
-            json_mode=True,   # constrain output to valid JSON
+            json_mode=True,  # constrain output to valid JSON
         )
 
         plan: dict = json.loads(response_text)
@@ -145,11 +150,10 @@ async def planner_node(state: AgentState) -> dict:
             "action": action,
         }
 
-    except Exception as exc:
+    except Exception:
         duration_ms = round((time.perf_counter() - start) * 1000, 2)
-        logger.error(
+        logger.exception(
             "Planner node failed, defaulting to retrieve",
-            exc_info=True,
             extra={"node": "planner", "duration_ms": duration_ms},
         )
         return {

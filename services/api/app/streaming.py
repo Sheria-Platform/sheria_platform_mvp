@@ -55,11 +55,13 @@ async def iter_agent_events(
     """
     node_start = time.perf_counter()
     async for event in agent_app.astream(initial_state, config):
-        node_name = list(event.keys())[0]
+        node_name = next(iter(event.keys()))
         node_data = event[node_name]
 
         duration_ms = round((time.perf_counter() - node_start) * 1000, 2)
-        NODE_LATENCY.labels(node=f"{metric_prefix}{node_name}").observe(duration_ms / 1000)
+        NODE_LATENCY.labels(node=f"{metric_prefix}{node_name}").observe(
+            duration_ms / 1000
+        )
         logger.info(
             "Agent node completed",
             extra={"node": node_name, "duration_ms": duration_ms},

@@ -161,7 +161,7 @@ flowchart TD
     C -- No --> D([Return 401 Unauthorized])
     C -- Yes --> E[Bind trace context\ntrace_id, session_id, user_id]
 
-    E --> F[Embed query\nnomic-embed-text 2560-dim]
+    E --> F[Embed query\nnomic-embed-text 768-dim]
     F --> G[Search semantic_cache\nQdrant cosine similarity]
     G --> H{Similarity > 0.95\nAND age < 30 days?}
 
@@ -175,7 +175,7 @@ flowchart TD
     L --> M[PLANNER NODE\nOllama JSON mode temp=0.0]
     M --> N{Route decision}
 
-    N -- direct_answer --> R[RESPONDER NODE\nOllama llama3.3 temp=0.3]
+    N -- direct_answer --> R[RESPONDER NODE\nOllama qwen3:8b temp=0.3]
     N -- tool_use --> O[TOOL NODE\nExecute tool function]
     O --> R
 
@@ -187,7 +187,7 @@ flowchart TD
     P3 --> R
 
     R --> S[Build IRAC prompt\nIssue-Rule-Application-Conclusion]
-    S --> T[Stream response tokens\nllama3.3 max_tokens=1024]
+    S --> T[Stream response tokens\nqwen3:8b max_tokens=1024]
     T --> U[NDJSON stream to client\nevent=answer]
 
     U --> V[Background Task 1\nSave to chat_history PostgreSQL]
@@ -215,7 +215,7 @@ flowchart TD
     <endEvent id="End_Unauthorized"/>
 
     <serviceTask id="Task_BindContext" name="Bind Trace Context\n(trace_id, session_id, user_id)"/>
-    <serviceTask id="Task_EmbedQuery" name="Embed Query\n(nomic-embed-text, 2560-dim)"/>
+    <serviceTask id="Task_EmbedQuery" name="Embed Query\n(nomic-embed-text, 768-dim)"/>
     <serviceTask id="Task_CheckCache" name="Search Semantic Cache\n(Qdrant cosine similarity)"/>
 
     <exclusiveGateway id="GW_Cache" name="Cache Hit?"/>
@@ -244,7 +244,7 @@ flowchart TD
     <serviceTask id="Task_Tool" name="TOOL NODE\nExecute tool function"/>
 
     <!-- Responder Node -->
-    <serviceTask id="Task_Responder" name="RESPONDER NODE\nBuild IRAC prompt\nOllama llama3.3 (temp=0.3)"/>
+    <serviceTask id="Task_Responder" name="RESPONDER NODE\nBuild IRAC prompt\nOllama qwen3:8b (temp=0.3)"/>
     <serviceTask id="Task_StreamAnswer" name="Stream Answer to Client\n(NDJSON events)"/>
 
     <!-- Background Tasks -->
@@ -379,7 +379,7 @@ stateDiagram-v2
 
 ```mermaid
 flowchart TD
-    A([Incoming query]) --> B[Embed query → 2560-dim vector]
+    A([Incoming query]) --> B[Embed query → 768-dim vector]
     B --> C[Search Qdrant semantic_cache\nwith cosine similarity]
     C --> D{Results found?}
 
@@ -453,3 +453,69 @@ sequenceDiagram
         App-->>K8s: 200 OK (or 503 if degraded)
     end
 ```
+
+---
+
+## Process 7: Document Verification (Sheria Verify)
+
+**Participants:** Court Staff/Registrar, Sheria API, Verification Pipeline
+
+### Mermaid Flow Diagram
+
+```mermaid
+flowchart TD
+    A([User selects PDF document]) --> B[POST /api/v1/verify\nmultipart: file, document_type, case_number]
+    B --> C[Validate JWT Token]
+    C --> D{JWT valid?}
+    D -- No --> E([401 Unauthorized])
+    D -- Yes --> F[Read PDF bytes from upload]
+    F --> G{PDF bytes empty?}
+    G -- Yes --> H([400 Bad Request: empty file])
+    G -- No --> I[Extract text via pypdf]
+    I --> J{pypdf parse error?}
+    J -- Yes --> K([400 Bad Request: invalid PDF])
+    J -- No --> L{Text extracted?}
+    L -- No text: image-only PDF --> M[Log warning: scanned document\nContinue with empty text]
+    L -- Yes --> N[Build tool_input JSON\ndocument_text, document_type, case_number]
+    M --> N
+
+    N --> O[verify_document tool\n3-step LLM + Qdrant pipeline]
+    O --> O1[Step 1: LLM metadata extraction\nOllama extracts case number, court, judge, date]
+    O1 --> O2[Step 2: Qdrant cross-reference\nSearch kenya_law_reports for case citation]
+    O2 --> O3[Step 3: Fraud pattern analysis\nLLM evaluates document indicators]
+    O3 --> P[Build VerificationReport\nauthentic, confidence, verification_checks, risk_flags, summary]
+
+    P --> Q{Pipeline error?}
+    Q -- Yes --> R([422 Unprocessable Entity])
+    Q -- No --> S[Return VerificationReport JSON]
+    S --> T[Background: save_verification\nto verification_activity table]
+    T --> U([Verification complete])
+```
+
+### BPMN 2.0 Description
+
+**Process:** `DocumentVerification`
+**Participants:** Staff Member (lane), Sheria API (lane), Verification Pipeline (lane)
+
+**Tasks:**
+1. `Task_Upload` — Staff POSTs multipart form to `/api/v1/verify`
+2. `Task_Auth` — JWT validation via `get_current_user` dependency
+3. `Task_ReadPDF` — Read upload bytes into memory
+4. `Task_ExtractText` — `pypdf` text extraction (graceful on scanned PDFs)
+5. `Task_MetadataExtract` — LLM call: extract structured metadata from document text
+6. `Task_CrossReference` — Qdrant search: look up case citation in `kenya_law_reports`
+7. `Task_FraudAnalysis` — LLM call: evaluate fraud indicators, assign confidence score
+8. `Task_BuildReport` — Assemble `VerificationReport` Pydantic model
+9. `Task_PersistActivity` — Background: `save_verification()` → `verification_activity` table
+
+**Gateways:**
+- `GW_Auth` — JWT valid? → continue | 401
+- `GW_EmptyFile` — bytes > 0? → continue | 400
+- `GW_ParseError` — pypdf success? → continue | 400
+- `GW_PipelineError` — tool raised exception? → 422 | continue
+
+**End events:**
+- `End_Verified` — Report returned to client
+- `End_Unauthorized` — 401
+- `End_InvalidFile` — 400
+- `End_PipelineError` — 422

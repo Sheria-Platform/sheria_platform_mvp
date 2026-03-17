@@ -1,8 +1,27 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { apiFetch } from "@/lib/api";
-import { HealthResponse } from "@/types/api";
+import { HealthResponse, ServiceHealth } from "@/types/api";
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
+type ReadinessRaw = Record<string, "up" | "down">;
+
+function toHealthResponse(raw: ReadinessRaw): HealthResponse {
+  const services: Record<string, ServiceHealth> = {};
+  for (const [name, state] of Object.entries(raw)) {
+    services[name] = { status: state === "up" ? "healthy" : "unhealthy" };
+  }
+  const statuses = Object.values(services).map((s) => s.status);
+  const allHealthy = statuses.every((s) => s === "healthy");
+  const allUnhealthy = statuses.length > 0 && statuses.every((s) => s === "unhealthy");
+  return {
+    status: allHealthy ? "healthy" : allUnhealthy ? "unhealthy" : "degraded",
+    services,
+    timestamp: new Date().toISOString(),
+    version: "",
+  };
+}
 
 export function useHealth(pollInterval = 30_000) {
   const [health, setHealth] = useState<HealthResponse | null>(null);
@@ -14,12 +33,16 @@ export function useHealth(pollInterval = 30_000) {
 
     const poll = async () => {
       try {
-        const data = await apiFetch<HealthResponse>("/api/v1/health", {
-          skipAuth: true,
+        const res = await fetch(`${API_BASE}/health/readiness`, {
           headers: { Accept: "application/json" },
         });
+        // Accept both 200 (all up) and 503 (some down) — both carry the status dict.
+        if (!res.ok && res.status !== 503) {
+          throw new Error(`HTTP ${res.status}`);
+        }
+        const raw: ReadinessRaw = await res.json();
         if (!cancelled) {
-          setHealth(data);
+          setHealth(toHealthResponse(raw));
           setError(null);
           setLoading(false);
         }

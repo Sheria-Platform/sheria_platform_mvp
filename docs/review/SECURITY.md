@@ -67,6 +67,9 @@ async def get_current_user(
 | `POST /feedback/` | Any authenticated | `get_current_user` |
 | `GET /history/sessions` | Any authenticated | `get_current_user` (user-scoped) |
 | `GET /history/sessions/{id}` | Any authenticated | `get_current_user` + ownership check |
+| `GET /auth/me` | Any authenticated | `get_current_user` (own record only) |
+| `PATCH /auth/me` | Any authenticated | `get_current_user` (own record only) |
+| `POST /auth/me/avatar` | Any authenticated | `get_current_user` (own record only) |
 
 ```python
 def require_admin(user: dict = Depends(get_current_user)) -> dict:
@@ -190,14 +193,19 @@ All API inputs are validated via Pydantic models:
 ```python
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://192.168.100.104:3000",  # LAN dev machine
+        "http://0.0.0.0:3000",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 ```
 
-**Reviewer concern:** Hard-coded `localhost:3000`. Production requires configurable `ALLOWED_ORIGINS` from environment variable.
+**Reviewer concern:** All four origins are hard-coded, including a specific LAN IP (`192.168.100.104`). Production requires a configurable `ALLOWED_ORIGINS` environment variable. The LAN IP will break in any other developer's environment and must not reach staging/production.
 
 ---
 
@@ -226,17 +234,76 @@ Every HTTP request is logged with:
 
 ---
 
-## 10. Security Checklist for PR Review
+## 10. Admin Approval Audit Trail
+
+The `users` table includes an `approved_by` column (`VARCHAR`, nullable) that stores the `user_id` of the admin who approved a registration. This provides a lightweight audit trail for accountability.
+
+**Reviewer note:** Confirm that `approved_by` is populated in the approval handler (`POST /auth/approve/{user_id}`) and that it is included in the admin user-list response for auditability.
+
+---
+
+## 11. Verify Endpoint Security
+
+The `POST /api/v1/verify` endpoint accepts a multipart PDF upload.
+
+**Controls in place:**
+- JWT authentication required
+- File content validated: empty file → 400, invalid PDF → 400
+- No file stored on disk — bytes read into memory, text extracted via `pypdf`, bytes discarded
+
+**Reviewer concerns:**
+- **Filename sanitization:** The `file.filename` from the multipart upload is passed directly to `memory.save_verification()`. Confirm this is stored as metadata only (not used in any file path or shell command) to prevent path traversal
+- **File size limit:** No explicit size cap on uploaded PDFs — a malformed multi-GB PDF could cause OOM. Consider adding `Content-Length` validation or FastAPI's `max_upload_size`
+- **Image PDFs:** Scanned documents yield empty text; the pipeline continues without error. Ensure responses clearly indicate "no text extracted" to prevent false confidence in verification results
+
+---
+
+## 12. Avatar Upload Security (`POST /api/v1/auth/me/avatar`)
+
+**Controls in place:**
+- JWT authentication required.
+- Content-type validated against allowlist `{image/jpeg, image/png, image/webp}` → `415` on violation.
+- File size validated ≤ `MAX_AVATAR_UPLOAD_MB` (default 5 MB, env-configurable) → `413` on violation.
+- Object stored under deterministic key `avatars/{user_id}.{ext}` — no user-controlled path component.
+- File read entirely into memory, then uploaded to MinIO/S3 via boto3 in a thread executor; never written to disk.
+- Service availability guarded: returns `503` if `S3_BUCKET_NAME` is not configured (no silent failure).
+- Presigned GET URL (TTL = 3600 s) generated and returned — bucket does not need to be public.
+
+**Reviewer concerns:**
+- **MIME-type spoofing:** Content-type is taken from the `UploadFile.content_type` header provided by the browser. A malicious client could send `image/jpeg` with a non-image payload. Consider adding server-side magic-byte validation (e.g., `python-magic`) for production hardening.
+- **Storage growth:** Uploading a new avatar overwrites the existing S3 key (same deterministic key per user), so there is no unbounded per-user accumulation. Old objects are replaced, not accumulated.
+- **Presigned URL leakage:** The presigned URL is returned in the API response and embedded in the frontend. It is time-limited (1 hour). No sensitive data is in the URL beyond the object key.
+
+---
+
+## 13. Profile Update Security (`PATCH /api/v1/auth/me`)
+
+**Controls in place:**
+- Scoped to the authenticated user's own record — no `user_id` parameter in the request body or path; user ID taken exclusively from the validated JWT.
+- Non-empty validation: any provided field must be a non-empty, non-whitespace string (empty strings rejected with `422`).
+- Only four fields are writable via this endpoint: `full_name`, `staff_number`, `bio`, `phone`. Role, court_station, email, status are not writable by the user.
+
+**Reviewer concern:** `bio` and `phone` are free-text with no length cap in the Pydantic model. Consider adding `max_length` constraints (e.g., `bio: str | None = Field(None, max_length=500)`) before production.
+
+---
+
+## 14. Security Checklist for PR Review
 
 - [ ] **JWT_SECRET_KEY** is not hardcoded or in `.env.example`
 - [ ] **Admin seed password** (`ADMIN_PASSWORD`) is changed from default `Admin1234!` in production
 - [ ] **Token revocation** on user suspension (current: tokens valid until TTL expiry)
 - [ ] **Activation token TTL** — verify tokens expire after a reasonable period
-- [ ] **Filename sanitization** in presigned URL key construction
-- [ ] **CORS origins** configurable for production deployment
+- [ ] **Filename sanitization** in presigned URL key construction AND in verify endpoint metadata storage
+- [ ] **CORS origins** configurable for production (remove hardcoded LAN IP `192.168.100.104`)
 - [ ] **SQL injection** — all queries use parameterized ORM calls (no raw SQL with interpolation)
 - [ ] **Password policy** — minimum 8 characters; consider adding complexity requirements
 - [ ] **Rate limiting** — no rate limiting on login endpoint (brute force risk)
-- [ ] **Prompt injection** — user input passed to LLM without sanitization
+- [ ] **Prompt injection** — user input passed to LLM without sanitization (chat and verify pipelines)
 - [ ] **Error messages** — HTTP errors should not leak internal details (stack traces)
 - [ ] **Neo4j Cypher injection** — verify `$query` parameter is safely parameterized
+- [ ] **`approved_by` field** — verify populated on approval and included in admin audit logs
+- [ ] **PDF upload size limit** — no `max_upload_size` cap on verify endpoint; add before production
+- [ ] **Embedding dimension** — `_EMBEDDING_DIM = 768` in `main.py`; confirm this matches actual `nomic-embed-text` output to avoid silent vector shape errors in Qdrant
+- [ ] **Avatar MIME-type spoofing** — content-type header is browser-supplied; consider server-side magic-byte validation for production
+- [ ] **Profile bio/phone length** — no `max_length` constraint on `bio`/`phone` in `ProfileUpdateRequest`; add limits before production
+- [ ] **Profile endpoint ownership** — `PATCH /auth/me` and `POST /auth/me/avatar` derive user ID from JWT only; confirm no user_id override is possible through request body

@@ -17,6 +17,8 @@ from collections.abc import Callable
 from services.api.app.agents.state import AgentState
 from services.api.app.tools.calculator import calculate
 from services.api.app.tools.graph_search import search_graph_tool
+from services.api.app.tools.predict_case_duration import predict_case_duration
+from services.api.app.tools.verify_document import verify_document
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +26,8 @@ logger = logging.getLogger(__name__)
 _TOOL_REGISTRY: dict[str, Callable] = {
     "calculator": calculate,
     "graph_search": search_graph_tool,
+    "predict_case_duration": predict_case_duration,
+    "verify_document": verify_document,
 }
 
 

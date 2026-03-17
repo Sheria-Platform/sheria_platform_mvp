@@ -10,7 +10,7 @@ Example:
     ...     vector=[0.1, 0.2, ...], limit=5
     ... )
     >>> for hit in results:
-    ...     print(hit.payload["text"])
+    ...     print(hit.payload["text"])  # ScoredPoint list
 """
 
 import logging
@@ -40,16 +40,16 @@ class VectorDBClient:
         self.client: AsyncQdrantClient = AsyncQdrantClient(
             host=settings.QDRANT_HOST,
             port=settings.QDRANT_PORT,
-            prefer_grpc=True,        # gRPC for lower latency
+            prefer_grpc=True,  # gRPC for lower latency
         )
 
     async def connect(self) -> None:
         """Verify the Qdrant connection at application startup.
 
         Fetches the collection list as a lightweight health check.
-
-        Raises:
-            Exception: If Qdrant is unreachable or returns an error.
+        Logs a warning on failure but does NOT raise — the app starts
+        regardless so that endpoints unrelated to vector search remain
+        available while Qdrant is temporarily unreachable.
         """
         try:
             collections = await self.client.get_collections()
@@ -58,8 +58,11 @@ class VectorDBClient:
                 len(collections.collections),
             )
         except Exception as exc:
-            logger.error("Qdrant connection failed: %s", exc)
-            raise
+            logger.warning(
+                "Qdrant unavailable at startup — vector search will fail "
+                "until Qdrant is reachable. error=%s",
+                exc,
+            )
 
     async def disconnect(self) -> None:
         """Close the Qdrant connection at application shutdown."""
@@ -99,13 +102,14 @@ class VectorDBClient:
             ... )
             >>> top_text = hits[0].payload["text"]
         """
-        return await self.client.search(
+        result = await self.client.query_points(
             collection_name=settings.QDRANT_COLLECTION,
-            query_vector=vector,
+            query=vector,
             limit=limit,
             with_payload=True,
             query_filter=query_filter,
         )
+        return result.points
 
 
 # Global singleton — lifecycle managed by main.py lifespan

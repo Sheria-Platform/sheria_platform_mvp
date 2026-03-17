@@ -184,7 +184,8 @@ List all users with optional filters.
       "court_station": "High Court Nairobi",
       "status": "active",
       "created_at": "2026-03-13T08:00:00Z",
-      "activated_at": "2026-03-13T09:00:00Z"
+      "activated_at": "2026-03-13T09:00:00Z",
+      "approved_by": "admin-user-id"
     }
   ],
   "total": 42
@@ -216,6 +217,103 @@ Suspend or reactivate a user account.
   "new_status": "suspended"
 }
 ```
+
+---
+
+## Profile Endpoints (`/api/v1/auth`)
+
+### GET `/api/v1/auth/me`
+
+**Auth required:** Yes (any active user)
+
+Return the authenticated user's full profile. If the user has a stored avatar, the response includes a short-lived presigned GET URL so the browser can display the image directly without public bucket access.
+
+**Response 200:**
+```json
+{
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "username": "jkimani",
+  "email": "j.kimani@judiciary.go.ke",
+  "full_name": "Justice Jane Kimani",
+  "role": "judge",
+  "court_station": "High Court Nairobi",
+  "staff_number": "JUD-2024-001",
+  "status": "active",
+  "bio": "Presiding judge, Land and Environment Court division.",
+  "phone": "+254712345678",
+  "avatar_presigned_url": "http://minio:9000/sheria-records/avatars/550e8400.jpg?X-Amz-Signature=...",
+  "approved_by": "admin-user-id",
+  "created_at": "2026-01-15T08:00:00Z",
+  "activated_at": "2026-01-15T09:00:00Z"
+}
+```
+
+**Notes:**
+- `avatar_presigned_url` is `null` if the user has not uploaded a profile picture, or if MinIO/S3 is not configured.
+- `hashed_password` and `activation_token` are never returned.
+- Presigned URL TTL: 3600 seconds.
+
+---
+
+### PATCH `/api/v1/auth/me`
+
+**Auth required:** Yes (any active user)
+
+Update editable profile fields. All fields are optional — omit any field to leave it unchanged.
+
+**Request:**
+```json
+{
+  "full_name": "Hon. Justice Jane Kimani",
+  "staff_number": "JUD-2024-001",
+  "bio": "Updated bio text.",
+  "phone": "+254712345678"
+}
+```
+
+**Validation:**
+- Any provided string field must be non-empty (whitespace-only values rejected with `422`).
+- `full_name`, `staff_number`, `bio`, `phone` are all optional in a single request.
+
+**Response 200:** Same shape as `GET /api/v1/auth/me` (updated profile with presigned avatar URL).
+
+**Errors:**
+- `422` — A provided string field is empty or whitespace.
+
+---
+
+### POST `/api/v1/auth/me/avatar`
+
+**Auth required:** Yes (any active user)
+
+Upload a profile picture. The image is stored in MinIO/S3 under `avatars/{user_id}.{ext}` and a presigned GET URL is returned immediately.
+
+**Request:** `multipart/form-data`
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `file` | image file | Yes | Profile picture (JPEG, PNG, or WebP) |
+
+**Validation:**
+- Content-type must be `image/jpeg`, `image/png`, or `image/webp` → `415` otherwise.
+- File must be ≤ `MAX_AVATAR_UPLOAD_MB` MB (default **5 MB**) → `413` otherwise.
+
+**Response 200:**
+```json
+{
+  "avatar_presigned_url": "http://minio:9000/sheria-records/avatars/550e8400.jpg?X-Amz-Signature=..."
+}
+```
+
+**Errors:**
+- `415` — Unsupported file type (only JPEG/PNG/WebP accepted).
+- `413` — File exceeds the 5 MB size limit (`MAX_AVATAR_UPLOAD_MB`).
+- `503` — MinIO/S3 not configured (`S3_BUCKET_NAME` not set in `.env`).
+- `500` — Upload or presigned URL generation failed.
+
+**Side effects:**
+- Overwrites any previous avatar for the same user (key `avatars/{user_id}.{ext}` is deterministic).
+- Updates `users.avatar_url` with the S3 object key.
 
 ---
 
@@ -497,6 +595,148 @@ sheria_retrieval_docs_count{source="combined"} 5831
 
 ---
 
+## Verify Endpoints (`/api/v1/verify`)
+
+### POST `/api/v1/verify`
+
+**Auth required:** Yes
+
+Upload a PDF court document and receive an authenticity report. The pipeline extracts metadata via LLM, cross-references the case in Kenya Law Reports (Qdrant), and runs a fraud pattern analysis.
+
+**Request:** `multipart/form-data`
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `file` | PDF file | Yes | — | Court document to authenticate |
+| `document_type` | string | No | `court_order` | `court_order` \| `judgment` \| `pleading` \| `affidavit` |
+| `case_number` | string | No | `""` | Case reference for cross-referencing against Qdrant corpus |
+
+**Response 200:**
+```json
+{
+  "authentic": true,
+  "confidence": 0.87,
+  "document_type": "court_order",
+  "extracted_metadata": {
+    "case_number": "HC MISC. APP. 123 OF 2025",
+    "court": "High Court Nairobi",
+    "date_issued": "2025-03-01",
+    "presiding_judge": "Justice Jane Kimani"
+  },
+  "verification_checks": [
+    {"check": "metadata_extraction", "passed": true, "detail": "All metadata fields extracted"},
+    {"check": "case_cross_reference", "passed": true, "detail": "Case found in Kenya Law Reports"},
+    {"check": "fraud_pattern_analysis", "passed": true, "detail": "No fraud patterns detected"}
+  ],
+  "risk_flags": [],
+  "summary": "Document appears authentic. Case cross-referenced successfully."
+}
+```
+
+**Errors:**
+- `400` — Empty file or invalid/unreadable PDF
+- `413` — File exceeds the server's upload limit (`MAX_PDF_UPLOAD_MB`, default **20 MB**)
+- `422` — Verification pipeline raised an unrecoverable error
+
+**File size limit:** Controlled by the `MAX_PDF_UPLOAD_MB` environment variable (default `20`). Override in `.env` or `docker-compose.yml`. Files exceeding the limit are rejected immediately after reading, before any LLM processing.
+
+**Side effects:** Saves result to `verification_activity` table via background task.
+
+**Scanned PDF behaviour:** If `pypdf` extracts no text (image-only PDF), the pipeline continues with an empty text string. Checks that require text content will fail gracefully and flag the document as inconclusive rather than crashing.
+
+---
+
+### GET `/api/v1/verify/history`
+
+**Auth required:** Yes
+
+Return the authenticated user's document verification history, newest first (up to 50 records).
+
+**Response 200:**
+```json
+[
+  {
+    "id": 1,
+    "filename": "court_order_2025.pdf",
+    "document_type": "court_order",
+    "case_number": "HC MISC. APP. 123 OF 2025",
+    "authentic": true,
+    "confidence": 0.87,
+    "created_at": "2026-03-15T10:00:00Z"
+  }
+]
+```
+
+---
+
+## Legal Research Endpoint (`/api/v1/legal-research`)
+
+### POST `/api/v1/legal-research`
+
+**Auth required:** Yes
+
+Structured judicial research endpoint (streaming). Unlike `/api/v1/chat/stream`, this endpoint:
+- **Always retrieves** from Kenya Law Reports — never short-circuits to a direct answer.
+- Accepts optional `jurisdiction` and `date_range` filters applied as Qdrant payload filters.
+- Returns structured `citations` alongside the IRAC answer text.
+
+**Request:**
+```json
+{
+  "query": "What is the test for adverse possession in Kenya?",
+  "jurisdiction": ["Supreme Court", "Court of Appeal"],
+  "date_range": {"from": "2010", "to": "2026"},
+  "session_id": "optional-session-uuid"
+}
+```
+
+**Fields:**
+- `query` — required, min_length=1
+- `jurisdiction` — optional list; valid values: `"Supreme Court"`, `"Court of Appeal"`, `"High Court"`, `"Industrial Court"`. Omit for all courts.
+- `date_range.from` / `date_range.to` — year strings (e.g. `"2010"`, `"2026"`)
+- `session_id` — optional UUID; auto-generated if omitted
+
+**Response:** `Content-Type: application/x-ndjson`
+
+Status events (emitted as each node starts):
+```json
+{"event": "status", "step": "retriever", "session_id": "..."}
+{"event": "status", "step": "responder", "session_id": "..."}
+```
+
+Answer event (final):
+```json
+{
+  "event": "answer",
+  "content": "The test for adverse possession in Kenya requires...",
+  "citations": [
+    {
+      "text": "Adverse possession requires actual, open, continuous possession...",
+      "source": "supreme_court/waweru_v_republic.pdf",
+      "case_number": "[2023] KESC 45",
+      "court": "Supreme Court"
+    }
+  ],
+  "session_id": "..."
+}
+```
+
+Cache hit (immediate, no agent execution):
+```json
+{"event": "answer", "content": "...", "citations": [], "session_id": "..."}
+```
+
+Error event:
+```json
+{"event": "error", "content": "An internal error occurred during legal research."}
+```
+
+**Background tasks (after stream):**
+1. Save user query and AI response to `chat_history`
+2. Update `semantic_cache` with new Q&A pair
+
+---
+
 ## Error Response Format
 
 All error responses use a consistent format:
@@ -517,6 +757,8 @@ All error responses use a consistent format:
 | `403` | Insufficient role / ownership violation |
 | `404` | Resource not found |
 | `409` | Conflict (duplicate username/email) |
+| `413` | Payload too large (PDF > `MAX_PDF_UPLOAD_MB` or avatar > `MAX_AVATAR_UPLOAD_MB`) |
+| `415` | Unsupported media type (avatar upload: only JPEG/PNG/WebP accepted) |
 | `422` | Pydantic validation failure |
 | `500` | Internal server error |
 | `503` | Service dependency unavailable |

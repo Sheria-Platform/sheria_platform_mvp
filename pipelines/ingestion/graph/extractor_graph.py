@@ -16,16 +16,20 @@ Environment Variables:
     LLM_MAX_TOKENS: Maximum tokens for generation (default: 4096)
     GRAPH_CONCURRENCY: Max concurrent LLM requests in-flight (default: 10)
 """
+
 import asyncio
 import json
 import logging
 import os
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import httpx
 
-from pipelines.ingestion.graph.schema_graph import GraphSchema, VALID_NODE_LABELS, VALID_RELATION_TYPES as _SCHEMA_RELATION_TYPES
+from pipelines.ingestion.graph.schema_graph import VALID_NODE_LABELS, GraphSchema
+from pipelines.ingestion.graph.schema_graph import (
+    VALID_RELATION_TYPES as _SCHEMA_RELATION_TYPES,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -46,10 +50,10 @@ GRAPH_OUTPUT_SCHEMA = {
                 "type": "object",
                 "properties": {
                     "id": {"type": "string"},
-                    "type": {"type": "string", "enum": _NODE_TYPE_ENUM}
+                    "type": {"type": "string", "enum": _NODE_TYPE_ENUM},
                 },
-                "required": ["id", "type"]
-            }
+                "required": ["id", "type"],
+            },
         },
         "edges": {
             "type": "array",
@@ -58,13 +62,13 @@ GRAPH_OUTPUT_SCHEMA = {
                 "properties": {
                     "source": {"type": "string"},
                     "target": {"type": "string"},
-                    "type": {"type": "string", "enum": _RELATION_TYPE_ENUM}
+                    "type": {"type": "string", "enum": _RELATION_TYPE_ENUM},
                 },
-                "required": ["source", "target", "type"]
-            }
-        }
+                "required": ["source", "target", "type"],
+            },
+        },
     },
-    "required": ["nodes", "edges"]
+    "required": ["nodes", "edges"],
 }
 
 
@@ -113,8 +117,7 @@ class GraphExtractor:
         """
         # Load configuration from environment
         self.llm_endpoint = os.getenv(
-            "OLLAMA_LLM_ENDPOINT",
-            "http://192.168.214.22:11435/api/chat"
+            "OLLAMA_LLM_ENDPOINT", "http://192.168.214.22:11435/api/chat"
         )
         self.model = os.getenv("OLLAMA_LLM_MODEL", "llama3")
         self.timeout = float(os.getenv("LLM_TIMEOUT", "180"))
@@ -130,16 +133,20 @@ class GraphExtractor:
         if not self.model:
             raise ValueError("OLLAMA_LLM_MODEL cannot be empty")
         if self.timeout <= 0 or self.timeout > 600:
-            raise ValueError(f"LLM_TIMEOUT must be between 0 and 600, got {self.timeout}")
+            raise ValueError(
+                f"LLM_TIMEOUT must be between 0 and 600, got {self.timeout}"
+            )
         if self.concurrency < 1 or self.concurrency > 64:
-            raise ValueError(f"GRAPH_CONCURRENCY must be between 1 and 64, got {self.concurrency}")
+            raise ValueError(
+                f"GRAPH_CONCURRENCY must be between 1 and 64, got {self.concurrency}"
+            )
 
         logger.info(
             f"GraphExtractor initialized: endpoint={self.llm_endpoint}, model={self.model}, "
             f"timeout={self.timeout}s, concurrency={self.concurrency}"
         )
 
-    def _extract_json_from_response(self, content: str) -> Optional[Dict[str, Any]]:
+    def _extract_json_from_response(self, content: str) -> dict[str, Any] | None:
         """
         Extract and parse JSON from LLM response, handling various formats.
 
@@ -159,7 +166,7 @@ class GraphExtractor:
             return None
 
         # Strip Qwen3 thinking blocks if /no_think was not honoured
-        content = re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL).strip()
+        content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
 
         # Try direct JSON parsing first
         try:
@@ -169,25 +176,31 @@ class GraphExtractor:
 
         # Try extracting from markdown code blocks
         patterns = [
-            r'```json\s*\n(.*?)\n```',  # ```json ... ```
-            r'```\s*\n(.*?)\n```',       # ``` ... ```
-            r'{.*}',                      # Any JSON object
+            r"```json\s*\n(.*?)\n```",  # ```json ... ```
+            r"```\s*\n(.*?)\n```",  # ``` ... ```
+            r"{.*}",  # Any JSON object
         ]
 
         for pattern in patterns:
             try:
                 match = re.search(pattern, content, re.DOTALL)
                 if match:
-                    json_str = match.group(1) if len(match.groups()) > 0 else match.group(0)
+                    json_str = (
+                        match.group(1) if len(match.groups()) > 0 else match.group(0)
+                    )
                     return json.loads(json_str.strip())
             except (json.JSONDecodeError, AttributeError):
                 continue
 
         # Log failure for diagnosing any remaining edge cases
-        logger.warning(f"Failed to parse JSON from LLM response. Preview: {content[:300]!r}")
+        logger.warning(
+            f"Failed to parse JSON from LLM response. Preview: {content[:300]!r}"
+        )
         return None
 
-    def _validate_graph_data(self, graph_data: Dict[str, Any]) -> Tuple[List[dict], List[dict]]:
+    def _validate_graph_data(
+        self, graph_data: dict[str, Any]
+    ) -> tuple[list[dict], list[dict]]:
         """
         Validate and extract nodes and edges from graph data.
 
@@ -225,7 +238,7 @@ class GraphExtractor:
         text: str,
         idx: int,
         semaphore: asyncio.Semaphore,
-    ) -> Tuple[int, List[dict], List[dict]]:
+    ) -> tuple[int, list[dict], list[dict]]:
         """
         Extract graph data from a single text chunk with retry logic.
 
@@ -298,7 +311,7 @@ Input Text:
                             f"(attempt {attempt + 1}/{self.max_retries})"
                         )
                         if attempt < self.max_retries - 1:
-                            await asyncio.sleep(self.retry_delay * (2 ** attempt))
+                            await asyncio.sleep(self.retry_delay * (2**attempt))
                             continue
                         return idx, [], []
 
@@ -315,7 +328,7 @@ Input Text:
                         f"LLM timeout for text {idx} (attempt {attempt + 1}/{self.max_retries})"
                     )
                     if attempt < self.max_retries - 1:
-                        await asyncio.sleep(self.retry_delay * (2 ** attempt))
+                        await asyncio.sleep(self.retry_delay * (2**attempt))
 
                 except httpx.HTTPStatusError as e:
                     last_error = e
@@ -326,7 +339,7 @@ Input Text:
                     if e.response.status_code < 500:
                         break  # Client error — don't retry
                     if attempt < self.max_retries - 1:
-                        await asyncio.sleep(self.retry_delay * (2 ** attempt))
+                        await asyncio.sleep(self.retry_delay * (2**attempt))
 
                 except Exception as e:
                     last_error = e
@@ -335,7 +348,7 @@ Input Text:
                         f"(attempt {attempt + 1}/{self.max_retries}): {e}"
                     )
                     if attempt < self.max_retries - 1:
-                        await asyncio.sleep(self.retry_delay * (2 ** attempt))
+                        await asyncio.sleep(self.retry_delay * (2**attempt))
 
         logger.error(
             f"Failed to extract graph for text {idx} after {self.max_retries} attempts: {last_error}"
@@ -343,8 +356,8 @@ Input Text:
         return idx, [], []
 
     async def _extract_all(
-        self, texts: List[str]
-    ) -> List[Tuple[int, List[dict], List[dict]]]:
+        self, texts: list[str]
+    ) -> list[tuple[int, list[dict], list[dict]]]:
         """
         Fire all LLM extraction requests concurrently and return results in input order.
 
@@ -359,7 +372,7 @@ Input Text:
             ]
             return await asyncio.gather(*tasks, return_exceptions=True)
 
-    def __call__(self, batch: Dict[str, Any]) -> Dict[str, Any]:
+    def __call__(self, batch: dict[str, Any]) -> dict[str, Any]:
         """
         Extract graph data from a batch of text chunks (concurrently).
 
@@ -397,8 +410,8 @@ Input Text:
         raw_results = asyncio.run(self._extract_all(texts))
 
         # Re-order by idx to guarantee output matches input order
-        nodes_list: List[List[dict]] = [[] for _ in texts]
-        edges_list: List[List[dict]] = [[] for _ in texts]
+        nodes_list: list[list[dict]] = [[] for _ in texts]
+        edges_list: list[list[dict]] = [[] for _ in texts]
 
         for result in raw_results:
             if isinstance(result, Exception):

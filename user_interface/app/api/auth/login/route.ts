@@ -29,13 +29,30 @@ export async function POST(req: NextRequest) {
   }
 
   const data = await apiRes.json();
-  const res = NextResponse.json({ user: data.user, token: data.access_token });
-  res.cookies.set("sheria_auth", JSON.stringify(data.user), {
+
+  // Strip token from the user object returned to the client — the JWT lives
+  // exclusively in the httpOnly cookie below and must not be JS-accessible.
+  const { token: _omit, ...userWithoutToken } = data.user;
+
+  const res = NextResponse.json({ user: userWithoutToken });
+
+  // Cookie 1: JWT — httpOnly so JavaScript cannot read it (XSS protection).
+  res.cookies.set("sheria_auth", data.access_token, {
+    httpOnly: true,
+    sameSite: "strict",
+    secure: process.env.NODE_ENV === "production",
+    maxAge: 60 * 60 * 8,
+    path: "/",
+  });
+
+  // Cookie 2: Role only — readable by Next.js middleware for route guards.
+  res.cookies.set("sheria_role", data.user.role, {
     httpOnly: false,
     sameSite: "strict",
     secure: process.env.NODE_ENV === "production",
     maxAge: 60 * 60 * 8,
     path: "/",
   });
+
   return res;
 }

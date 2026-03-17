@@ -29,6 +29,7 @@ from pydantic import BaseModel, Field
 from services.api.app.agents.legal_research_graph import legal_research_app
 from services.api.app.agents.state import AgentState
 from services.api.app.auth.jwt import get_current_user
+from services.api.app.auth.permissions import require_role
 from services.api.app.cache.semantic import SemanticCache
 from services.api.app.clients.ollama_client import OllamaClient
 from services.api.app.dependencies import get_llm_client, get_memory, get_semantic_cache
@@ -41,6 +42,7 @@ logger = logging.getLogger(__name__)
 
 
 # --- Schemas ---
+
 
 class DateRange(BaseModel):
     from_date: str = Field(alias="from", description="Start year, e.g. '2010'")
@@ -71,11 +73,12 @@ class LegalResearchRequest(BaseModel):
 
 # --- Route ---
 
+
 @router.post("")
 async def legal_research(
     req: LegalResearchRequest,
     background_tasks: BackgroundTasks,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_role("judge", "magistrate")),
     cache: SemanticCache = Depends(get_semantic_cache),
     memory: PostgresMemory = Depends(get_memory),
     llm: OllamaClient = Depends(get_llm_client),
@@ -106,15 +109,25 @@ async def legal_research(
         logger.info("Legal research cache hit")
 
         async def _stream_cache() -> AsyncGenerator[str, None]:
-            yield json.dumps({
-                "event": "answer",
-                "content": cached_ans,
-                "citations": [],
-                "session_id": session_id,
-            }) + "\n"
+            yield (
+                json.dumps(
+                    {
+                        "event": "answer",
+                        "content": cached_ans,
+                        "citations": [],
+                        "session_id": session_id,
+                    }
+                )
+                + "\n"
+            )
+            yield json.dumps({"event": "done", "session_id": session_id}) + "\n"
 
-        background_tasks.add_task(memory.add_message, session_id, "user", req.query, user_id)
-        background_tasks.add_task(memory.add_message, session_id, "assistant", cached_ans, user_id)
+        background_tasks.add_task(
+            memory.add_message, session_id, "user", req.query, user_id
+        )
+        background_tasks.add_task(
+            memory.add_message, session_id, "assistant", cached_ans, user_id
+        )
         return StreamingResponse(_stream_cache(), media_type="application/x-ndjson")
 
     # Build initial agent state — action is not set here; this graph skips the
@@ -153,16 +166,21 @@ async def legal_research(
 
                 # Capture final answer from responder
                 if node_name == "responder":
-                    if "messages" in node_data and node_data["messages"]:
+                    if node_data.get("messages"):
                         ai_msg = node_data["messages"][-1]
                         final_answer = ai_msg.get("content", "")
 
-                        yield json.dumps({
-                            "event": "answer",
-                            "content": final_answer,
-                            "citations": final_citations,
-                            "session_id": session_id,
-                        }) + "\n"
+                        yield (
+                            json.dumps(
+                                {
+                                    "event": "answer",
+                                    "content": final_answer,
+                                    "citations": final_citations,
+                                    "session_id": session_id,
+                                }
+                            )
+                            + "\n"
+                        )
 
             if final_answer:
                 total_ms = round((time.perf_counter() - request_start) * 1000, 2)
@@ -178,11 +196,18 @@ async def legal_research(
                 await memory.add_message(session_id, "assistant", final_answer, user_id)
                 await cache.set_cached_response(req.query, final_answer)
 
+            yield json.dumps({"event": "done", "session_id": session_id}) + "\n"
+
         except Exception:
-            logger.error("Error in legal research stream", exc_info=True)
-            yield json.dumps({
-                "event": "error",
-                "content": "An internal error occurred during legal research.",
-            }) + "\n"
+            logger.exception("Error in legal research stream")
+            yield (
+                json.dumps(
+                    {
+                        "event": "error",
+                        "content": "An internal error occurred during legal research.",
+                    }
+                )
+                + "\n"
+            )
 
     return StreamingResponse(event_generator(), media_type="application/x-ndjson")

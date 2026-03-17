@@ -6,9 +6,11 @@ from typing import Any
 
 try:
     import pypdf
+
     USE_PYPDF = True
 except ImportError:
     from unstructured.partition.pdf import partition_pdf
+
     USE_PYPDF = False
 
 logger = logging.getLogger(__name__)
@@ -43,11 +45,15 @@ def parse_pdf_bytes(file_bytes: bytes, filename: str) -> tuple[str, dict[str, An
                 "table_count": 0,
             }
 
-            logger.info(f"Parsed {filename} with PyPDF: {len(text_content)} chars, {len(pdf_reader.pages)} pages")
+            logger.info(
+                f"Parsed {filename} with PyPDF: {len(text_content)} chars, {len(pdf_reader.pages)} pages"
+            )
             return text_content, metadata
 
         except Exception as e:
-            logger.warning(f"PyPDF failed for {filename}, falling back to unstructured: {e}")
+            logger.warning(
+                f"PyPDF failed for {filename}, falling back to unstructured: {e}"
+            )
             # Fall through to unstructured parsing
 
     # Fallback to unstructured (slower but more robust)
@@ -86,7 +92,7 @@ def parse_pdf_bytes(file_bytes: bytes, filename: str) -> tuple[str, dict[str, An
                         tables.append(el.metadata.text_as_html)
 
         except Exception as e:
-            logger.error(f"Failed to parse PDF {filename}: {str(e)}")
+            logger.error(f"Failed to parse PDF {filename}: {e!s}")
             # In production, you might raise a specific ParseError here
             raise e
 

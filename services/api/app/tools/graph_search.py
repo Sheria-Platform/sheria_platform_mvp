@@ -55,4 +55,4 @@ async def search_graph_tool(question: str) -> str:
         return str(results)
 
     except Exception as e:
-        return f"Graph search error: {str(e)}"
+        return f"Graph search error: {e!s}"

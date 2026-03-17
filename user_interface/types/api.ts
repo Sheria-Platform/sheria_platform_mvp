@@ -16,4 +16,8 @@ export type {
   RegisterRequest,
   PendingUser,
   ActiveUser,
+  DocumentType,
+  VerificationCheck,
+  VerificationReport,
+  VerificationActivity,
 } from "../src/types/api";

@@ -28,8 +28,16 @@ class AgentState(TypedDict):
     action: str                                     # Route: retrieve|direct_answer|tool_use
     tool_choice: str                                # Tool name (if tool_use)
     tool_input: str                                 # Tool input string
-    query_vector: list[float]                       # Cached 2560-dim embedding
+    query_vector: list[float]                       # Cached 768-dim embedding
+    jurisdiction_filter: list[str]                  # Court filter for legal-research route
+    citations: list[dict]                           # Structured citations from retriever
 ```
+
+**Field usage by graph:**
+| Field | Chat graph (`graph.py`) | Legal research graph (`legal_research_graph.py`) |
+|-------|------------------------|--------------------------------------------------|
+| `jurisdiction_filter` | Always empty `[]` | Populated from request (e.g. `["Supreme Court"]`) |
+| `citations` | Not used | Populated by retriever; included in final answer event |
 
 **Critical note on `messages`:** The `Annotated[list, operator.add]` annotation means LangGraph uses `operator.add` to merge state updates — messages are appended, never overwritten. This is the correct pattern for conversation history.
 
@@ -352,13 +360,93 @@ return StreamingResponse(
 | Planner LLM call (Ollama) | 500ms-2s | JSON mode, temp=0 |
 | Vector search (Qdrant) | 20-50ms | Top-5, cosine |
 | Graph search (Neo4j) | 50-200ms | Fulltext + 1-hop |
-| Responder LLM streaming (Ollama) | 2-8s | llama3.3, 1024 tokens |
+| Responder LLM streaming (Ollama) | 2-8s | qwen3:8b, 1024 tokens |
 | **Total (cache miss)** | **3-11s** | TTFB ~3s (status events), full response 6-11s |
 | **Total (cache hit)** | **< 100ms** | Embed + search + stream |
 
 ---
 
-## 8. LangGraph Version Notes
+## 8. Legal Research Graph (`agents/legal_research_graph.py`)
+
+A second, dedicated LangGraph graph used exclusively by the `POST /api/v1/legal-research` endpoint.
+
+### Why a separate graph?
+
+The generic chat graph (`graph.py`) includes a planner node that can short-circuit to `direct_answer`. For formal judicial research, this is undesirable — every query **must** retrieve from Kenya Law Reports and return cited authorities. The dedicated graph enforces this invariant by removing the planner.
+
+### Topology
+
+```
+              Entry
+                │
+                ▼
+     ┌─────────────────────┐
+     │  RETRIEVER NODE     │
+     │  (jurisdiction-     │
+     │   filter-aware)     │
+     └──────────┬──────────┘
+                │
+     ┌──────────▼──────────┐
+     │  RESPONDER NODE     │
+     │  (emits structured  │
+     │   citations)        │
+     └──────────┬──────────┘
+                │
+               END
+```
+
+### Key differences from the chat graph
+
+| Aspect | Chat graph | Legal research graph |
+|--------|-----------|----------------------|
+| Planner node | Yes (can short-circuit) | No — always retrieves |
+| Jurisdiction filtering | Not supported | `jurisdiction_filter` from state applied as Qdrant payload filter |
+| Citations in response | Not included | `citations: list[dict]` extracted by retriever, emitted in answer event |
+| Tool node | Supported | Not included |
+| Cache behaviour | Semantic cache check before graph | Same semantic cache check |
+
+### Jurisdiction filter application
+
+The retriever node in `legal_research_graph.py` reads `state["jurisdiction_filter"]` and builds a Qdrant `Filter` condition restricting results to matching courts:
+
+```python
+# Pseudocode — see retriever node implementation
+if jurisdiction_filter:
+    qdrant_filter = Filter(must=[
+        FieldCondition(key="court", match=MatchAny(any=jurisdiction_filter))
+    ])
+else:
+    qdrant_filter = None  # No filter = all courts
+
+results = qdrant_client.search(
+    collection_name="kenya_law_reports",
+    query_vector=vector,
+    query_filter=qdrant_filter,
+    limit=5,
+)
+```
+
+### Citation extraction
+
+The retriever node populates `state["citations"]` with structured metadata from each Qdrant result:
+
+```python
+citations = [
+    {
+        "text": hit.payload["text"],
+        "source": hit.payload["source"],
+        "case_number": hit.payload.get("case_number", ""),
+        "court": hit.payload.get("court", ""),
+    }
+    for hit in vector_results
+]
+```
+
+These citations are passed through to the route handler and emitted in the final `answer` event of the NDJSON stream.
+
+---
+
+## 9. LangGraph Version Notes
 
 The implementation uses **LangGraph v0.1.x** patterns:
 - `StateGraph` with `TypedDict` state

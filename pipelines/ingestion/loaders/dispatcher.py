@@ -6,12 +6,13 @@ Public API:
     get_loader(filename) -> Callable  -- returns the right parser for a file
     SUPPORTED_EXTENSIONS              -- frozenset of accepted extensions
 """
-import logging
-from typing import Callable, Tuple
 
-from pipelines.ingestion.loaders.pdf_loader import parse_pdf_bytes
+import logging
+from collections.abc import Callable
+
 from pipelines.ingestion.loaders.docx_loader import parse_docx_bytes
 from pipelines.ingestion.loaders.html_loader import parse_html_bytes
+from pipelines.ingestion.loaders.pdf_loader import parse_pdf_bytes
 from pipelines.ingestion.loaders.txt_loader import parse_txt_bytes
 
 logger = logging.getLogger(__name__)
@@ -20,15 +21,15 @@ logger = logging.getLogger(__name__)
 SUPPORTED_EXTENSIONS = frozenset([".pdf", ".docx", ".html", ".htm", ".txt"])
 
 _LOADER_MAP: dict[str, Callable] = {
-    ".pdf":  parse_pdf_bytes,
+    ".pdf": parse_pdf_bytes,
     ".docx": parse_docx_bytes,
     ".html": parse_html_bytes,
-    ".htm":  parse_html_bytes,  # alias — same parser
-    ".txt":  parse_txt_bytes,
+    ".htm": parse_html_bytes,  # alias — same parser
+    ".txt": parse_txt_bytes,
 }
 
 
-def get_loader(filename: str) -> Callable[[bytes, str], Tuple[str, dict]]:
+def get_loader(filename: str) -> Callable[[bytes, str], tuple[str, dict]]:
     """
     Return the appropriate loader function for the given filename.
 

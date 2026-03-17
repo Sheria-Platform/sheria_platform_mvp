@@ -32,7 +32,7 @@ Example:
     ...     print(f"Completed: {node_name}")
 """
 
-from langgraph.graph import END, StateGraph
+from langgraph.graph import END, START, StateGraph
 
 from services.api.app.agents.nodes.planner import planner_node
 from services.api.app.agents.nodes.responder import generate_node
@@ -76,7 +76,7 @@ _workflow.add_node("tool", tool_node)
 _workflow.add_node("responder", generate_node)
 
 # Entry point
-_workflow.set_entry_point("planner")
+_workflow.add_edge(START, "planner")
 
 # Conditional branching after planner
 _workflow.add_conditional_edges(

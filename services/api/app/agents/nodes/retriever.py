@@ -105,7 +105,9 @@ async def retrieve_node(state: AgentState) -> dict:
     embed_ms = 0.0
     if cached_vector:
         query_vector = cached_vector
-        logger.debug("Retriever reusing cached query vector", extra={"node": "retriever"})
+        logger.debug(
+            "Retriever reusing cached query vector", extra={"node": "retriever"}
+        )
     else:
         embed_start = time.perf_counter()
         query_vector = await embeddings_client.embed_query(query)
@@ -157,26 +159,25 @@ async def retrieve_node(state: AgentState) -> dict:
                 f"{text} [Citation: {citation_code} | Court: {court_name} | Year: {year}]"
             )
             # Structured citation for the API response
-            citations.append({
-                "citation_code": citation_code,
-                "court_name": court_name,
-                "year": year,
-                "case_slug": case_slug,
-                "score": score,
-            })
+            citations.append(
+                {
+                    "citation_code": citation_code,
+                    "court_name": court_name,
+                    "year": year,
+                    "case_slug": case_slug,
+                    "score": score,
+                }
+            )
         return docs, citations
 
     async def _graph_search() -> list[str]:
         """Search Neo4j fulltext index for entity relationships."""
         try:
-            rows = await neo4j_client.query(
-                _GRAPH_CYPHER, {"query": query}
-            )
+            rows = await neo4j_client.query(_GRAPH_CYPHER, {"query": query})
             return [row["text"] for row in rows]
-        except Exception as exc:
-            logger.error(
+        except Exception:
+            logger.exception(
                 "Graph search failed",
-                exc_info=True,
                 extra={"node": "retriever"},
             )
             return []

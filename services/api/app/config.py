@@ -92,7 +92,7 @@ class Settings(BaseSettings):
     # Ollama (LLM & Embeddings)                                             #
     # ------------------------------------------------------------------ #
     OLLAMA_BASE_URL: str = "http://ollama:11434"
-    OLLAMA_LLM_MODEL: str = "llama3.3"
+    OLLAMA_LLM_MODEL: str = "qwen3:8b"
     OLLAMA_EMBEDDING_MODEL: str = "nomic-embed-text"
     OLLAMA_TIMEOUT: int = 60  # seconds
 
@@ -101,6 +101,25 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------ #
     JWT_SECRET_KEY: str  # required — sensitive
     JWT_ALGORITHM: str = "HS256"
+    # Comma-separated list of allowed CORS origins.
+    # Override in production: ALLOWED_ORIGINS=https://sheria.judiciary.go.ke
+    ALLOWED_ORIGINS: str = (
+        "http://localhost:3000,http://127.0.0.1:3000,"
+        "http://localhost:3001,http://127.0.0.1:3001"
+    )
+    TOKEN_BLACKLIST_TTL_SECONDS: int = 28800  # 8 hours — matches JWT TTL
+    ACTIVATION_TOKEN_TTL_DAYS: int = 7
+
+    # ------------------------------------------------------------------ #
+    # Embeddings                                                          #
+    # ------------------------------------------------------------------ #
+    EMBEDDING_DIM: int = 768  # Must match OLLAMA_EMBEDDING_MODEL output dimensions
+
+    # ------------------------------------------------------------------ #
+    # File uploads                                                        #
+    # ------------------------------------------------------------------ #
+    MAX_PDF_UPLOAD_MB: int = 20  # Maximum PDF size accepted by /api/v1/verify
+    MAX_AVATAR_UPLOAD_MB: int = 5  # Maximum avatar image size accepted by /api/v1/auth/me/avatar
 
     # ------------------------------------------------------------------ #
     # Semantic Cache                                                         #
@@ -116,14 +135,14 @@ class Settings(BaseSettings):
     # Default Admin Seed                                                    #
     # ------------------------------------------------------------------ #
     ADMIN_USERNAME: str = "admin"
-    ADMIN_PASSWORD: str = "Admin1234!"   # change in production
+    ADMIN_PASSWORD: str = "Admin1234!"  # change in production
     ADMIN_EMAIL: str = "admin@judiciary.go.ke"
     ADMIN_FULL_NAME: str = "System Administrator"
 
     # ------------------------------------------------------------------ #
     # SMTP / Email                                                           #
     # ------------------------------------------------------------------ #
-    SMTP_HOST: str = ""          # empty = email delivery disabled
+    SMTP_HOST: str = ""  # empty = email delivery disabled
     SMTP_PORT: int = 587
     SMTP_USER: str = ""
     SMTP_PASSWORD: str = ""
@@ -137,4 +156,4 @@ class Settings(BaseSettings):
         extra = "ignore"
 
 
-settings: Settings = Settings()
+settings: Settings = Settings()  # type: ignore[call-arg]

@@ -3,10 +3,9 @@
 import hashlib
 import mimetypes
 
-
 # Magic byte signatures
 _PDF_MAGIC = b"%PDF-"
-_ZIP_MAGIC = b"PK\x03\x04"   # DOCX/XLSX are ZIP archives
+_ZIP_MAGIC = b"PK\x03\x04"  # DOCX/XLSX are ZIP archives
 
 
 def validate_pdf(content: bytes) -> bool:

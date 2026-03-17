@@ -8,8 +8,8 @@ from datetime import datetime, timezone
 # ── Request Context ────────────────────────────────────────────────────────
 # Stores per-request fields so every log record emitted during a request is
 # automatically decorated without callers needing to pass them as extra=.
-_request_ctx: contextvars.ContextVar[dict] = contextvars.ContextVar(
-    "request_context", default={}
+_request_ctx: contextvars.ContextVar[dict | None] = contextvars.ContextVar(
+    "request_context", default=None
 )
 
 
@@ -26,7 +26,7 @@ def bind_context(**kwargs: object) -> None:
         bind_context(trace_id="abc123", session_id="sess-1", user_id="u-42")
         logger.info("Processing request")  # → {"trace_id": "abc123", ...}
     """
-    current = _request_ctx.get().copy()
+    current = (_request_ctx.get() or {}).copy()
     current.update(kwargs)
     _request_ctx.set(current)
 
@@ -44,7 +44,7 @@ class JSONFormatter(logging.Formatter):
     _PROMOTED = ("trace_id", "session_id", "user_id", "node", "duration_ms")
 
     def format(self, record: logging.LogRecord) -> str:
-        ctx = _request_ctx.get()
+        ctx = _request_ctx.get() or {}
 
         log_record: dict = {
             "timestamp": datetime.now(timezone.utc).isoformat(),

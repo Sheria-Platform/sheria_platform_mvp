@@ -8,6 +8,7 @@ Provides an async HTTP interface to Ollama's /api/chat endpoint with:
 - Streaming support
 - Health check
 """
+
 import json
 import logging
 from collections.abc import AsyncGenerator
@@ -150,7 +151,9 @@ class OllamaClient:
         }
 
         try:
-            async with self.client.stream("POST", "/api/chat", json=payload) as response:
+            async with self.client.stream(
+                "POST", "/api/chat", json=payload
+            ) as response:
                 response.raise_for_status()
                 async for line in response.aiter_lines():
                     if not line:

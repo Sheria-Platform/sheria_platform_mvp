@@ -4,7 +4,7 @@
 Allows authenticated users to rate individual assistant responses with
 a thumbs-up/thumbs-down score and an optional free-text comment.
 Feedback is persisted to the ``feedback`` table in PostgreSQL via the
-``PostgresMemory.record_feedback`` ORM method.
+``FeedbackRepository.record_feedback`` method.
 """
 
 import logging
@@ -13,7 +13,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
 from services.api.app.auth.jwt import get_current_user
-from services.api.app.memory.postgres import postgres_memory
+from services.api.app.dependencies import get_feedback_repo
+from services.api.app.memory.feedback_repository import FeedbackRepository
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -33,7 +34,7 @@ class FeedbackRequest(BaseModel):
 
     session_id: str
     message_id: int
-    score: int          # 1 = like, -1 = dislike
+    score: int  # 1 = like, -1 = dislike
     comment: str | None = None
 
 
@@ -41,6 +42,7 @@ class FeedbackRequest(BaseModel):
 async def submit_feedback(
     req: FeedbackRequest,
     user: dict = Depends(get_current_user),
+    feedback: FeedbackRepository = Depends(get_feedback_repo),
 ) -> dict[str, str]:
     """Record a user's rating for an assistant response.
 
@@ -48,6 +50,7 @@ async def submit_feedback(
         req: Feedback payload including session, message, score,
             and optional comment.
         user: Authenticated user dict from ``get_current_user``.
+        feedback: Feedback repository dependency.
 
     Returns:
         ``{"status": "recorded"}`` on success.
@@ -68,7 +71,7 @@ async def submit_feedback(
             }
     """
     try:
-        await postgres_memory.record_feedback(
+        await feedback.record_feedback(
             session_id=req.session_id,
             user_id=user["id"],
             message_id=req.message_id,

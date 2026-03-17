@@ -87,7 +87,7 @@ services:
 #       # Production security settings
 #       MINIO_BROWSER_REDIRECT_URL: ${MINIO_BROWSER_REDIRECT_URL:-http://0.0.0.0:9001}
 #       MINIO_SERVER_URL: ${MINIO_SERVER_URL:-http://0.0.0.0:9000}
-      
+
 #       # Performance and reliability settings
 #       MINIO_CACHE: "on"
 #       MINIO_CACHE_DRIVES: "/data/cache"
@@ -96,7 +96,7 @@ services:
       # Health check settings
       #MINIO_NOTIFY_WEBHOOK_ENABLE_PRIMARY: "on"
       # Additional security headers
-      MINIO_API_CORS_ALLOW_ORIGIN: "*"  
+      MINIO_API_CORS_ALLOW_ORIGIN: "*"
     volumes:
       - minio-data:/data
     restart: unless-stopped
@@ -181,6 +181,7 @@ services:
       # Security
       JWT_SECRET_KEY: ${JWT_SECRET_KEY}
       JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
       # Observability
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
       # SMTP — routes activation emails to MailHog in dev
