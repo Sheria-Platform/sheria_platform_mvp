@@ -15,9 +15,12 @@ export function ChatContainer() {
     await sendMessage(text);
   }
 
-  async function handleRerun(comment: string) {
-    const prompt = `Your previous answer did not fully address my question. Here is my feedback: "${comment}"\n\nPlease provide an improved response.`;
-    await sendMessage(prompt);
+  async function handleRerun(comment: string, webSearch: boolean) {
+    const feedbackClause = comment.trim()
+      ? `Here is my feedback: "${comment.trim()}"\n\n`
+      : "";
+    const prompt = `Your previous answer did not fully address my question. ${feedbackClause}Please provide an improved response.`;
+    await sendMessage(prompt, { webSearch });
   }
 
   return (
@@ -42,6 +45,8 @@ export function ChatContainer() {
         onSend={handleSend}
         onStop={stopStream}
         isStreaming={store.isStreaming}
+        webSearchEnabled={store.webSearchEnabled}
+        onToggleWebSearch={store.toggleWebSearch}
       />
     </div>
   );

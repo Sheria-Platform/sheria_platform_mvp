@@ -17,7 +17,7 @@ interface FeedbackButtonsProps {
   messageId: string;
   sessionId: string;
   feedbackGiven?: "thumbs_up" | "thumbs_down";
-  onRerun?: (comment: string) => void;
+  onRerun?: (comment: string, webSearch: boolean) => void;
 }
 
 export function FeedbackButtons({
@@ -66,20 +66,20 @@ export function FeedbackButtons({
     setUiState("awaiting_comment");
   }
 
-  async function handleSubmitComment() {
+  function handleSubmitComment() {
     if (!comment.trim()) return;
-    setUiState("submitting");
-    setMessageFeedback(sessionId, messageId, "thumbs_down");
-    await postFeedback(-1, comment.trim());
+    const trimmed = comment.trim();
     setUiState("done_rerun");
-    onRerun?.(comment.trim());
+    setMessageFeedback(sessionId, messageId, "thumbs_down");
+    postFeedback(-1, trimmed); // fire-and-forget
+    onRerun?.(trimmed, false);
   }
 
-  async function handleSkip() {
-    setUiState("submitting");
+  function handleSkip() {
+    setUiState("done_rerun");
     setMessageFeedback(sessionId, messageId, "thumbs_down");
-    await postFeedback(-1, null);
-    setUiState("done_skip");
+    postFeedback(-1, null); // fire-and-forget
+    onRerun?.("", true);
   }
 
   if (uiState === "done_positive" || uiState === "done_skip") {
