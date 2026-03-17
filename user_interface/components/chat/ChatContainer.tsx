@@ -15,6 +15,11 @@ export function ChatContainer() {
     await sendMessage(text);
   }
 
+  async function handleRerun(comment: string) {
+    const prompt = `Your previous answer did not fully address my question. Here is my feedback: "${comment}"\n\nPlease provide an improved response.`;
+    await sendMessage(prompt);
+  }
+
   return (
     <div className="flex flex-col h-full">
       {!activeSession || activeSession.messages.length === 0 ? (
@@ -30,6 +35,7 @@ export function ChatContainer() {
         <MessageList
           messages={activeSession.messages}
           sessionId={activeSession.id}
+          onRerun={handleRerun}
         />
       )}
       <ChatInput

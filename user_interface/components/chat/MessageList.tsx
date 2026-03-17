@@ -9,9 +9,10 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 interface MessageListProps {
   messages: ChatMessage[];
   sessionId: string;
+  onRerun?: (comment: string) => void;
 }
 
-export function MessageList({ messages, sessionId }: MessageListProps) {
+export function MessageList({ messages, sessionId, onRerun }: MessageListProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -25,7 +26,7 @@ export function MessageList({ messages, sessionId }: MessageListProps) {
           msg.role === "user" ? (
             <UserMessage key={msg.id} message={msg} />
           ) : (
-            <AssistantMessage key={msg.id} message={msg} sessionId={sessionId} />
+            <AssistantMessage key={msg.id} message={msg} sessionId={sessionId} onRerun={onRerun} />
           )
         )}
         <div ref={bottomRef} />
