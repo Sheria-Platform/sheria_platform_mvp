@@ -63,6 +63,11 @@ async def create_db_tables() -> None:
                 "ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(30)"
             )
         )
+        await conn.execute(
+            sqlalchemy.text(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMP WITHOUT TIME ZONE"
+            )
+        )
 
 
 async def ensure_qdrant_collections() -> None:

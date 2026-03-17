@@ -26,6 +26,7 @@ def _user_to_dict(row: User) -> dict:
         "avatar_url": row.avatar_url,
         "bio": row.bio,
         "phone": row.phone,
+        "last_login_at": row.last_login_at.isoformat() if row.last_login_at else None,
         "activation_token_expires_at": row.activation_token_expires_at.isoformat()
         if row.activation_token_expires_at
         else None,
@@ -245,6 +246,21 @@ class UserRepository:
                     update(User).where(User.id == user_id).values(**values)
                 )
                 return result.rowcount > 0  # type: ignore[attr-defined]
+
+    async def update_last_login(self, user_id: str) -> None:
+        """Record the current UTC timestamp as the user's most recent login.
+
+        Called immediately after a successful password verification in the
+        login endpoint.  Failures are non-fatal — a missing timestamp is
+        preferable to a broken login flow.
+        """
+        async with AsyncSessionLocal() as session:
+            async with session.begin():
+                await session.execute(
+                    update(User)
+                    .where(User.id == user_id)
+                    .values(last_login_at=datetime.utcnow())
+                )
 
     async def update_avatar(self, user_id: str, avatar_key: str) -> bool:
         """Store the S3/MinIO object key for the user's profile picture.

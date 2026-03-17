@@ -93,6 +93,7 @@ class User(Base):
     avatar_url = Column(String, nullable=True)   # S3/MinIO object key, e.g. "avatars/{id}.jpg"
     bio = Column(Text, nullable=True)             # Optional free-text bio
     phone = Column(String(30), nullable=True)
+    last_login_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     activated_at = Column(DateTime, nullable=True)
 

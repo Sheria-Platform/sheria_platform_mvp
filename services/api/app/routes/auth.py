@@ -167,6 +167,8 @@ async def login(request: Request, req: LoginRequest) -> dict:
         jti=jti,
     )
     await store_user_jti(user["id"], jti)
+    # Fire-and-forget: timestamp failure must never break login
+    asyncio.create_task(user_repository.update_last_login(user["id"]))  # noqa: RUF006
     return {
         "access_token": token,
         "token_type": "bearer",
