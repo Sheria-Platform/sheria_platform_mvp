@@ -80,6 +80,7 @@ async def chat_stream(
                 )
                 + "\n"
             )
+            yield json.dumps({"event": "done", "session_id": session_id}) + "\n"
 
         background_tasks.add_task(
             memory.add_message, session_id, "user", req.message, user_id
