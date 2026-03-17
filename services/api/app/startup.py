@@ -47,6 +47,22 @@ async def create_db_tables() -> None:
                 "approved_by VARCHAR"
             )
         )
+        # Profile fields added in user-profile feature
+        await conn.execute(
+            sqlalchemy.text(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_url TEXT"
+            )
+        )
+        await conn.execute(
+            sqlalchemy.text(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS bio TEXT"
+            )
+        )
+        await conn.execute(
+            sqlalchemy.text(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(30)"
+            )
+        )
 
 
 async def ensure_qdrant_collections() -> None:

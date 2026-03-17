@@ -116,6 +116,7 @@ class Settings(BaseSettings):
     # File uploads                                                        #
     # ------------------------------------------------------------------ #
     MAX_PDF_UPLOAD_MB: int = 20  # Maximum PDF size accepted by /api/v1/verify
+    MAX_AVATAR_UPLOAD_MB: int = 5  # Maximum avatar image size accepted by /api/v1/auth/me/avatar
 
     # ------------------------------------------------------------------ #
     # Semantic Cache                                                         #

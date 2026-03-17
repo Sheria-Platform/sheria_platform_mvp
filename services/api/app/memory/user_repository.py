@@ -23,6 +23,9 @@ def _user_to_dict(row: User) -> dict:
         "hashed_password": row.hashed_password,
         "activation_token": row.activation_token,
         "approved_by": row.approved_by,
+        "avatar_url": row.avatar_url,
+        "bio": row.bio,
+        "phone": row.phone,
         "activation_token_expires_at": row.activation_token_expires_at.isoformat()
         if row.activation_token_expires_at
         else None,
@@ -199,6 +202,64 @@ class UserRepository:
             async with session.begin():
                 result = await session.execute(
                     update(User).where(User.id == user_id).values(status=new_status)
+                )
+                return result.rowcount > 0  # type: ignore[attr-defined]
+
+    async def update_profile(
+        self,
+        user_id: str,
+        full_name: str | None = None,
+        staff_number: str | None = None,
+        bio: str | None = None,
+        phone: str | None = None,
+    ) -> bool:
+        """Update editable profile fields for a user.
+
+        Only non-``None`` arguments are written; fields omitted from the call
+        are left unchanged.
+
+        Args:
+            user_id: Primary-key UUID of the user.
+            full_name: Display name.
+            staff_number: Staff / payroll number.
+            bio: Free-text biography.
+            phone: Contact phone number (max 30 chars).
+
+        Returns:
+            ``True`` if a row was matched and updated, ``False`` if not found.
+        """
+        values: dict = {}
+        if full_name is not None:
+            values["full_name"] = full_name
+        if staff_number is not None:
+            values["staff_number"] = staff_number
+        if bio is not None:
+            values["bio"] = bio
+        if phone is not None:
+            values["phone"] = phone
+        if not values:
+            return True  # nothing to update — not an error
+        async with AsyncSessionLocal() as session:
+            async with session.begin():
+                result = await session.execute(
+                    update(User).where(User.id == user_id).values(**values)
+                )
+                return result.rowcount > 0  # type: ignore[attr-defined]
+
+    async def update_avatar(self, user_id: str, avatar_key: str) -> bool:
+        """Store the S3/MinIO object key for the user's profile picture.
+
+        Args:
+            user_id: Primary-key UUID of the user.
+            avatar_key: S3 object key, e.g. ``"avatars/{id}.jpg"``.
+
+        Returns:
+            ``True`` if a row was matched and updated, ``False`` if not found.
+        """
+        async with AsyncSessionLocal() as session:
+            async with session.begin():
+                result = await session.execute(
+                    update(User).where(User.id == user_id).values(avatar_url=avatar_key)
                 )
                 return result.rowcount > 0  # type: ignore[attr-defined]
 
