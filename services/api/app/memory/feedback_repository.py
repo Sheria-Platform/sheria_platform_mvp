@@ -11,7 +11,7 @@ class FeedbackRepository:
         self,
         session_id: str,
         user_id: str,
-        message_id: int,
+        message_id: str,
         score: int,
         comment: str | None,
     ) -> None:
@@ -20,7 +20,7 @@ class FeedbackRepository:
         Args:
             session_id: Conversation thread the rated message belongs to.
             user_id: Authenticated user submitting the rating.
-            message_id: Primary-key ID of the ``ChatHistory`` row being rated.
+            message_id: Frontend UUID string identifying the rated message.
             score: ``1`` for positive, ``-1`` for negative.
             comment: Optional free-text explanation.
         """
