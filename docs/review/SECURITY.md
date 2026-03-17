@@ -67,6 +67,9 @@ async def get_current_user(
 | `POST /feedback/` | Any authenticated | `get_current_user` |
 | `GET /history/sessions` | Any authenticated | `get_current_user` (user-scoped) |
 | `GET /history/sessions/{id}` | Any authenticated | `get_current_user` + ownership check |
+| `GET /auth/me` | Any authenticated | `get_current_user` (own record only) |
+| `PATCH /auth/me` | Any authenticated | `get_current_user` (own record only) |
+| `POST /auth/me/avatar` | Any authenticated | `get_current_user` (own record only) |
 
 ```python
 def require_admin(user: dict = Depends(get_current_user)) -> dict:
@@ -255,7 +258,36 @@ The `POST /api/v1/verify` endpoint accepts a multipart PDF upload.
 
 ---
 
-## 12. Security Checklist for PR Review
+## 12. Avatar Upload Security (`POST /api/v1/auth/me/avatar`)
+
+**Controls in place:**
+- JWT authentication required.
+- Content-type validated against allowlist `{image/jpeg, image/png, image/webp}` → `415` on violation.
+- File size validated ≤ `MAX_AVATAR_UPLOAD_MB` (default 5 MB, env-configurable) → `413` on violation.
+- Object stored under deterministic key `avatars/{user_id}.{ext}` — no user-controlled path component.
+- File read entirely into memory, then uploaded to MinIO/S3 via boto3 in a thread executor; never written to disk.
+- Service availability guarded: returns `503` if `S3_BUCKET_NAME` is not configured (no silent failure).
+- Presigned GET URL (TTL = 3600 s) generated and returned — bucket does not need to be public.
+
+**Reviewer concerns:**
+- **MIME-type spoofing:** Content-type is taken from the `UploadFile.content_type` header provided by the browser. A malicious client could send `image/jpeg` with a non-image payload. Consider adding server-side magic-byte validation (e.g., `python-magic`) for production hardening.
+- **Storage growth:** Uploading a new avatar overwrites the existing S3 key (same deterministic key per user), so there is no unbounded per-user accumulation. Old objects are replaced, not accumulated.
+- **Presigned URL leakage:** The presigned URL is returned in the API response and embedded in the frontend. It is time-limited (1 hour). No sensitive data is in the URL beyond the object key.
+
+---
+
+## 13. Profile Update Security (`PATCH /api/v1/auth/me`)
+
+**Controls in place:**
+- Scoped to the authenticated user's own record — no `user_id` parameter in the request body or path; user ID taken exclusively from the validated JWT.
+- Non-empty validation: any provided field must be a non-empty, non-whitespace string (empty strings rejected with `422`).
+- Only four fields are writable via this endpoint: `full_name`, `staff_number`, `bio`, `phone`. Role, court_station, email, status are not writable by the user.
+
+**Reviewer concern:** `bio` and `phone` are free-text with no length cap in the Pydantic model. Consider adding `max_length` constraints (e.g., `bio: str | None = Field(None, max_length=500)`) before production.
+
+---
+
+## 14. Security Checklist for PR Review
 
 - [ ] **JWT_SECRET_KEY** is not hardcoded or in `.env.example`
 - [ ] **Admin seed password** (`ADMIN_PASSWORD`) is changed from default `Admin1234!` in production
@@ -272,3 +304,6 @@ The `POST /api/v1/verify` endpoint accepts a multipart PDF upload.
 - [ ] **`approved_by` field** — verify populated on approval and included in admin audit logs
 - [ ] **PDF upload size limit** — no `max_upload_size` cap on verify endpoint; add before production
 - [ ] **Embedding dimension** — `_EMBEDDING_DIM = 768` in `main.py`; confirm this matches actual `nomic-embed-text` output to avoid silent vector shape errors in Qdrant
+- [ ] **Avatar MIME-type spoofing** — content-type header is browser-supplied; consider server-side magic-byte validation for production
+- [ ] **Profile bio/phone length** — no `max_length` constraint on `bio`/`phone` in `ProfileUpdateRequest`; add limits before production
+- [ ] **Profile endpoint ownership** — `PATCH /auth/me` and `POST /auth/me/avatar` derive user ID from JWT only; confirm no user_id override is possible through request body

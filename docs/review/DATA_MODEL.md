@@ -19,11 +19,19 @@ CREATE TABLE users (
     status           VARCHAR(20) NOT NULL DEFAULT 'pending',
                      -- pending → approved → active → suspended
     activation_token VARCHAR,                 -- UUID; cleared after use
+    activation_token_expires_at TIMESTAMP,   -- token TTL
     approved_by      VARCHAR,                 -- user_id of the admin who approved (audit trail)
+    avatar_url       TEXT,                    -- S3/MinIO object key e.g. "avatars/{id}.jpg"
+    bio              TEXT,                    -- optional free-text biography
+    phone            VARCHAR(30),             -- optional contact number
     created_at       TIMESTAMP DEFAULT now(),
     activated_at     TIMESTAMP               -- NULL until status=active
 );
 ```
+
+> **Migration notes:** `avatar_url`, `bio`, and `phone` were added via idempotent
+> `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` statements in `startup.py` (profile feature).
+> Existing rows will have `NULL` for all three columns until the user edits their profile.
 
 **User lifecycle status values:**
 
@@ -428,6 +436,30 @@ class ActivateRequest(BaseModel):
 
 class UserStatusRequest(BaseModel):
     action: Literal["suspend", "reactivate"]
+```
+
+### Profile Models
+```python
+class ProfileUpdateRequest(BaseModel):
+    """PATCH /api/v1/auth/me — all fields optional."""
+    full_name:    str | None = None
+    staff_number: str | None = None
+    bio:          str | None = None
+    phone:        str | None = None
+```
+
+**`GET /api/v1/auth/me` response** (profile dict, sensitive fields stripped):
+```python
+# Returned by GET /api/v1/auth/me and PATCH /api/v1/auth/me
+{
+    "id", "username", "email", "full_name", "role", "court_station",
+    "staff_number", "status", "approved_by", "avatar_url",
+    "bio", "phone",
+    "activation_token_expires_at", "created_at", "activated_at",
+    # synthetic field — presigned GET URL (None if no avatar or MinIO unconfigured)
+    "avatar_presigned_url": str | None
+}
+# Note: hashed_password and activation_token are excluded
 ```
 
 ### Upload Request

@@ -127,6 +127,7 @@ Next.js application providing the judge/staff interface.
 - `/verify` — Document verification (Sheria Verify) with upload form and report
 - `/health` — Service health dashboard
 - `/admin/users` — User management (admin only)
+- `/profile` — Self-service profile page: view account details, edit bio/phone/name, upload avatar
 
 ---
 
@@ -465,6 +466,8 @@ services/api/main.py
     ├── app/routes/upload.py ──→ boto3 (S3/MinIO)
     ├── app/routes/history.py ─→ app/memory/postgres.py
     ├── app/routes/feedback.py → app/memory/postgres.py
+    ├── app/routes/profile.py ─→ app/memory/user_repository.py
+    │       └──────────────────→ boto3 (S3/MinIO, avatar upload + presigned GET)
     └── app/routes/health.py
 ```
 

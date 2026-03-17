@@ -220,6 +220,103 @@ Suspend or reactivate a user account.
 
 ---
 
+## Profile Endpoints (`/api/v1/auth`)
+
+### GET `/api/v1/auth/me`
+
+**Auth required:** Yes (any active user)
+
+Return the authenticated user's full profile. If the user has a stored avatar, the response includes a short-lived presigned GET URL so the browser can display the image directly without public bucket access.
+
+**Response 200:**
+```json
+{
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "username": "jkimani",
+  "email": "j.kimani@judiciary.go.ke",
+  "full_name": "Justice Jane Kimani",
+  "role": "judge",
+  "court_station": "High Court Nairobi",
+  "staff_number": "JUD-2024-001",
+  "status": "active",
+  "bio": "Presiding judge, Land and Environment Court division.",
+  "phone": "+254712345678",
+  "avatar_presigned_url": "http://minio:9000/sheria-records/avatars/550e8400.jpg?X-Amz-Signature=...",
+  "approved_by": "admin-user-id",
+  "created_at": "2026-01-15T08:00:00Z",
+  "activated_at": "2026-01-15T09:00:00Z"
+}
+```
+
+**Notes:**
+- `avatar_presigned_url` is `null` if the user has not uploaded a profile picture, or if MinIO/S3 is not configured.
+- `hashed_password` and `activation_token` are never returned.
+- Presigned URL TTL: 3600 seconds.
+
+---
+
+### PATCH `/api/v1/auth/me`
+
+**Auth required:** Yes (any active user)
+
+Update editable profile fields. All fields are optional — omit any field to leave it unchanged.
+
+**Request:**
+```json
+{
+  "full_name": "Hon. Justice Jane Kimani",
+  "staff_number": "JUD-2024-001",
+  "bio": "Updated bio text.",
+  "phone": "+254712345678"
+}
+```
+
+**Validation:**
+- Any provided string field must be non-empty (whitespace-only values rejected with `422`).
+- `full_name`, `staff_number`, `bio`, `phone` are all optional in a single request.
+
+**Response 200:** Same shape as `GET /api/v1/auth/me` (updated profile with presigned avatar URL).
+
+**Errors:**
+- `422` — A provided string field is empty or whitespace.
+
+---
+
+### POST `/api/v1/auth/me/avatar`
+
+**Auth required:** Yes (any active user)
+
+Upload a profile picture. The image is stored in MinIO/S3 under `avatars/{user_id}.{ext}` and a presigned GET URL is returned immediately.
+
+**Request:** `multipart/form-data`
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `file` | image file | Yes | Profile picture (JPEG, PNG, or WebP) |
+
+**Validation:**
+- Content-type must be `image/jpeg`, `image/png`, or `image/webp` → `415` otherwise.
+- File must be ≤ `MAX_AVATAR_UPLOAD_MB` MB (default **5 MB**) → `413` otherwise.
+
+**Response 200:**
+```json
+{
+  "avatar_presigned_url": "http://minio:9000/sheria-records/avatars/550e8400.jpg?X-Amz-Signature=..."
+}
+```
+
+**Errors:**
+- `415` — Unsupported file type (only JPEG/PNG/WebP accepted).
+- `413` — File exceeds the 5 MB size limit (`MAX_AVATAR_UPLOAD_MB`).
+- `503` — MinIO/S3 not configured (`S3_BUCKET_NAME` not set in `.env`).
+- `500` — Upload or presigned URL generation failed.
+
+**Side effects:**
+- Overwrites any previous avatar for the same user (key `avatars/{user_id}.{ext}` is deterministic).
+- Updates `users.avatar_url` with the S3 object key.
+
+---
+
 ## Chat Endpoint (`/api/v1/chat`)
 
 ### POST `/api/v1/chat/stream`
@@ -660,7 +757,8 @@ All error responses use a consistent format:
 | `403` | Insufficient role / ownership violation |
 | `404` | Resource not found |
 | `409` | Conflict (duplicate username/email) |
-| `413` | Payload too large (PDF exceeds `MAX_PDF_UPLOAD_MB`) |
+| `413` | Payload too large (PDF > `MAX_PDF_UPLOAD_MB` or avatar > `MAX_AVATAR_UPLOAD_MB`) |
+| `415` | Unsupported media type (avatar upload: only JPEG/PNG/WebP accepted) |
 | `422` | Pydantic validation failure |
 | `500` | Internal server error |
 | `503` | Service dependency unavailable |
