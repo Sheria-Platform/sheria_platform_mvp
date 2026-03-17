@@ -58,6 +58,18 @@ export function useChat() {
         }
       } finally {
         store.completeMessage(sessionId!, assistantMsgId);
+        // If the stream ended with no content (LLM returned empty), inform the user
+        const completedMsg = useChatStore
+          .getState()
+          .sessions.find((s) => s.id === sessionId)
+          ?.messages.find((m) => m.id === assistantMsgId);
+        if (completedMsg && !completedMsg.content.trim()) {
+          store.appendToMessage(
+            sessionId!,
+            assistantMsgId,
+            "*No response was generated. Please try again.*"
+          );
+        }
         store.setStreaming(false);
         abortRef.current = null;
       }
