@@ -29,6 +29,7 @@ from pydantic import BaseModel, Field
 from services.api.app.agents.legal_research_graph import legal_research_app
 from services.api.app.agents.state import AgentState
 from services.api.app.auth.jwt import get_current_user
+from services.api.app.auth.permissions import require_role
 from services.api.app.cache.semantic import SemanticCache
 from services.api.app.clients.ollama_client import OllamaClient
 from services.api.app.dependencies import get_llm_client, get_memory, get_semantic_cache
@@ -77,7 +78,7 @@ class LegalResearchRequest(BaseModel):
 async def legal_research(
     req: LegalResearchRequest,
     background_tasks: BackgroundTasks,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_role("judge", "magistrate")),
     cache: SemanticCache = Depends(get_semantic_cache),
     memory: PostgresMemory = Depends(get_memory),
     llm: OllamaClient = Depends(get_llm_client),
@@ -119,6 +120,7 @@ async def legal_research(
                 )
                 + "\n"
             )
+            yield json.dumps({"event": "done", "session_id": session_id}) + "\n"
 
         background_tasks.add_task(
             memory.add_message, session_id, "user", req.query, user_id

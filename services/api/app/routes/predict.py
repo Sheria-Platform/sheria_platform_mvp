@@ -19,6 +19,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
 from services.api.app.auth.jwt import get_current_user
+from services.api.app.auth.permissions import require_role
 from services.api.app.dependencies import get_prediction_repo
 from services.api.app.memory.prediction_repository import PredictionRepository
 from services.api.app.tools.predict_case_duration import predict_case_duration
@@ -103,7 +104,7 @@ class PredictionActivity(BaseModel):
 async def predict_duration(
     request: PredictionRequest,
     background_tasks: BackgroundTasks,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_role("judge", "magistrate")),
     memory: PredictionRepository = Depends(get_prediction_repo),
 ) -> PredictionReport:
     """Forecast how long a court case is likely to take.

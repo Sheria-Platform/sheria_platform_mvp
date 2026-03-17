@@ -23,6 +23,7 @@ import boto3
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
+from services.api.app.auth.permissions import require_role
 from services.api.app.auth.jwt import get_current_user
 from services.api.app.config import settings
 from services.api.app.memory.ingestion_repository import ingestion_repository
@@ -228,7 +229,7 @@ def _run_ingest(job_id: str, bucket: str, s3_key: str, user_id: str) -> None:
 )
 async def trigger_ingest(
     req: IngestRequest,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_role("registrar", "clerk")),
 ) -> JobStatus:
     """Start the ingestion pipeline for a file that was just uploaded to MinIO."""
     if not settings.S3_BUCKET_NAME:

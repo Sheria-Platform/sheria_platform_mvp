@@ -24,6 +24,7 @@ from fastapi import (
 )
 from pydantic import BaseModel
 
+from services.api.app.auth.permissions import require_role
 from services.api.app.auth.jwt import get_current_user
 from services.api.app.config import settings
 from services.api.app.dependencies import get_verification_repo
@@ -123,7 +124,7 @@ async def verify_court_document(
         default="",
         description="Case reference number as it appears on the document",
     ),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_role("registrar", "judge", "magistrate")),
     memory: VerificationRepository = Depends(get_verification_repo),
 ) -> VerificationReport:
     """Authenticate a court document and return a verification report.
