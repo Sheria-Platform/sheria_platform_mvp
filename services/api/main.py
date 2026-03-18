@@ -18,6 +18,7 @@ Example:
         docker compose up sheria-api
 """
 
+import asyncio
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -93,12 +94,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             exc,
         )
     await ollama_client.start()
+    # Capture the running event loop BEFORE recover_stale_jobs so that worker
+    # threads can schedule DB coroutines onto it via run_coroutine_threadsafe.
+    upload.set_main_loop(asyncio.get_event_loop())
+    await upload.recover_stale_jobs()
     logger.info("All clients initialized successfully")
 
     yield
 
     # ── Shutdown ─────────────────────────────────────────────────────
     logger.info("Closing clients...")
+    upload.shutdown_executor()
     await ollama_client.close()
     await qdrant_client.disconnect()
     await redis_client.close()
