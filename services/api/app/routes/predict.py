@@ -15,12 +15,12 @@ No streaming -- prediction is a synchronous request/response.
 import json
 import logging
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
-from services.api.app.auth.jwt import get_current_user
 from services.api.app.auth.permissions import require_role
 from services.api.app.dependencies import get_prediction_repo
+from services.api.app.limiter import limiter
 from services.api.app.memory.prediction_repository import PredictionRepository
 from services.api.app.tools.predict_case_duration import predict_case_duration
 
@@ -54,7 +54,7 @@ class PredictionRequest(BaseModel):
     )
     complexity: str = Field(
         default="medium",
-        description="Estimated case complexity: low | medium | high",
+        description="Estimated case complexity: low | medium | high | very_high",
         examples=["high"],
     )
     description: str = Field(
@@ -101,8 +101,10 @@ class PredictionActivity(BaseModel):
         "and synthesises an estimate via LLM with key risk factors."
     ),
 )
+@limiter.limit("10/minute")
 async def predict_duration(
-    request: PredictionRequest,
+    request: Request,
+    payload: PredictionRequest,
     background_tasks: BackgroundTasks,
     user: dict = Depends(require_role("judge", "magistrate")),
     memory: PredictionRepository = Depends(get_prediction_repo),
@@ -110,7 +112,7 @@ async def predict_duration(
     """Forecast how long a court case is likely to take.
 
     Args:
-        request:          Case attributes from the request body.
+        payload:          Case attributes from the request body.
         background_tasks: FastAPI background task queue.
         user:             Authenticated user from JWT.
         memory:           Prediction repository dependency.
@@ -127,20 +129,20 @@ async def predict_duration(
         "Case duration prediction requested",
         extra={
             "user_id": user.get("id"),
-            "case_type": request.case_type,
-            "court": request.court,
-            "complexity": request.complexity,
-            "parties_count": request.parties_count,
+            "case_type": payload.case_type,
+            "court": payload.court,
+            "complexity": payload.complexity,
+            "parties_count": payload.parties_count,
         },
     )
 
     tool_input = json.dumps(
         {
-            "case_type": request.case_type,
-            "court": request.court,
-            "parties_count": request.parties_count,
-            "complexity": request.complexity,
-            "description": request.description,
+            "case_type": payload.case_type,
+            "court": payload.court,
+            "parties_count": payload.parties_count,
+            "complexity": payload.complexity,
+            "description": payload.description,
         }
     )
 
@@ -165,10 +167,10 @@ async def predict_duration(
     background_tasks.add_task(
         memory.save_prediction,
         user.get("id", ""),
-        request.case_type,
-        request.court,
-        request.complexity,
-        request.parties_count,
+        payload.case_type,
+        payload.court,
+        payload.complexity,
+        payload.parties_count,
         report_data,
     )
 
@@ -182,7 +184,7 @@ async def predict_duration(
     description="Return the authenticated user's prediction history, newest first.",
 )
 async def get_prediction_history(
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_role("judge", "magistrate")),
     memory: PredictionRepository = Depends(get_prediction_repo),
 ) -> list[PredictionActivity]:
     """Return prediction records for the current user.
