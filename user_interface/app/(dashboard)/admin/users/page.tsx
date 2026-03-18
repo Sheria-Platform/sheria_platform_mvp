@@ -4,11 +4,9 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useChatStore } from "@/store/chatStore";
 import { apiFetch } from "@/lib/api";
 import { ALL_ROLES } from "@/lib/constants";
-import { ActiveUser, AnalyticsPayload, PendingUser, UserRole } from "@/types/api";
+import { ActiveUser, PendingUser, UserRole } from "@/types/api";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { BarChart2 } from "lucide-react";
-import AnalyticsDashboard, { AnalyticsDashboardSkeleton } from "@/components/admin/AnalyticsDashboard";
 
 interface ApproveResult {
   /** Relative path e.g. `/activate?token=<uuid>` */
@@ -16,7 +14,7 @@ interface ApproveResult {
   activation_token: string;
 }
 
-type Tab = "pending" | "approved" | "active" | "deactivated" | "analytics";
+type Tab = "pending" | "approved" | "active" | "deactivated";
 type AnyUser = ActiveUser | PendingUser;
 
 /**
@@ -64,12 +62,6 @@ export default function AdminUsersPage() {
   const [reactivating, setReactivating] = useState<string | null>(null);
   const [reactivateErrors, setReactivateErrors] = useState<Record<string, string>>({});
 
-  // ── Analytics tab ──────────────────────────────────────────────────────
-  const [analyticsData, setAnalyticsData] = useState<AnalyticsPayload | null>(null);
-  const [loadingAnalytics, setLoadingAnalytics] = useState(false);
-  const [analyticsError, setAnalyticsError] = useState("");
-  const [analyticsFetched, setAnalyticsFetched] = useState(false);
-
   // ── Profile panel ───────────────────────────────────────────────────────
   const [profileUser, setProfileUser] = useState<AnyUser | null>(null);
 
@@ -110,20 +102,6 @@ export default function AdminUsersPage() {
     try { setDeactivatedUsers(await apiFetch<ActiveUser[]>("/api/proxy/admin/users?status=suspended")); }
     catch (err) { setDeactivatedError((err as Error).message); }
     finally { setDeactivatedLoading(false); }
-  }, []);
-
-  const fetchAnalytics = useCallback(async () => {
-    setLoadingAnalytics(true);
-    setAnalyticsError("");
-    try {
-      const data = await apiFetch<AnalyticsPayload>("/api/proxy/admin/analytics");
-      setAnalyticsData(data);
-      setAnalyticsFetched(true);
-    } catch (err) {
-      setAnalyticsError((err as Error).message);
-    } finally {
-      setLoadingAnalytics(false);
-    }
   }, []);
 
   useEffect(() => {
@@ -276,9 +254,6 @@ export default function AdminUsersPage() {
 
   function handleTabChange(key: Tab) {
     setActiveTab(key);
-    if (key === "analytics" && !analyticsFetched) {
-      fetchAnalytics();
-    }
   }
 
   // ── Tab config ─────────────────────────────────────────────────────────
@@ -303,7 +278,6 @@ export default function AdminUsersPage() {
       count: deactivatedUsers.length || undefined,
       countColor: "bg-red-100 text-red-700",
     },
-    { key: "analytics", label: "Analytics", countColor: "" },
   ];
 
   // ── Render ─────────────────────────────────────────────────────────────
@@ -329,7 +303,6 @@ export default function AdminUsersPage() {
                 : "border-transparent text-gray-500 hover:text-gray-700"
             }`}
           >
-            {t.key === "analytics" && <BarChart2 className="w-4 h-4" />}
             {t.label}
             {t.count !== undefined && t.count > 0 && (
               <span className={`ml-2 text-xs px-1.5 py-0.5 rounded-full ${t.countColor}`}>
@@ -660,22 +633,6 @@ export default function AdminUsersPage() {
             ))}
           </div>
         )
-      )}
-
-      {/* ── Analytics tab ─────────────────────────────────────────────── */}
-      {activeTab === "analytics" && (
-        loadingAnalytics ? (
-          <AnalyticsDashboardSkeleton />
-        ) : analyticsError ? (
-          <div className="text-center py-12 text-red-500">
-            <p>{analyticsError}</p>
-            <Button variant="outline" onClick={fetchAnalytics} className="mt-4">
-              Retry
-            </Button>
-          </div>
-        ) : analyticsData ? (
-          <AnalyticsDashboard data={analyticsData} />
-        ) : null
       )}
 
       {/* ── Profile slide-over panel ───────────────────────────────────── */}

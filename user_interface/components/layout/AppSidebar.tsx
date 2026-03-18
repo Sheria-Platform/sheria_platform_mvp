@@ -30,6 +30,7 @@ import {
   PanelLeftOpen,
   UserCircle,
   ListChecks,
+  BarChart2,
 } from "lucide-react";
 
 const NAV_ITEMS = [
@@ -42,8 +43,9 @@ const NAV_ITEMS = [
 ];
 
 const ADMIN_ITEMS = [
-  { href: "/health",      label: "System Status",    icon: Activity },
-  { href: "/admin/users", label: "User Management",  icon: Users },
+  { href: "/health",            label: "System Status",    icon: Activity },
+  { href: "/admin/users",       label: "User Management",  icon: Users },
+  { href: "/admin/analytics",   label: "Analytics",        icon: BarChart2 },
 ];
 
 export function AppSidebar() {
@@ -136,19 +138,17 @@ export function AppSidebar() {
             if (collapsed) {
               return (
                 <Tooltip key={item.href}>
-                  <TooltipTrigger asChild>
-                    <Link href={item.href}>
-                      <span
-                        className={cn(
-                          "flex items-center justify-center p-2 rounded-lg transition-colors cursor-pointer",
-                          active
-                            ? "bg-white/15 text-white"
-                            : "text-gray-400 hover:text-white hover:bg-white/10"
-                        )}
-                      >
-                        <Icon size={18} />
-                      </span>
-                    </Link>
+                  <TooltipTrigger render={<Link href={item.href} />}>
+                    <span
+                      className={cn(
+                        "flex items-center justify-center p-2 rounded-lg transition-colors cursor-pointer",
+                        active
+                          ? "bg-white/15 text-white"
+                          : "text-gray-400 hover:text-white hover:bg-white/10"
+                      )}
+                    >
+                      <Icon size={18} />
+                    </span>
                   </TooltipTrigger>
                   <TooltipContent side="right">{item.label}</TooltipContent>
                 </Tooltip>
@@ -193,12 +193,10 @@ export function AppSidebar() {
           {collapsed ? (
             <>
               <Tooltip>
-                <TooltipTrigger asChild>
-                  <Link href="/profile">
-                    <span className="w-full flex items-center justify-center p-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/10 transition-colors">
-                      <UserCircle size={16} />
-                    </span>
-                  </Link>
+                <TooltipTrigger render={<Link href="/profile" />}>
+                  <span className="w-full flex items-center justify-center p-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/10 transition-colors">
+                    <UserCircle size={16} />
+                  </span>
                 </TooltipTrigger>
                 <TooltipContent side="right">My Profile</TooltipContent>
               </Tooltip>
