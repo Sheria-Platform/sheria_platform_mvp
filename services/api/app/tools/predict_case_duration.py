@@ -70,14 +70,15 @@ Output JSON only — no prose, no markdown fences:
   "confidence": <float 0.0–1.0>,
   "similar_cases_found": <integer — number of analogies used>,
   "key_factors": [<list of 2–4 strings — factors most influencing this estimate>],
-  "risk_level": "low" | "medium" | "high",
+  "risk_level": "low" | "medium" | "high" | "critical",
   "summary": "<one sentence human-readable forecast>"
 }}
 
 risk_level guide:
-  low    — straightforward legal issue, few parties, common case type
-  medium — moderate complexity or parties, some procedural risk
-  high   — multi-party, constitutional issues, expert witnesses, or high-backlog court"""
+  low      — straightforward legal issue, few parties, common case type
+  medium   — moderate complexity or parties, some procedural risk
+  high     — multi-party, constitutional issues, expert witnesses, or high-backlog court
+  critical — very_high complexity, 5+ parties, constitutional or precedent-setting matter"""
 
 
 # ── Main entry-point ──────────────────────────────────────────────────────────
