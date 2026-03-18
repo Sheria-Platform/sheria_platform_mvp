@@ -4,6 +4,40 @@ import { useState, useCallback } from "react";
 import { apiFetch } from "@/lib/api";
 import { UploadPresignRequest, UploadPresignResponse } from "@/types/api";
 
+/** PUT a file directly to a presigned URL with real byte-level progress. */
+function putWithProgress(
+  url: string,
+  file: File,
+  onProgress: (pct: number) => void
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) {
+        onProgress(Math.round((e.loaded / e.total) * 100));
+      }
+    };
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve();
+      } else {
+        reject(
+          new Error(
+            `MinIO upload failed (${xhr.status}): ${xhr.responseText.slice(0, 200)}`
+          )
+        );
+      }
+    };
+    xhr.onerror = () => reject(new Error("Network error during upload"));
+    xhr.open("PUT", url);
+    xhr.setRequestHeader(
+      "Content-Type",
+      file.type || "application/octet-stream"
+    );
+    xhr.send(file);
+  });
+}
+
 export interface UploadFile {
   id: string;
   file: File;
@@ -54,18 +88,13 @@ export function useUpload() {
 
         updateFile(uploadFile.id, { progress: 40 });
 
-        // 2. PUT file to MinIO
-        const putRes = await fetch(presign.upload_url, {
-          method: "PUT",
-          body: uploadFile.file,
-          headers: { "Content-Type": uploadFile.file.type || "application/octet-stream" },
+        // 2. PUT file to MinIO with real byte-level progress (40–95%)
+        await putWithProgress(presign.upload_url, uploadFile.file, (pct) => {
+          // Map 0–100% byte progress into the 40–95% slot of our overall bar
+          updateFile(uploadFile.id, { progress: 40 + Math.round(pct * 0.55) });
         });
-        if (!putRes.ok) {
-          const body = await putRes.text();
-          throw new Error(`MinIO upload failed (${putRes.status}): ${body.slice(0, 200)}`);
-        }
 
-        updateFile(uploadFile.id, { progress: 75 });
+        updateFile(uploadFile.id, { progress: 95 });
 
         // 3. Trigger ingestion pipeline
         const job = await apiFetch<{ job_id: string; status: string }>(
