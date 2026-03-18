@@ -68,7 +68,7 @@ export function AppSidebar() {
     <TooltipProvider delay={200}>
       <aside
         className={cn(
-          "bg-[#1a1a1a] text-white flex flex-col shrink-0 transition-[width] duration-200 ease-in-out overflow-hidden",
+          "bg-[#1a3a6b] text-white flex flex-col shrink-0 transition-[width] duration-200 ease-in-out overflow-hidden",
           collapsed ? "w-16" : "w-64"
         )}
       >
