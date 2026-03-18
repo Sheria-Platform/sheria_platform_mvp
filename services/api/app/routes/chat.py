@@ -160,9 +160,9 @@ async def chat_stream(
                     "Chat request completed",
                     extra={"duration_ms": total_ms, "answer_length": len(final_answer)},
                 )
-                await memory.add_message(session_id, "user", req.message, user_id)
-                await memory.add_message(session_id, "assistant", final_answer, user_id)
-                await cache.set_cached_response(req.message, final_answer)
+                background_tasks.add_task(memory.add_message, session_id, "user", req.message, user_id)
+                background_tasks.add_task(memory.add_message, session_id, "assistant", final_answer, user_id)
+                background_tasks.add_task(cache.set_cached_response, req.message, final_answer)
 
             yield json.dumps({"event": "done", "session_id": session_id}) + "\n"
 

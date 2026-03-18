@@ -8,8 +8,6 @@ SYSTEM_PROMPT = """
 You are a Knowledge Graph Helper.
 Extract the core entities from the user's question to perform a search.
 
-Question: {question}
-
 Output JSON only:
 {
     "entities": ["list", "of", "names"]
@@ -26,7 +24,8 @@ async def search_graph_tool(question: str) -> str:
         # 1. Extract Entities (No Code Generation)
         response_text = await llm_client.chat_completion(
             messages=[
-                {"role": "system", "content": SYSTEM_PROMPT.format(question=question)}
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": question},
             ],
             temperature=0.0,
             json_mode=True,

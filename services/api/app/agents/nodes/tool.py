@@ -66,4 +66,4 @@ async def tool_node(state: AgentState) -> dict:
         raw = tool_fn(tool_input)
         result = await raw if asyncio.iscoroutine(raw) else raw
 
-    return {"messages": [{"role": "user", "content": f"Tool Output: {result}"}]}
+    return {"messages": [{"role": "system", "content": f"Tool result: {result}"}]}

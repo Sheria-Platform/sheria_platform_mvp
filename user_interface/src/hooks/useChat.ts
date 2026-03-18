@@ -78,7 +78,17 @@ export function useChat() {
         abortRef.current = null;
       }
     },
-    [store]
+    [
+      store.isStreaming,
+      store.activeSessionId,
+      store.webSearchEnabled,
+      store.createSession,
+      store.addUserMessage,
+      store.addAssistantMessage,
+      store.setStreaming,
+      store.appendToMessage,
+      store.completeMessage,
+    ]
   );
 
   const stopStream = useCallback(() => {

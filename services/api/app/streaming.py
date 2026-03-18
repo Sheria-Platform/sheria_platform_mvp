@@ -66,10 +66,10 @@ async def iter_agent_events(
             "Agent node completed",
             extra={"node": node_name, "duration_ms": duration_ms},
         )
-        node_start = time.perf_counter()
 
         status_json = (
             json.dumps({"event": "status", "step": node_name, "session_id": session_id})
             + "\n"
         )
         yield node_name, node_data, status_json
+        node_start = time.perf_counter()  # reset after yield so HTTP flush time is excluded

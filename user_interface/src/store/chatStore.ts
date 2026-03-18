@@ -186,6 +186,17 @@ export const useChatStore = create<ChatStore>()(
         user: state.user,
         webSearchEnabled: state.webSearchEnabled,
       }),
+      onRehydrateStorage: () => (state) => {
+        if (!state) return;
+        // Clear any isStreaming flags persisted mid-stream so reloaded sessions
+        // never show a stuck streaming indicator.
+        state.sessions = state.sessions.map((sess) => ({
+          ...sess,
+          messages: sess.messages.map((msg) =>
+            msg.isStreaming ? { ...msg, isStreaming: false } : msg
+          ),
+        }));
+      },
     }
   )
 );

@@ -31,8 +31,6 @@ Extract the most effective search keywords from the legal question below.
 Prioritise: case citations, court names, legal principles, party names, and year ranges.
 Remove filler words, question structure, and conversational phrasing.
 
-Question: {question}
-
 Output JSON only:
 {
     "keywords": ["keyword1", "keyword2", "..."],
@@ -70,10 +68,8 @@ async def _extract_search_keywords(query: str) -> str:
     try:
         response_text = await ollama_client.chat_completion(
             messages=[
-                {
-                    "role": "system",
-                    "content": _KEYWORD_EXTRACTION_PROMPT.format(question=query),
-                }
+                {"role": "system", "content": _KEYWORD_EXTRACTION_PROMPT},
+                {"role": "user", "content": query},
             ],
             temperature=0.0,
             json_mode=True,
