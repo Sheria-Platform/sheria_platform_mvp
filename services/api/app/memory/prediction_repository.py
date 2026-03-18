@@ -1,6 +1,8 @@
 # services/api/app/memory/prediction_repository.py
 """Prediction history persistence -- save and retrieve case duration forecast records."""
 
+from datetime import datetime
+
 from sqlalchemy import select
 
 from services.api.app.memory.models import AsyncSessionLocal, PredictionHistory
@@ -84,6 +86,33 @@ class PredictionRepository:
             result = await session.execute(
                 select(PredictionHistory)
                 .where(PredictionHistory.user_id == user_id)
+                .order_by(PredictionHistory.created_at.desc())
+                .limit(limit)
+            )
+            rows = result.scalars().all()
+            return [_prediction_to_dict(r) for r in rows]
+
+
+    async def get_court_predictions(
+        self, court: str, since: datetime, limit: int = 200
+    ) -> list[dict]:
+        """Return prediction records for a court since a given datetime.
+
+        Args:
+            court: Court name to filter by (exact match on the ``court`` column).
+            since: Only return rows with ``created_at >= since``.
+            limit: Maximum number of rows to return.
+
+        Returns:
+            List of dicts with keys: id, case_type, court, complexity,
+            parties_count, estimated_months_min, estimated_months_max,
+            confidence, risk_level, report, created_at.
+        """
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(PredictionHistory)
+                .where(PredictionHistory.court == court)
+                .where(PredictionHistory.created_at >= since)
                 .order_by(PredictionHistory.created_at.desc())
                 .limit(limit)
             )
