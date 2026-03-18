@@ -27,8 +27,14 @@ _JSON_FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.DOTALL)
 
 
 def _extract_json(raw: str) -> str:
-    """Strip optional markdown fences and return the inner JSON string."""
+    """Strip optional markdown fences and return the inner JSON string.
+
+    Raises:
+        ValueError: If the response is empty after stripping.
+    """
     raw = raw.strip()
+    if not raw:
+        raise ValueError("LLM returned an empty response")
     m = _JSON_FENCE_RE.search(raw)
     return m.group(1) if m else raw
 
@@ -151,7 +157,7 @@ async def predict_case_duration(tool_input: str) -> str:
                 }
             ],
             temperature=0.1,
-            max_tokens=512,
+            max_tokens=768,
         )
         report = json.loads(_extract_json(raw))
         # Ensure similar_cases_found reflects actual Qdrant result, not LLM hallucination
