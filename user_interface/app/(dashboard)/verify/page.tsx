@@ -17,7 +17,7 @@ const DOCUMENT_TYPES: { value: DocumentType; label: string }[] = [
 ];
 
 export default function VerifyPage() {
-  const { state, report, error, file, selectFile, reset, verify } = useVerify();
+  const { state, report, error, file, progress, step, selectFile, reset, verify } = useVerify();
   const [documentType, setDocumentType] = useState<DocumentType>("court_order");
   const [caseNumber, setCaseNumber] = useState("");
 
@@ -32,7 +32,7 @@ export default function VerifyPage() {
     onDrop,
     accept: { "application/pdf": [".pdf"] },
     maxFiles: 1,
-    maxSize: 50 * 1024 * 1024,
+    maxSize: 20 * 1024 * 1024,
     disabled: state === "verifying",
   });
 
@@ -68,7 +68,7 @@ export default function VerifyPage() {
           <p className="text-sm font-medium text-gray-700">
             {isDragActive ? "Drop the PDF here" : "Drag & drop a court document (PDF)"}
           </p>
-          <p className="text-xs text-gray-400 mt-1">PDF only · up to 50 MB</p>
+          <p className="text-xs text-gray-400 mt-1">PDF only · up to 20 MB</p>
         </div>
       ) : (
         <div className="bg-white border rounded-xl p-4 space-y-4">
@@ -131,15 +131,23 @@ export default function VerifyPage() {
             className="w-full"
             style={{ backgroundColor: "#1a3a6b" }}
           >
-            {isVerifying ? (
-              <span className="flex items-center gap-2">
-                <span className="size-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                Verifying…
-              </span>
-            ) : (
-              "Verify Document"
-            )}
+            {isVerifying ? "Verifying…" : "Verify Document"}
           </Button>
+
+          {isVerifying && (
+            <div className="space-y-1.5 pt-1">
+              <div className="flex justify-between items-center text-xs text-gray-500">
+                <span>{step}</span>
+                <span className="tabular-nums">{progress}%</span>
+              </div>
+              <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden">
+                <div
+                  className="h-full rounded-full transition-all duration-700 ease-out"
+                  style={{ width: `${progress}%`, backgroundColor: "#1a3a6b" }}
+                />
+              </div>
+            </div>
+          )}
         </div>
       )}
 
