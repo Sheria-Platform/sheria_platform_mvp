@@ -29,6 +29,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   UserCircle,
+  ListChecks,
 } from "lucide-react";
 
 const NAV_ITEMS = [
@@ -36,6 +37,7 @@ const NAV_ITEMS = [
   { href: "/verify",  label: "Sheria Verify",    icon: ShieldCheck },
   { href: "/predict", label: "Sheria Predict",   icon: TrendingUp },
   { href: "/upload",  label: "Sheria Digitize",  icon: FileText },
+  { href: "/jobs",    label: "Ingestion Jobs",   icon: ListChecks },
   { href: "/history", label: "Activity History", icon: History },
 ];
 
@@ -79,7 +81,8 @@ export function AppSidebar() {
                 alt="Sheria Platform"
                 width={120}
                 height={32}
-                className="h-8 w-auto object-contain"
+                className="h-8 object-contain"
+                style={{ width: "auto" }}
                 priority
               />
             </div>
