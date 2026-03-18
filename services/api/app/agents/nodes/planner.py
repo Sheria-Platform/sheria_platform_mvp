@@ -92,6 +92,8 @@ Available tools:
   predict_case_duration — input: JSON string with keys case_type, court, parties_count, complexity, description
   verify_document       — input: JSON string with keys document_text, document_type, case_number
   calculator            — input: arithmetic expression string
+  workload_management   — input: JSON string with keys court, days (default 30)
+                          Use for court backlog, caseload statistics, or workload analysis queries
 """
 
 # Conditionally appended when state["web_search_enabled"] is True.
