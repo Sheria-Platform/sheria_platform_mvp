@@ -63,6 +63,30 @@ Respond with JSON only:
 
 risk_level: low | medium | high"""
 
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+
+def _parse_llm_json(raw: str) -> dict:
+    """Parse JSON from an LLM response, guarding against common failure modes.
+
+    Ollama may return:
+    - An empty string when json_mode fails or the model produces no output
+    - Markdown-fenced JSON (```json ... ```) despite format="json" being set
+
+    Raises:
+        ValueError: If the response is empty.
+        json.JSONDecodeError: If the (stripped) text is not valid JSON.
+    """
+    text = raw.strip()
+    if not text:
+        raise ValueError("LLM returned an empty response")
+    # Strip markdown code fences if present (e.g. ```json\n{...}\n```)
+    if text.startswith("```"):
+        lines = text.splitlines()
+        text = "\n".join(lines[1:-1]).strip()
+    return json.loads(text)
+
+
 # ── Confidence weights ────────────────────────────────────────────────────────
 
 _W_METADATA = 0.20
@@ -123,7 +147,7 @@ async def verify_document(tool_input: str) -> str:
             max_tokens=512,
             json_mode=True,
         )
-        extracted_metadata = json.loads(raw)
+        extracted_metadata = _parse_llm_json(raw)
         metadata_passed = bool(
             extracted_metadata.get("court")
             or extracted_metadata.get("case_number")
@@ -205,7 +229,7 @@ async def verify_document(tool_input: str) -> str:
             max_tokens=1024,
             json_mode=True,
         )
-        fraud_data = json.loads(raw)
+        fraud_data = _parse_llm_json(raw)
         fraud_indicators = fraud_data.get("fraud_indicators_found", True)
         risk_level = fraud_data.get("risk_level", "medium")
         flags = fraud_data.get("flags", [])

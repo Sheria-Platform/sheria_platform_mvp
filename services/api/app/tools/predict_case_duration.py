@@ -161,8 +161,6 @@ async def predict_case_duration(tool_input: str) -> str:
             max_tokens=768,
         )
         report = json.loads(_extract_json(raw))
-        # Ensure similar_cases_found reflects actual Qdrant result, not LLM hallucination
-        report["similar_cases_found"] = similar_cases_found
 
         # Compute confidence deterministically so it actually varies with inputs.
         # Base: how many historical analogies did Qdrant find?
