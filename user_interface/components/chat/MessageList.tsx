@@ -9,7 +9,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 interface MessageListProps {
   messages: ChatMessage[];
   sessionId: string;
-  onRerun?: (comment: string, webSearch: boolean) => void;
+  onRerun?: (comment: string, webSearch: boolean) => Promise<void>;
 }
 
 export function MessageList({ messages, sessionId, onRerun }: MessageListProps) {

@@ -25,6 +25,9 @@ interface ChatStore {
   // Streaming state
   setStreaming: (value: boolean, messageId?: string) => void;
 
+  // Remove the last N messages from a session (used to undo orphaned messages)
+  removeLastMessages: (sessionId: string, count: number) => void;
+
   // Auth
   setUser: (user: AuthUser | null) => void;
 
@@ -165,6 +168,21 @@ export const useChatStore = create<ChatStore>()(
                       ? { ...msg, feedbackGiven: feedback }
                       : msg
                   ),
+                }
+              : sess
+          ),
+        })),
+
+      removeLastMessages: (sessionId, count) =>
+        set((s) => ({
+          sessions: s.sessions.map((sess) =>
+            sess.id === sessionId
+              ? {
+                  ...sess,
+                  messages:
+                    count >= sess.messages.length
+                      ? []
+                      : sess.messages.slice(0, -count),
                 }
               : sess
           ),

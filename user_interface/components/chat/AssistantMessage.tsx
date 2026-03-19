@@ -15,7 +15,7 @@ export function AssistantMessage({
 }: {
   message: ChatMessage;
   sessionId: string;
-  onRerun?: (comment: string, webSearch: boolean) => void;
+  onRerun?: (comment: string, webSearch: boolean) => Promise<void>;
 }) {
   return (
     <div className="flex flex-col px-4 py-1 max-w-[85%]">

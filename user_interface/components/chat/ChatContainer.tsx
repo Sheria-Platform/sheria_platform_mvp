@@ -20,7 +20,16 @@ export function ChatContainer() {
       ? `Here is my feedback: "${comment.trim()}"\n\n`
       : "";
     const prompt = `Your previous answer did not fully address my question. ${feedbackClause}Please provide an improved response.`;
-    await sendMessage(prompt, { webSearch });
+    await sendMessage(prompt, {
+      webSearch,
+      onError: () => {
+        // Remove the user prompt + empty assistant message that were added before
+        // the network error so they don't linger as orphaned messages in the chat.
+        if (store.activeSessionId) {
+          store.removeLastMessages(store.activeSessionId, 2);
+        }
+      },
+    });
   }
 
   return (

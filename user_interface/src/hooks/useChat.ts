@@ -10,7 +10,7 @@ export function useChat() {
   const abortRef = useRef<AbortController | null>(null);
 
   const sendMessage = useCallback(
-    async (content: string, options?: { webSearch?: boolean }) => {
+    async (content: string, options?: { webSearch?: boolean; onError?: () => void }) => {
       if (store.isStreaming || !content.trim()) return;
 
       let sessionId = store.activeSessionId;
@@ -54,6 +54,11 @@ export function useChat() {
         }
       } catch (err) {
         if ((err as Error).name !== "AbortError") {
+          if (options?.onError) {
+            // Caller handles the error (e.g. rerun flow) — clean up and rethrow
+            options.onError();
+            throw err;
+          }
           store.appendToMessage(
             sessionId!,
             assistantMsgId,

@@ -17,7 +17,7 @@ interface FeedbackButtonsProps {
   messageId: string;
   sessionId: string;
   feedbackGiven?: "thumbs_up" | "thumbs_down";
-  onRerun?: (comment: string, webSearch: boolean) => void;
+  onRerun?: (comment: string, webSearch: boolean) => Promise<void>;
 }
 
 export function FeedbackButtons({
@@ -37,6 +37,7 @@ export function FeedbackButtons({
 
   const [uiState, setUiState] = useState<UiState>(initialState);
   const [comment, setComment] = useState("");
+  const [rerunError, setRerunError] = useState<string | null>(null);
 
   async function postFeedback(score: 1 | -1, feedbackComment: string | null) {
     try {
@@ -66,20 +67,32 @@ export function FeedbackButtons({
     setUiState("awaiting_comment");
   }
 
-  function handleSubmitComment() {
+  async function handleSubmitComment() {
     if (!comment.trim()) return;
     const trimmed = comment.trim();
     setUiState("done_rerun");
+    setRerunError(null);
     setMessageFeedback(sessionId, messageId, "thumbs_down");
     postFeedback(-1, trimmed); // fire-and-forget
-    onRerun?.(trimmed, false);
+    try {
+      await onRerun?.(trimmed, false);
+    } catch {
+      setUiState("awaiting_comment");
+      setRerunError("Connection failed. Please try again.");
+    }
   }
 
-  function handleSkip() {
+  async function handleSkip() {
     setUiState("done_rerun");
+    setRerunError(null);
     setMessageFeedback(sessionId, messageId, "thumbs_down");
     postFeedback(-1, null); // fire-and-forget
-    onRerun?.("", true);
+    try {
+      await onRerun?.("", true);
+    } catch {
+      setUiState("awaiting_comment");
+      setRerunError("Connection failed. Please try again.");
+    }
   }
 
   if (uiState === "done_positive" || uiState === "done_skip") {
@@ -97,6 +110,9 @@ export function FeedbackButtons({
   if (uiState === "awaiting_comment") {
     return (
       <div className="flex flex-col gap-1 mt-1">
+        {rerunError && (
+          <p className="text-xs text-red-500">{rerunError}</p>
+        )}
         <Textarea
           autoFocus
           className="text-xs min-h-[60px] resize-none"
