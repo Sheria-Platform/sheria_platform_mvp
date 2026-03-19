@@ -65,7 +65,7 @@ export default function PredictPage() {
     <div className="max-w-2xl mx-auto px-4 py-8 space-y-6">
       {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold mb-1" style={{ color: "#1a3a6b" }}>
+        <h1 className="text-2xl font-bold mb-1 text-judicial-navy">
           Sheria Predict
         </h1>
         <p className="text-gray-500 text-sm">
@@ -83,7 +83,7 @@ export default function PredictPage() {
               value={form.case_type}
               onChange={(e) => setForm((f) => ({ ...f, case_type: e.target.value }))}
               disabled={isPredicting}
-              className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+              className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
             >
               {CASE_TYPES.map((ct) => (
                 <option key={ct} value={ct}>{ct}</option>
@@ -97,7 +97,7 @@ export default function PredictPage() {
               value={form.court}
               onChange={(e) => setForm((f) => ({ ...f, court: e.target.value }))}
               disabled={isPredicting}
-              className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+              className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
             >
               {COURTS.map((c) => (
                 <option key={c} value={c}>{c}</option>
@@ -117,7 +117,7 @@ export default function PredictPage() {
               value={form.parties_count}
               onChange={(e) => setForm((f) => ({ ...f, parties_count: Math.max(1, Math.min(50, parseInt(e.target.value) || 1)) }))}
               disabled={isPredicting}
-              className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+              className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
             />
           </div>
 
@@ -127,7 +127,7 @@ export default function PredictPage() {
               value={form.complexity}
               onChange={(e) => setForm((f) => ({ ...f, complexity: e.target.value as CaseComplexity }))}
               disabled={isPredicting}
-              className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+              className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
             >
               {COMPLEXITIES.map((c) => (
                 <option key={c.value} value={c.value}>{c.label} — {c.desc}</option>
@@ -148,7 +148,7 @@ export default function PredictPage() {
             rows={3}
             maxLength={2000}
             placeholder="Describe key facts, legal issues, or special circumstances that may affect timeline…"
-            className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 placeholder:text-gray-300 resize-none"
+            className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50 placeholder:text-gray-300 resize-none"
           />
           <p className="text-xs text-gray-300 text-right">{form.description.length}/2000</p>
         </div>
@@ -157,8 +157,7 @@ export default function PredictPage() {
           <Button
             onClick={() => predict(form)}
             disabled={!canSubmit}
-            className="flex-1"
-            style={{ backgroundColor: "#1a3a6b" }}
+            className="flex-1 bg-judicial-navy text-white hover:bg-judicial-navy-800"
           >
             {isPredicting ? (
               <span className="flex items-center gap-2">

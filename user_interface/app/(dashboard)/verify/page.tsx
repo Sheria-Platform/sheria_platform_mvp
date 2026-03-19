@@ -43,7 +43,7 @@ export default function VerifyPage() {
     <div className="max-w-2xl mx-auto px-4 py-8 space-y-6">
       {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold mb-1" style={{ color: "#1a3a6b" }}>
+        <h1 className="text-2xl font-bold mb-1 text-judicial-navy">
           Sheria Verify
         </h1>
         <p className="text-gray-500 text-sm">
@@ -100,7 +100,7 @@ export default function VerifyPage() {
                 value={documentType}
                 onChange={(e) => setDocumentType(e.target.value as DocumentType)}
                 disabled={isVerifying}
-                className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
               >
                 {DOCUMENT_TYPES.map((dt) => (
                   <option key={dt.value} value={dt.value}>
@@ -120,7 +120,7 @@ export default function VerifyPage() {
                 onChange={(e) => setCaseNumber(e.target.value)}
                 disabled={isVerifying}
                 placeholder="e.g. HC MISC. APP. 123 OF 2025"
-                className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 placeholder:text-gray-300"
+                className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50 placeholder:text-gray-300"
               />
             </div>
           </div>
@@ -128,8 +128,7 @@ export default function VerifyPage() {
           <Button
             onClick={() => verify(documentType, caseNumber)}
             disabled={!canSubmit}
-            className="w-full"
-            style={{ backgroundColor: "#1a3a6b" }}
+            className="w-full bg-judicial-navy text-white hover:bg-judicial-navy-800"
           >
             {isVerifying ? "Verifying…" : "Verify Document"}
           </Button>
@@ -142,8 +141,8 @@ export default function VerifyPage() {
               </div>
               <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden">
                 <div
-                  className="h-full rounded-full transition-all duration-700 ease-out"
-                  style={{ width: `${progress}%`, backgroundColor: "#1a3a6b" }}
+                  className="h-full rounded-full bg-judicial-navy transition-all duration-700 ease-out"
+                  style={{ width: `${progress}%` }}
                 />
               </div>
             </div>

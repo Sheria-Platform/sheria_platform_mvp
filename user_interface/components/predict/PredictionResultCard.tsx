@@ -40,14 +40,14 @@ export function PredictionResultCard({ report }: Props) {
             <circle
               cx="18" cy="18" r="15.9"
               fill="none"
-              stroke="#1a3a6b"
+              className="stroke-judicial-navy"
               strokeWidth="3"
               strokeDasharray={`${confidencePct} ${100 - confidencePct}`}
               strokeDashoffset="0"
               strokeLinecap="round"
             />
           </svg>
-          <span className="absolute inset-0 flex items-center justify-center text-xs font-bold text-[#1a3a6b]">
+          <span className="absolute inset-0 flex items-center justify-center text-xs font-bold text-judicial-navy">
             {confidencePct}%
           </span>
         </div>
@@ -90,7 +90,7 @@ export function PredictionResultCard({ report }: Props) {
             <ul className="space-y-1.5">
               {report.key_factors.map((factor, i) => (
                 <li key={i} className="flex items-start gap-2">
-                  <Scale size={14} className="text-[#1a3a6b] mt-0.5 shrink-0 opacity-60" />
+                  <Scale size={14} className="text-judicial-navy mt-0.5 shrink-0 opacity-60" />
                   <span className="text-sm text-gray-700">{factor}</span>
                 </li>
               ))}

@@ -22,7 +22,7 @@ function StatBar({
   label,
   value,
   total,
-  color = "bg-[#1a3a6b]",
+  color = "bg-judicial-navy",
 }: {
   label: string;
   value: number;
@@ -61,7 +61,7 @@ function StatCard({
   return (
     <div className="bg-white border border-gray-200 rounded-xl p-5">
       <p className="text-xs text-gray-400 uppercase tracking-wide">{label}</p>
-      <p className="text-3xl font-bold text-[#1a3a6b] mt-1">{value}</p>
+      <p className="text-3xl font-bold text-judicial-navy mt-1">{value}</p>
       {sub && <p className="text-xs text-gray-400 mt-1">{sub}</p>}
     </div>
   );
@@ -201,7 +201,7 @@ export default function AnalyticsDashboard({
             <p className="text-xs text-gray-400 uppercase tracking-wide">
               Avg. Confidence
             </p>
-            <p className="text-4xl font-bold text-[#1a3a6b] mt-2">
+            <p className="text-4xl font-bold text-judicial-navy mt-2">
               {verifications.avg_confidence.toFixed(2)}
             </p>
             <p className="text-xs text-gray-400 mt-1">
