@@ -27,8 +27,14 @@ _JSON_FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.DOTALL)
 
 
 def _extract_json(raw: str) -> str:
-    """Strip optional markdown fences and return the inner JSON string."""
+    """Strip optional markdown fences and return the inner JSON string.
+
+    Raises:
+        ValueError: If the response is empty after stripping.
+    """
     raw = raw.strip()
+    if not raw:
+        raise ValueError("LLM returned an empty response")
     m = _JSON_FENCE_RE.search(raw)
     return m.group(1) if m else raw
 
@@ -64,14 +70,15 @@ Output JSON only — no prose, no markdown fences:
   "confidence": <float 0.0–1.0>,
   "similar_cases_found": <integer — number of analogies used>,
   "key_factors": [<list of 2–4 strings — factors most influencing this estimate>],
-  "risk_level": "low" | "medium" | "high",
+  "risk_level": "low" | "medium" | "high" | "critical",
   "summary": "<one sentence human-readable forecast>"
 }}
 
 risk_level guide:
-  low    — straightforward legal issue, few parties, common case type
-  medium — moderate complexity or parties, some procedural risk
-  high   — multi-party, constitutional issues, expert witnesses, or high-backlog court"""
+  low      — straightforward legal issue, few parties, common case type
+  medium   — moderate complexity or parties, some procedural risk
+  high     — multi-party, constitutional issues, expert witnesses, or high-backlog court
+  critical — very_high complexity, 5+ parties, constitutional or precedent-setting matter"""
 
 
 # ── Main entry-point ──────────────────────────────────────────────────────────
@@ -151,11 +158,9 @@ async def predict_case_duration(tool_input: str) -> str:
                 }
             ],
             temperature=0.1,
-            max_tokens=512,
+            max_tokens=768,
         )
         report = json.loads(_extract_json(raw))
-        # Ensure similar_cases_found reflects actual Qdrant result, not LLM hallucination
-        report["similar_cases_found"] = similar_cases_found
 
         # Compute confidence deterministically so it actually varies with inputs.
         # Base: how many historical analogies did Qdrant find?

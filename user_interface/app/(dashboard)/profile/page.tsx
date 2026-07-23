@@ -5,8 +5,7 @@ import { UserCircle, Camera, Loader2, CheckCircle } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import { getAuthUser, setAuthUser } from "@/lib/auth";
 import { useChatStore } from "@/store/chatStore";
-import { UserProfile } from "@/types/api";
-import { UserRole } from "@/types/api";
+import { UserProfile, UserRole } from "@/types/api";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -124,7 +123,7 @@ export default function ProfilePage() {
         // Persist avatar key to cookie so it survives refresh
         const current = getAuthUser();
         if (current) {
-          const next = { ...current, avatar_url: file.name };
+          const next = { ...current, avatar_url: data.avatar_presigned_url };
           setAuthUser(next);
           setUser(next);
         }
@@ -167,7 +166,7 @@ export default function ProfilePage() {
   return (
     <div className="max-w-2xl mx-auto px-4 py-8 space-y-6">
       {/* ── Page header ─────────────────────────────────────────────── */}
-      <h1 className="text-2xl font-semibold text-[#1a3a6b]">My Profile</h1>
+      <h1 className="text-2xl font-semibold text-judicial-navy">My Profile</h1>
 
       {/* ── Avatar section ──────────────────────────────────────────── */}
       <div className="flex items-center gap-5">
@@ -175,7 +174,7 @@ export default function ProfilePage() {
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
-            className="w-20 h-20 rounded-full overflow-hidden border-2 border-gray-200 bg-[#1a3a6b] flex items-center justify-center text-white text-2xl font-bold hover:opacity-90 transition-opacity relative group"
+            className="w-20 h-20 rounded-full overflow-hidden border-2 border-gray-200 bg-judicial-navy flex items-center justify-center text-white text-2xl font-bold hover:opacity-90 transition-opacity relative group"
             title="Change profile picture"
           >
             {avatarSrc ? (
@@ -266,7 +265,7 @@ export default function ProfilePage() {
               type="text"
               value={fullName}
               onChange={(e) => setFullName(e.target.value)}
-              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1a3a6b]/30"
+              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-judicial-navy/30"
             />
           </div>
           <div>
@@ -278,7 +277,7 @@ export default function ProfilePage() {
               type="text"
               value={staffNumber}
               onChange={(e) => setStaffNumber(e.target.value)}
-              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1a3a6b]/30"
+              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-judicial-navy/30"
             />
           </div>
           <div>
@@ -290,7 +289,7 @@ export default function ProfilePage() {
               rows={3}
               value={bio}
               onChange={(e) => setBio(e.target.value)}
-              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1a3a6b]/30 resize-none"
+              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-judicial-navy/30 resize-none"
             />
           </div>
           <div>
@@ -302,7 +301,7 @@ export default function ProfilePage() {
               type="tel"
               value={phone}
               onChange={(e) => setPhone(e.target.value)}
-              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1a3a6b]/30"
+              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-judicial-navy/30"
             />
           </div>
 
@@ -311,7 +310,7 @@ export default function ProfilePage() {
               type="button"
               onClick={handleSave}
               disabled={saving}
-              className="flex items-center gap-2 bg-[#1a3a6b] text-white text-sm px-4 py-2 rounded-md hover:bg-[#163060] transition-colors disabled:opacity-60"
+              className="flex items-center gap-2 bg-judicial-navy text-white text-sm px-4 py-2 rounded-md hover:bg-judicial-navy-800 transition-colors disabled:opacity-60"
             >
               {saving && <Loader2 size={14} className="animate-spin" />}
               Save Changes

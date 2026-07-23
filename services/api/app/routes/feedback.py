@@ -25,15 +25,14 @@ class FeedbackRequest(BaseModel):
 
     Attributes:
         session_id: The conversation session the message belongs to.
-        message_id: Primary-key ID of the assistant ``ChatHistory``
-            row being rated.
+        message_id: Frontend UUID string of the assistant message being rated.
         score: Sentiment integer -- ``1`` for positive (like),
             ``-1`` for negative (dislike).
         comment: Optional free-text explanation from the user.
     """
 
     session_id: str
-    message_id: int
+    message_id: str
     score: int  # 1 = like, -1 = dislike
     comment: str | None = None
 
@@ -79,7 +78,7 @@ async def submit_feedback(
             comment=req.comment,
         )
         logger.info(
-            "Feedback recorded. session=%s message=%d score=%d",
+            "Feedback recorded. session=%s message=%s score=%d",
             req.session_id,
             req.message_id,
             req.score,

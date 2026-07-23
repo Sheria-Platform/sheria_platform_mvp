@@ -15,7 +15,7 @@ export default function UploadPage() {
   return (
     <div className="max-w-2xl mx-auto px-4 py-8 space-y-5">
       <div>
-        <h1 className="text-2xl font-bold mb-1" style={{ color: "#1a3a6b" }}>
+        <h1 className="text-2xl font-bold mb-1 text-judicial-navy">
           Sheria Digitize
         </h1>
         <p className="text-gray-500 text-sm">
@@ -34,8 +34,7 @@ export default function UploadPage() {
             <Button
               onClick={uploadAll}
               disabled={isUploading}
-              className="w-full"
-              style={{ backgroundColor: "#1a3a6b" }}
+              className="w-full bg-judicial-navy text-white hover:bg-judicial-navy-800"
             >
               {isUploading ? "Uploading…" : "Upload All"}
             </Button>

@@ -19,6 +19,8 @@ from services.api.app.tools.calculator import calculate
 from services.api.app.tools.graph_search import search_graph_tool
 from services.api.app.tools.predict_case_duration import predict_case_duration
 from services.api.app.tools.verify_document import verify_document
+from services.api.app.tools.web_search import search_kenya_law_web
+from services.api.app.tools.workload_management import workload_management
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +30,8 @@ _TOOL_REGISTRY: dict[str, Callable] = {
     "graph_search": search_graph_tool,
     "predict_case_duration": predict_case_duration,
     "verify_document": verify_document,
+    "web_search": search_kenya_law_web,
+    "workload_management": workload_management,
 }
 
 
@@ -62,4 +66,4 @@ async def tool_node(state: AgentState) -> dict:
         raw = tool_fn(tool_input)
         result = await raw if asyncio.iscoroutine(raw) else raw
 
-    return {"messages": [{"role": "user", "content": f"Tool Output: {result}"}]}
+    return {"messages": [{"role": "system", "content": f"Tool result: {result}"}]}

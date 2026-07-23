@@ -17,7 +17,7 @@ const DOCUMENT_TYPES: { value: DocumentType; label: string }[] = [
 ];
 
 export default function VerifyPage() {
-  const { state, report, error, file, selectFile, reset, verify } = useVerify();
+  const { state, report, error, file, progress, step, selectFile, reset, verify } = useVerify();
   const [documentType, setDocumentType] = useState<DocumentType>("court_order");
   const [caseNumber, setCaseNumber] = useState("");
 
@@ -32,7 +32,7 @@ export default function VerifyPage() {
     onDrop,
     accept: { "application/pdf": [".pdf"] },
     maxFiles: 1,
-    maxSize: 50 * 1024 * 1024,
+    maxSize: 20 * 1024 * 1024,
     disabled: state === "verifying",
   });
 
@@ -43,7 +43,7 @@ export default function VerifyPage() {
     <div className="max-w-2xl mx-auto px-4 py-8 space-y-6">
       {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold mb-1" style={{ color: "#1a3a6b" }}>
+        <h1 className="text-2xl font-bold mb-1 text-judicial-navy">
           Sheria Verify
         </h1>
         <p className="text-gray-500 text-sm">
@@ -68,7 +68,7 @@ export default function VerifyPage() {
           <p className="text-sm font-medium text-gray-700">
             {isDragActive ? "Drop the PDF here" : "Drag & drop a court document (PDF)"}
           </p>
-          <p className="text-xs text-gray-400 mt-1">PDF only · up to 50 MB</p>
+          <p className="text-xs text-gray-400 mt-1">PDF only · up to 20 MB</p>
         </div>
       ) : (
         <div className="bg-white border rounded-xl p-4 space-y-4">
@@ -100,7 +100,7 @@ export default function VerifyPage() {
                 value={documentType}
                 onChange={(e) => setDocumentType(e.target.value as DocumentType)}
                 disabled={isVerifying}
-                className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
               >
                 {DOCUMENT_TYPES.map((dt) => (
                   <option key={dt.value} value={dt.value}>
@@ -120,7 +120,7 @@ export default function VerifyPage() {
                 onChange={(e) => setCaseNumber(e.target.value)}
                 disabled={isVerifying}
                 placeholder="e.g. HC MISC. APP. 123 OF 2025"
-                className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 placeholder:text-gray-300"
+                className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50 placeholder:text-gray-300"
               />
             </div>
           </div>
@@ -128,18 +128,25 @@ export default function VerifyPage() {
           <Button
             onClick={() => verify(documentType, caseNumber)}
             disabled={!canSubmit}
-            className="w-full"
-            style={{ backgroundColor: "#1a3a6b" }}
+            className="w-full bg-judicial-navy text-white hover:bg-judicial-navy-800"
           >
-            {isVerifying ? (
-              <span className="flex items-center gap-2">
-                <span className="size-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                Verifying…
-              </span>
-            ) : (
-              "Verify Document"
-            )}
+            {isVerifying ? "Verifying…" : "Verify Document"}
           </Button>
+
+          {isVerifying && (
+            <div className="space-y-1.5 pt-1">
+              <div className="flex justify-between items-center text-xs text-gray-500">
+                <span>{step}</span>
+                <span className="tabular-nums">{progress}%</span>
+              </div>
+              <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden">
+                <div
+                  className="h-full rounded-full bg-judicial-navy transition-all duration-700 ease-out"
+                  style={{ width: `${progress}%` }}
+                />
+              </div>
+            </div>
+          )}
         </div>
       )}
 

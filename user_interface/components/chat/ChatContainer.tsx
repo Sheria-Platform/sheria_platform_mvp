@@ -15,6 +15,23 @@ export function ChatContainer() {
     await sendMessage(text);
   }
 
+  async function handleRerun(comment: string, webSearch: boolean) {
+    const feedbackClause = comment.trim()
+      ? `Here is my feedback: "${comment.trim()}"\n\n`
+      : "";
+    const prompt = `Your previous answer did not fully address my question. ${feedbackClause}Please provide an improved response.`;
+    await sendMessage(prompt, {
+      webSearch,
+      onError: () => {
+        // Remove the user prompt + empty assistant message that were added before
+        // the network error so they don't linger as orphaned messages in the chat.
+        if (store.activeSessionId) {
+          store.removeLastMessages(store.activeSessionId, 2);
+        }
+      },
+    });
+  }
+
   return (
     <div className="flex flex-col h-full">
       {!activeSession || activeSession.messages.length === 0 ? (
@@ -30,12 +47,15 @@ export function ChatContainer() {
         <MessageList
           messages={activeSession.messages}
           sessionId={activeSession.id}
+          onRerun={handleRerun}
         />
       )}
       <ChatInput
         onSend={handleSend}
         onStop={stopStream}
         isStreaming={store.isStreaming}
+        webSearchEnabled={store.webSearchEnabled}
+        onToggleWebSearch={store.toggleWebSearch}
       />
     </div>
   );

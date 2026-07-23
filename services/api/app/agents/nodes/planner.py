@@ -81,6 +81,31 @@ Output JSON ONLY — no prose, no markdown:
 }
 """
 
+# Appended to _SYSTEM_PROMPT whenever action="tool_use" is possible.
+# Teaches the model to emit tool_choice + tool_input in its JSON output.
+_SYSTEM_PROMPT_TOOL_FIELDS = """
+When action is "tool_use", also include these two fields in the JSON:
+    "tool_choice": "<tool_name>",
+    "tool_input": "<raw string or JSON string the tool expects>"
+
+Available tools:
+  predict_case_duration — input: JSON string with keys case_type, court, parties_count, complexity, description
+  verify_document       — input: JSON string with keys document_text, document_type, case_number
+  calculator            — input: arithmetic expression string
+  workload_management   — input: JSON string with keys court, days (default 30)
+                          Use for court backlog, caseload statistics, or workload analysis queries
+"""
+
+# Conditionally appended when state["web_search_enabled"] is True.
+_WEB_SEARCH_TOOL_ENTRY = """
+  web_search            — input: the refined_query string (plain text, not JSON)
+                          Use ONLY when the user explicitly asks for the latest/most recent
+                          developments, references a date likely beyond local data, or asks
+                          about a case not found in the local Kenya Law Reports database.
+                          Do NOT use for well-established legal principles already covered
+                          by local case law.
+"""
+
 
 async def planner_node(state: AgentState) -> dict:
     """Analyse the user query and decide the next graph step.
@@ -118,11 +143,19 @@ async def planner_node(state: AgentState) -> dict:
     )
 
     try:
+        # Build system prompt — append tool fields section; extend with web_search
+        # entry only when the request explicitly enables live web search.
+        web_search_enabled: bool = state.get("web_search_enabled", False)
+        tool_section = _SYSTEM_PROMPT_TOOL_FIELDS
+        if web_search_enabled:
+            tool_section = tool_section + _WEB_SEARCH_TOOL_ENTRY
+        system_prompt = _SYSTEM_PROMPT + tool_section
+
         # Send last 6 messages (3 turns) so the planner can resolve coreferences
         recent_messages = state["messages"][-6:]
         response_text = await ollama_client.chat_completion(
             messages=[
-                {"role": "system", "content": _SYSTEM_PROMPT},
+                {"role": "system", "content": system_prompt},
                 *recent_messages,
             ],
             temperature=0.0,  # deterministic planning
@@ -148,6 +181,8 @@ async def planner_node(state: AgentState) -> dict:
             "current_query": plan.get("refined_query", user_query),
             "plan": [plan.get("reasoning", "")],
             "action": action,
+            "tool_choice": plan.get("tool_choice", ""),
+            "tool_input": plan.get("tool_input", ""),
         }
 
     except Exception:

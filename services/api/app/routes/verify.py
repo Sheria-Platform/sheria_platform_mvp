@@ -11,6 +11,7 @@ No streaming -- document verification is a synchronous request/response.
 
 import json
 import logging
+from typing import Literal
 
 from fastapi import (
     APIRouter,
@@ -19,15 +20,16 @@ from fastapi import (
     File,
     Form,
     HTTPException,
+    Request,
     UploadFile,
     status,
 )
 from pydantic import BaseModel
 
 from services.api.app.auth.permissions import require_role
-from services.api.app.auth.jwt import get_current_user
 from services.api.app.config import settings
 from services.api.app.dependencies import get_verification_repo
+from services.api.app.limiter import limiter
 from services.api.app.memory.verification_repository import VerificationRepository
 from services.api.app.tools.verify_document import verify_document
 
@@ -113,12 +115,14 @@ def _extract_text_from_pdf(pdf_bytes: bytes) -> str:
         "in Kenya Law Reports (Qdrant), and runs a fraud pattern analysis."
     ),
 )
+@limiter.limit("10/minute")
 async def verify_court_document(
+    request: Request,
     background_tasks: BackgroundTasks,
     file: UploadFile = File(..., description="PDF court document to verify"),
-    document_type: str = Form(
+    document_type: Literal["court_order", "judgment", "pleading", "affidavit"] = Form(
         default="court_order",
-        description="Type of document: court_order | judgment | pleading | affidavit",
+        description="Type of court document being verified",
     ),
     case_number: str = Form(
         default="",
@@ -155,9 +159,15 @@ async def verify_court_document(
     )
 
     # -- Read & validate PDF ---------------------------------------------------
-    pdf_bytes = await file.read()
-
     _max_bytes = settings.MAX_PDF_UPLOAD_MB * 1024 * 1024
+    # Early rejection when Content-Length is present — avoids buffering large files
+    if file.size is not None and file.size > _max_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"File too large. Maximum allowed size is {settings.MAX_PDF_UPLOAD_MB} MB.",
+        )
+    pdf_bytes = await file.read()
+    # Authoritative check (handles absent or spoofed Content-Length)
     if len(pdf_bytes) > _max_bytes:
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
@@ -236,7 +246,7 @@ async def verify_court_document(
     description="Return the authenticated user's verification history, newest first.",
 )
 async def get_verification_history(
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_role("registrar", "judge", "magistrate")),
     memory: VerificationRepository = Depends(get_verification_repo),
 ) -> list[VerificationActivity]:
     """Return verification activity records for the current user.

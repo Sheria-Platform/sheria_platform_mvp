@@ -10,7 +10,7 @@ export function useChat() {
   const abortRef = useRef<AbortController | null>(null);
 
   const sendMessage = useCallback(
-    async (content: string) => {
+    async (content: string, options?: { webSearch?: boolean; onError?: () => void }) => {
       if (store.isStreaming || !content.trim()) return;
 
       let sessionId = store.activeSessionId;
@@ -28,7 +28,11 @@ export function useChat() {
       try {
         const response = await apiStream(
           "/api/proxy/chat",
-          { message: content, session_id: sessionId },
+          {
+            message: content,
+            session_id: sessionId,
+            web_search: options?.webSearch ?? store.webSearchEnabled,
+          },
           controller.signal
         );
 
@@ -50,6 +54,11 @@ export function useChat() {
         }
       } catch (err) {
         if ((err as Error).name !== "AbortError") {
+          if (options?.onError) {
+            // Caller handles the error (e.g. rerun flow) — clean up and rethrow
+            options.onError();
+            throw err;
+          }
           store.appendToMessage(
             sessionId!,
             assistantMsgId,
@@ -74,7 +83,17 @@ export function useChat() {
         abortRef.current = null;
       }
     },
-    [store]
+    [
+      store.isStreaming,
+      store.activeSessionId,
+      store.webSearchEnabled,
+      store.createSession,
+      store.addUserMessage,
+      store.addAssistantMessage,
+      store.setStreaming,
+      store.appendToMessage,
+      store.completeMessage,
+    ]
   );
 
   const stopStream = useCallback(() => {

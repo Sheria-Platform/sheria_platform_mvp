@@ -7,7 +7,6 @@ import { usePathname, useRouter } from "next/navigation";
 import { useChatStore } from "@/store/chatStore";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import {
   Tooltip,
@@ -30,6 +29,8 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   UserCircle,
+  ListChecks,
+  BarChart2,
 } from "lucide-react";
 
 const NAV_ITEMS = [
@@ -37,25 +38,21 @@ const NAV_ITEMS = [
   { href: "/verify",  label: "Sheria Verify",    icon: ShieldCheck },
   { href: "/predict", label: "Sheria Predict",   icon: TrendingUp },
   { href: "/upload",  label: "Sheria Digitize",  icon: FileText },
+  { href: "/jobs",    label: "Ingestion Jobs",   icon: ListChecks },
   { href: "/history", label: "Activity History", icon: History },
-  { href: "/health",  label: "System Status",    icon: Activity },
 ];
 
-const ADMIN_ITEM = { href: "/admin/users", label: "User Management", icon: Users };
+const ADMIN_ITEMS = [
+  { href: "/health",            label: "System Status",    icon: Activity },
+  { href: "/admin/users",       label: "User Management",  icon: Users },
+  { href: "/admin/analytics",   label: "Analytics",        icon: BarChart2 },
+];
 
 export function AppSidebar() {
   const [collapsed, setCollapsed] = useState(false);
   const pathname = usePathname();
   const router = useRouter();
-  const {
-    sessions,
-    activeSessionId,
-    setActiveSession,
-    createSession,
-    deleteSession,
-    user,
-    setUser,
-  } = useChatStore();
+  const { createSession, user, setUser } = useChatStore();
 
   async function handleLogout() {
     await fetch("/api/auth/logout", { method: "POST" });
@@ -66,14 +63,14 @@ export function AppSidebar() {
 
   const allNavItems = [
     ...NAV_ITEMS,
-    ...(user?.role === "admin" ? [ADMIN_ITEM] : []),
+    ...(user?.role === "admin" ? ADMIN_ITEMS : []),
   ];
 
   return (
     <TooltipProvider delay={200}>
       <aside
         className={cn(
-          "bg-[#1a1a1a] text-white flex flex-col shrink-0 transition-[width] duration-200 ease-in-out overflow-hidden",
+          "bg-judicial-navy text-white flex flex-col shrink-0 transition-[width] duration-200 ease-in-out overflow-hidden",
           collapsed ? "w-16" : "w-64"
         )}
       >
@@ -86,7 +83,8 @@ export function AppSidebar() {
                 alt="Sheria Platform"
                 width={120}
                 height={32}
-                className="h-8 w-auto object-contain"
+                className="h-8 object-contain"
+                style={{ width: "auto" }}
                 priority
               />
             </div>
@@ -140,19 +138,17 @@ export function AppSidebar() {
             if (collapsed) {
               return (
                 <Tooltip key={item.href}>
-                  <TooltipTrigger asChild>
-                    <Link href={item.href}>
-                      <span
-                        className={cn(
-                          "flex items-center justify-center p-2 rounded-lg transition-colors cursor-pointer",
-                          active
-                            ? "bg-white/15 text-white"
-                            : "text-gray-400 hover:text-white hover:bg-white/10"
-                        )}
-                      >
-                        <Icon size={18} />
-                      </span>
-                    </Link>
+                  <TooltipTrigger render={<Link href={item.href} />}>
+                    <span
+                      className={cn(
+                        "flex items-center justify-center p-2 rounded-lg transition-colors cursor-pointer",
+                        active
+                          ? "bg-white/15 text-white"
+                          : "text-gray-400 hover:text-white hover:bg-white/10"
+                      )}
+                    >
+                      <Icon size={18} />
+                    </span>
                   </TooltipTrigger>
                   <TooltipContent side="right">{item.label}</TooltipContent>
                 </Tooltip>
@@ -177,48 +173,7 @@ export function AppSidebar() {
           })}
         </nav>
 
-        {/* ── Recent sessions (expanded only) ─────────────────────── */}
-        {!collapsed && (
-          <>
-            <Separator className="opacity-10 mx-3 my-1" />
-            <div className="px-4 pt-2 pb-1 shrink-0">
-              <span className="text-xs text-gray-500 font-medium uppercase tracking-wider">
-                Recent sessions
-              </span>
-            </div>
-            <ScrollArea className="flex-1 px-2">
-              <div className="space-y-0.5 pb-4">
-                {sessions.slice(0, 20).map((sess) => (
-                  <div
-                    key={sess.id}
-                    className={cn(
-                      "group flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs cursor-pointer transition-colors",
-                      sess.id === activeSessionId
-                        ? "bg-white/15 text-white"
-                        : "text-gray-400 hover:text-white hover:bg-white/10"
-                    )}
-                    onClick={() => { setActiveSession(sess.id); router.push("/chat"); }}
-                  >
-                    <span className="flex-1 truncate">{sess.title}</span>
-                    <button
-                      className="opacity-0 group-hover:opacity-100 text-gray-500 hover:text-white ml-1"
-                      onClick={(e) => { e.stopPropagation(); deleteSession(sess.id); }}
-                      title="Delete"
-                    >
-                      ×
-                    </button>
-                  </div>
-                ))}
-                {sessions.length === 0 && (
-                  <p className="text-xs text-gray-600 px-3 py-1">No sessions yet</p>
-                )}
-              </div>
-            </ScrollArea>
-          </>
-        )}
-
-        {/* Spacer in collapsed mode to push user section down */}
-        {collapsed && <div className="flex-1" />}
+        <div className="flex-1" />
 
         <Separator className="opacity-10" />
 
@@ -238,12 +193,10 @@ export function AppSidebar() {
           {collapsed ? (
             <>
               <Tooltip>
-                <TooltipTrigger asChild>
-                  <Link href="/profile">
-                    <span className="w-full flex items-center justify-center p-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/10 transition-colors">
-                      <UserCircle size={16} />
-                    </span>
-                  </Link>
+                <TooltipTrigger render={<Link href="/profile" />}>
+                  <span className="w-full flex items-center justify-center p-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/10 transition-colors">
+                    <UserCircle size={16} />
+                  </span>
                 </TooltipTrigger>
                 <TooltipContent side="right">My Profile</TooltipContent>
               </Tooltip>

@@ -50,6 +50,11 @@ function JobRow({ file, job }: { file: UploadFile; job?: JobState }) {
                 {job.stats.files_processed} file(s) processed
               </span>
             )}
+            {job.stats.graph_indexed == null && (
+              <span className="text-xs text-amber-500" title="Set ENABLE_GRAPH=true to populate the citation graph">
+                Graph extraction disabled
+              </span>
+            )}
           </div>
         )}
       </div>

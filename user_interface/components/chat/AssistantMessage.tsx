@@ -11,9 +11,11 @@ import { FeedbackButtons } from "./FeedbackButtons";
 export function AssistantMessage({
   message,
   sessionId,
+  onRerun,
 }: {
   message: ChatMessage;
   sessionId: string;
+  onRerun?: (comment: string, webSearch: boolean) => Promise<void>;
 }) {
   return (
     <div className="flex flex-col px-4 py-1 max-w-[85%]">
@@ -45,6 +47,7 @@ export function AssistantMessage({
             messageId={message.id}
             sessionId={sessionId}
             feedbackGiven={message.feedbackGiven}
+            onRerun={onRerun}
           />
         )}
       </div>

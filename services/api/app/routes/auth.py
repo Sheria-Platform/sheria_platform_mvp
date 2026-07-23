@@ -400,3 +400,184 @@ async def get_audit_log(
 ) -> list[dict]:
     """Return the most recent 200 admin audit log entries. Admin only."""
     return await audit_repository.get_recent_logs(limit=200)
+
+
+@router.get("/analytics")
+async def get_analytics(admin: dict = Depends(require_admin)) -> dict:
+    """Return system-wide analytics across all judicial modules. Admin only."""
+    from sqlalchemy import func, distinct, select
+
+    from services.api.app.memory.models import (
+        AdminAuditLog,
+        AsyncSessionLocal,
+        ChatHistory,
+        IngestionJob,
+        PredictionHistory,
+        User,
+        VerificationActivity,
+    )
+
+    # AsyncSession does not support concurrent operations on one session.
+    # Run all queries sequentially within a single connection.
+    async with AsyncSessionLocal() as session:
+        user_status_rows = await session.execute(
+            select(User.status, func.count(User.id).label("cnt")).group_by(User.status)
+        )
+        role_rows = await session.execute(
+            select(User.role, func.count(User.id).label("cnt")).group_by(User.role)
+        )
+        court_rows = await session.execute(
+            select(User.court_station, func.count(User.id).label("cnt"))
+            .group_by(User.court_station)
+            .order_by(func.count(User.id).desc())
+            .limit(5)
+        )
+        recent_7d_result = await session.execute(
+            select(func.count(User.id)).where(
+                User.created_at >= datetime.utcnow() - timedelta(days=7)
+            )
+        )
+        session_count_result = await session.execute(
+            select(func.count(distinct(ChatHistory.session_id)))
+        )
+        verify_total_result = await session.execute(
+            select(func.count(VerificationActivity.id))
+        )
+        authentic_count_result = await session.execute(
+            select(func.count(VerificationActivity.id)).where(
+                VerificationActivity.authentic == True  # noqa: E712
+            )
+        )
+        avg_confidence_result = await session.execute(
+            select(func.avg(VerificationActivity.confidence))
+        )
+        verify_type_rows = await session.execute(
+            select(
+                VerificationActivity.document_type,
+                func.count(VerificationActivity.id).label("cnt"),
+            ).group_by(VerificationActivity.document_type)
+        )
+        predict_total_result = await session.execute(
+            select(func.count(PredictionHistory.id))
+        )
+        avg_months_result = await session.execute(
+            select(
+                func.avg(
+                    (PredictionHistory.estimated_months_min + PredictionHistory.estimated_months_max) / 2.0
+                )
+            )
+        )
+        risk_rows = await session.execute(
+            select(PredictionHistory.risk_level, func.count(PredictionHistory.id).label("cnt"))
+            .where(PredictionHistory.risk_level.isnot(None))
+            .group_by(PredictionHistory.risk_level)
+        )
+        top_court_rows = await session.execute(
+            select(PredictionHistory.court, func.count(PredictionHistory.id).label("cnt"))
+            .group_by(PredictionHistory.court)
+            .order_by(func.count(PredictionHistory.id).desc())
+            .limit(5)
+        )
+        ingest_count_result = await session.execute(
+            select(func.count(IngestionJob.job_id))
+        )
+        audit_rows = await session.execute(
+            select(
+                AdminAuditLog.id,
+                AdminAuditLog.action,
+                AdminAuditLog.detail,
+                AdminAuditLog.ip_address,
+                AdminAuditLog.created_at,
+                User.username.label("admin_username"),
+            )
+            .join(User, User.id == AdminAuditLog.admin_id, isouter=True)
+            .order_by(AdminAuditLog.created_at.desc())
+            .limit(20)
+        )
+
+    # ── Aggregate results ──────────────────────────────────────────────────
+    status_counts: dict[str, int] = {}
+    for row in user_status_rows.all():
+        status_counts[row.status] = row.cnt
+
+    total_users = sum(status_counts.values())
+    active_users = status_counts.get("active", 0)
+    pending_users = status_counts.get("pending", 0)
+    suspended_users = status_counts.get("suspended", 0)
+
+    users_by_role = {row.role: row.cnt for row in role_rows.all()}
+
+    top_court_stations = [
+        {"court_station": row.court_station, "count": row.cnt}
+        for row in court_rows.all()
+    ]
+
+    recent_7d = recent_7d_result.scalar() or 0
+    total_chat_sessions = session_count_result.scalar() or 0
+    total_verifications = verify_total_result.scalar() or 0
+    authentic_count = authentic_count_result.scalar() or 0
+    raw_avg_confidence = avg_confidence_result.scalar()
+    avg_confidence = float(raw_avg_confidence) if raw_avg_confidence is not None else 0.0
+
+    by_document_type = {row.document_type: row.cnt for row in verify_type_rows.all()}
+    fraudulent_count = total_verifications - authentic_count
+    authenticity_rate = (
+        round((authentic_count / total_verifications) * 100, 1)
+        if total_verifications > 0
+        else 0.0
+    )
+
+    total_predictions = predict_total_result.scalar() or 0
+    raw_avg_months = avg_months_result.scalar()
+    avg_estimated_months = (
+        round(float(raw_avg_months), 1) if raw_avg_months is not None else 0.0
+    )
+
+    by_risk_level = {row.risk_level: row.cnt for row in risk_rows.all()}
+    top_courts = [
+        {"court": row.court, "count": row.cnt} for row in top_court_rows.all()
+    ]
+    total_ingestion_jobs = ingest_count_result.scalar() or 0
+
+    audit_log = [
+        {
+            "id": row.id,
+            "action": row.action,
+            "admin": row.admin_username or "unknown",
+            "detail": row.detail,
+            "ip_address": row.ip_address,
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+        }
+        for row in audit_rows.all()
+    ]
+
+    return {
+        "overview": {
+            "total_users": total_users,
+            "active_users": active_users,
+            "pending_users": pending_users,
+            "suspended_users": suspended_users,
+            "total_chat_sessions": total_chat_sessions,
+            "total_verifications": total_verifications,
+            "total_predictions": total_predictions,
+            "total_ingestion_jobs": total_ingestion_jobs,
+        },
+        "users_by_role": users_by_role,
+        "top_court_stations": top_court_stations,
+        "recent_registrations_7d": recent_7d,
+        "verifications": {
+            "total": total_verifications,
+            "authentic_count": authentic_count,
+            "fraudulent_count": fraudulent_count,
+            "authenticity_rate": authenticity_rate,
+            "avg_confidence": round(avg_confidence, 2),
+            "by_document_type": by_document_type,
+        },
+        "predictions": {
+            "total": total_predictions,
+            "avg_estimated_months": avg_estimated_months,
+            "by_risk_level": by_risk_level,
+            "top_courts": top_courts,
+        },
+        "audit_log": audit_log,
+    }

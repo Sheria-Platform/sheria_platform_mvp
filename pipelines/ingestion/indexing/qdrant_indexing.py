@@ -84,9 +84,17 @@ class QdrantIndexer:
                 f"QdrantIndexer initialized: host={host}:{port}, collection={self.collection_name}"
             )
 
-            # Verify collection exists
+            # Verify collection exists and read expected vector dimension
+            self._expected_dim: int | None = None
             try:
-                self.client.get_collection(collection_name=self.collection_name)
+                info = self.client.get_collection(collection_name=self.collection_name)
+                vec_params = info.config.params.vectors
+                # VectorParams has a .size attribute; NamedVectorParams does not
+                if hasattr(vec_params, "size"):
+                    self._expected_dim = vec_params.size
+                    logger.info(
+                        f"Collection '{self.collection_name}' expects {self._expected_dim}-dim vectors"
+                    )
             except Exception as e:
                 logger.warning(
                     f"Collection '{self.collection_name}' may not exist: {e}"
@@ -118,9 +126,11 @@ class QdrantIndexer:
             logger.warning("Vector contains non-numeric values")
             return False
 
-        if expected_dim and len(vector) != expected_dim:
+        # Use caller-supplied dim, or fall back to the collection's known dim
+        dim_to_check = expected_dim or self._expected_dim
+        if dim_to_check and len(vector) != dim_to_check:
             logger.warning(
-                f"Vector dimension mismatch: expected {expected_dim}, got {len(vector)}"
+                f"Vector dimension mismatch: expected {dim_to_check}, got {len(vector)}"
             )
             return False
 

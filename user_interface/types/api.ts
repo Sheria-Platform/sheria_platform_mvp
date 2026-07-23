@@ -4,6 +4,7 @@ export type {
   UserProfile,
   UserRole,
   ChatRequest,
+  Citation,
   StreamEvent,
   PipelineStep,
   FeedbackRequest,

@@ -13,6 +13,8 @@ Typical flow:
 """
 
 import asyncio
+import concurrent.futures
+import os
 import threading
 import time
 import uuid
@@ -29,6 +31,24 @@ from services.api.app.config import settings
 from services.api.app.memory.ingestion_repository import ingestion_repository
 
 router = APIRouter()
+
+# Bounded thread pool — prevents unbounded parallelism under concurrent uploads
+_MAX_CONCURRENT_JOBS = int(os.getenv("MAX_CONCURRENT_INGEST_JOBS", "4"))
+_executor = concurrent.futures.ThreadPoolExecutor(
+    max_workers=_MAX_CONCURRENT_JOBS,
+    thread_name_prefix="ingest",
+)
+
+# The main asyncio event loop — captured once at startup by set_main_loop().
+# Worker threads must schedule DB coroutines onto THIS loop (not a new one)
+# because SQLAlchemy's asyncpg connection pool is bound to it.
+_main_loop: asyncio.AbstractEventLoop | None = None
+
+
+def set_main_loop(loop: asyncio.AbstractEventLoop) -> None:
+    """Store the main event loop so worker threads can use run_coroutine_threadsafe."""
+    global _main_loop
+    _main_loop = loop
 
 # boto3 presigning is CPU-bound and very fast (~1 ms); a sync client
 # is acceptable here -- no I/O occurs until the client uploads.
@@ -75,6 +95,38 @@ class PresignedURLResponse(BaseModel):
     upload_url: str
     file_id: str
     s3_key: str
+
+
+async def recover_stale_jobs() -> None:
+    """Mark any jobs still in 'pending'/'running' state in the DB as 'failed'.
+
+    Called at application startup to clean up jobs that were interrupted by a
+    server restart.  Without this, the UI would show those jobs stuck forever.
+    """
+    try:
+        from services.api.app.memory.models import AsyncSessionLocal, IngestionJob
+        from sqlalchemy import update
+
+        async with AsyncSessionLocal() as session:
+            await session.execute(
+                update(IngestionJob)
+                .where(IngestionJob.status.in_(["pending", "running"]))
+                .values(
+                    status="failed",
+                    error="Server restarted while job was in progress.",
+                    completed_at=datetime.utcnow(),
+                )
+            )
+            await session.commit()
+    except Exception as exc:
+        # Non-fatal — log and continue startup
+        import logging
+        logging.getLogger(__name__).warning("Could not recover stale jobs: %s", exc)
+
+
+def shutdown_executor() -> None:
+    """Gracefully drain the ingest thread pool.  Call from app lifespan shutdown."""
+    _executor.shutdown(wait=False, cancel_futures=False)
 
 
 @router.post(
@@ -177,11 +229,23 @@ class JobStatus(BaseModel):
 
 
 def _run_ingest(job_id: str, bucket: str, s3_key: str, user_id: str) -> None:
-    with _jobs_lock:
-        _jobs[job_id]["status"] = "running"
-        _jobs[job_id]["started_at"] = time.time()
-    asyncio.run(ingestion_repository.update_ingestion_job(job_id, status="running"))
+    # DB coroutines must run on the MAIN event loop where SQLAlchemy's asyncpg
+    # connection pool was created.  Scheduling onto a new loop causes:
+    #   "Future attached to a different loop"
+    # run_coroutine_threadsafe() is the correct bridge from a worker thread.
+    if _main_loop is None:
+        raise RuntimeError("Main event loop not captured; call set_main_loop() at startup.")
+
+    def _db(coro):
+        """Schedule a coroutine on the main loop and block until it completes."""
+        return asyncio.run_coroutine_threadsafe(coro, _main_loop).result(timeout=30)
+
     try:
+        with _jobs_lock:
+            _jobs[job_id]["status"] = "running"
+            _jobs[job_id]["started_at"] = time.time()
+        _db(ingestion_repository.update_ingestion_job(job_id, status="running"))
+
         from pipelines.ingestion.main import main as ingest_main  # lazy import
 
         exit_code, stats = ingest_main(bucket_name=bucket, prefix=s3_key)
@@ -194,7 +258,7 @@ def _run_ingest(job_id: str, bucket: str, s3_key: str, user_id: str) -> None:
             _jobs[job_id]["duration_s"] = round(
                 completed - (_jobs[job_id].get("started_at") or completed), 1
             )
-        asyncio.run(
+        _db(
             ingestion_repository.update_ingestion_job(
                 job_id,
                 status=final_status,
@@ -211,7 +275,7 @@ def _run_ingest(job_id: str, bucket: str, s3_key: str, user_id: str) -> None:
             _jobs[job_id]["error"] = str(exc)
             _jobs[job_id]["completed_at"] = completed
             _jobs[job_id]["duration_s"] = duration
-        asyncio.run(
+        _db(
             ingestion_repository.update_ingestion_job(
                 job_id,
                 status="failed",
@@ -229,7 +293,7 @@ def _run_ingest(job_id: str, bucket: str, s3_key: str, user_id: str) -> None:
 )
 async def trigger_ingest(
     req: IngestRequest,
-    user: dict = Depends(require_role("registrar", "clerk")),
+    user: dict = Depends(require_role("judge", "magistrate", "registrar", "clerk")),
 ) -> JobStatus:
     """Start the ingestion pipeline for a file that was just uploaded to MinIO."""
     if not settings.S3_BUCKET_NAME:
@@ -261,12 +325,7 @@ async def trigger_ingest(
         started_at=datetime.utcfromtimestamp(started_ts),
     )
 
-    t = threading.Thread(
-        target=_run_ingest,
-        args=(job_id, settings.S3_BUCKET_NAME, req.s3_key, user["id"]),
-        daemon=True,
-    )
-    t.start()
+    _executor.submit(_run_ingest, job_id, settings.S3_BUCKET_NAME, req.s3_key, user["id"])
     return JobStatus(
         job_id=job_id,
         status="pending",

@@ -358,15 +358,20 @@ authentication and dashboard flows.
 | `/(dashboard)/history`         | Past conversation sessions                              |
 | `/(dashboard)/health`          | Service dependency health dashboard                     |
 | `/(dashboard)/jobs`            | Ingestion job monitor                                   |
+| `/(dashboard)/verify`          | Court document authentication (Sheria Verify)           |
+| `/(dashboard)/predict`         | Case duration prediction (Sheria Predict)               |
+| `/(dashboard)/profile`         | User profile — view and edit account details            |
 | `/(dashboard)/admin/users`     | User management (admin role only)                       |
 
 ### Components
 
-- `components/chat/` — ChatContainer, MessageList, StreamingIndicator, FeedbackButtons
+- `components/chat/` — ChatContainer, MessageList, ChatInput, AssistantMessage, UserMessage, StreamingIndicator, FeedbackButtons, EmptyState
 - `components/upload/` — DropZone, FileList, UploadProgress, IngestionJobsPanel
 - `components/layout/` — AppSidebar, TopBar, RoleBadge
 - `components/health/` — HealthDashboard, ServiceCard, StatusBadge
 - `components/auth/` — LoginForm, AuthPageShell, FormError, SuccessCard
+- `components/predict/` — PredictionResultCard
+- `components/verify/` — VerificationReportCard
 - `components/ui/` — shadcn/ui primitives (button, input, card, dialog, etc.)
 
 ---
@@ -392,10 +397,14 @@ Registration follows: **Register -> Admin Approval -> Activation -> Login**
 | POST   | `/api/v1/chat/stream`                   | Agentic RAG query — streaming NDJSON     | Yes  |
 | POST   | `/api/v1/legal-research`                | Kenya Law research with jurisdiction filter | Yes |
 | POST   | `/api/v1/verify`                        | Authenticate a court document (PDF)      | Yes  |
+| POST   | `/api/v1/predict`                       | Case duration prediction                 | Yes  |
 | GET    | `/api/v1/history/sessions`              | List user's chat sessions                | Yes  |
 | GET    | `/api/v1/history/sessions/{id}`         | Retrieve all messages in a session       | Yes  |
 | POST   | `/api/v1/feedback`                      | Submit rating on an AI response          | Yes  |
 | POST   | `/api/v1/upload/generate-presigned-url` | Get MinIO/S3 presigned upload URL        | Yes  |
+| GET    | `/api/v1/auth/me`                       | Get current user profile                 | Yes  |
+| PATCH  | `/api/v1/auth/me`                       | Update profile (name, email)             | Yes  |
+| POST   | `/api/v1/auth/me/avatar`                | Upload profile avatar                    | Yes  |
 
 ### Health and Observability
 
@@ -515,49 +524,87 @@ sheria_platform_mvp/
 |   |   |   |   |-- nodes/           # planner, retriever, tool, responder
 |   |   |   |   |-- state.py         # AgentState TypedDict
 |   |   |   |   `-- decorators.py    # @node_timer context manager
-|   |   |   |-- auth/                # JWT utilities and RBAC dependency
+|   |   |   |-- auth/                # JWT utilities, RBAC, token blacklist
 |   |   |   |-- cache/               # Semantic cache (Qdrant + Redis)
-|   |   |   |-- clients/             # Ollama, Qdrant gRPC, Neo4j, async Postgres
-|   |   |   |-- memory/              # SQLAlchemy ORM models + PostgresMemory
+|   |   |   |-- clients/             # Ollama LLM/embed, Qdrant gRPC, Neo4j, async Postgres
+|   |   |   |-- enhancers/           # Query rewriter for improved retrieval
+|   |   |   |-- memory/              # SQLAlchemy ORM models + repositories
+|   |   |   |   |-- models.py        # ORM table definitions
+|   |   |   |   |-- postgres.py      # Async connection pool
+|   |   |   |   |-- chat_repository.py
+|   |   |   |   |-- user_repository.py
+|   |   |   |   |-- feedback_repository.py
+|   |   |   |   |-- ingestion_repository.py
+|   |   |   |   |-- verification_repository.py
+|   |   |   |   |-- prediction_repository.py
+|   |   |   |   `-- audit_repository.py
 |   |   |   |-- routes/              # chat, legal_research, auth, upload, verify,
-|   |   |   |                        #   feedback, history, health
+|   |   |   |                        #   feedback, history, health, predict, profile
 |   |   |   |-- tools/               # vector_search, graph_search, verify_document,
-|   |   |   |                        #   calculator  (web_search + sandbox: stubbed)
-|   |   |   |-- utils/               # email (activation), helpers
+|   |   |   |                        #   predict_case_duration, calculator
+|   |   |   |-- utils/               # email (activation)
 |   |   |   |-- config.py            # Pydantic Settings
+|   |   |   |-- dependencies.py      # FastAPI Depends() provider functions
+|   |   |   |-- limiter.py           # Rate limiting
 |   |   |   |-- logging.py           # bind_context() + JSONFormatter
-|   |   |   |-- streaming.py         # iter_agent_events() NDJSON helper
-|   |   |   `-- dependencies.py      # FastAPI Depends() provider functions
-|   |   `-- main.py                  # App entry, lifespan, middleware, routes
-|   |-- gateway/                     # API gateway (routing, rate limiting)
-|   `-- sandbox/                     # Secure code execution (stubbed)
+|   |   |   |-- middleware.py        # Request logging middleware
+|   |   |   |-- observability.py     # Prometheus + OpenTelemetry wiring
+|   |   |   |-- startup.py           # DB/collection initialisation on startup
+|   |   |   `-- streaming.py         # iter_agent_events() NDJSON helper
+|   |   |-- main.py                  # App entry, lifespan, middleware, routes
+|   |   |-- Dockerfile
+|   |   `-- requirements.txt
+|   `-- CLAUDE.md                    # Services-layer architecture notes
 |-- user_interface/                  # Next.js 16 / React 19 frontend
 |   |-- app/
 |   |   |-- (auth)/                  # login, register, activate
-|   |   |-- (dashboard)/             # chat, upload, history, health, jobs, admin/users
-|   |   `-- api/auth/                # login and logout Next.js route handlers
+|   |   |-- (dashboard)/             # chat, upload, history, health, jobs,
+|   |   |                            #   verify, predict, profile, admin/users
+|   |   `-- api/
+|   |       |-- auth/                # login, logout, me — Next.js route handlers
+|   |       `-- proxy/               # chat, verify, predict, avatar proxies
 |   |-- components/
-|   |   |-- chat/                    # ChatContainer, MessageList, FeedbackButtons, etc.
-|   |   |-- upload/                  # DropZone, FileList, IngestionJobsPanel, etc.
-|   |   |-- layout/                  # AppSidebar, TopBar, RoleBadge
-|   |   |-- health/                  # HealthDashboard, ServiceCard, StatusBadge
 |   |   |-- auth/                    # LoginForm, AuthPageShell, FormError, SuccessCard
+|   |   |-- chat/                    # ChatContainer, MessageList, ChatInput,
+|   |   |                            #   AssistantMessage, UserMessage, StreamingIndicator,
+|   |   |                            #   FeedbackButtons, EmptyState
+|   |   |-- health/                  # HealthDashboard, ServiceCard, StatusBadge
+|   |   |-- layout/                  # AppSidebar, TopBar, RoleBadge
+|   |   |-- predict/                 # PredictionResultCard
+|   |   |-- upload/                  # DropZone, FileList, UploadProgress, IngestionJobsPanel
+|   |   |-- verify/                  # VerificationReportCard
 |   |   `-- ui/                      # shadcn/ui primitives
-|   `-- public/
-|       |-- sheria-logo.svg
-|       `-- sheria-logo.jpg
+|   |-- src/
+|   |   |-- hooks/                   # useChat, useHealth, useHistory, useUpload,
+|   |   |                            #   useVerify, usePredict, useIngestionJobs, etc.
+|   |   |-- lib/                     # api.ts, auth.ts, stream.ts, utils.ts
+|   |   |-- store/                   # chatStore (Zustand)
+|   |   `-- types/                   # api.ts, chat.ts
+|   |-- hooks/                       # Legacy hook aliases (use src/hooks/)
+|   |-- lib/                         # Legacy lib aliases (use src/lib/)
+|   |-- store/                       # Legacy store alias (use src/store/)
+|   |-- types/                       # Legacy type aliases (use src/types/)
+|   `-- public/                      # sheria-logo.svg, sheria-logo.jpg
 |-- pipelines/
-|   `-- ingestion/                   # Court records ingestion pipeline
-|       |-- loaders/                 # pdf, docx, html, txt + dispatcher
-|       |-- chunking/                # splitter (512 tok) + metadata enrichment
-|       |-- embedding/               # Ollama batch embedder
-|       |-- graph/                   # LLM entity extractor + schema
-|       |-- indexing/                # Qdrant indexer + Neo4j indexer
-|       |-- main.py                  # CLI orchestrator
-|       `-- server.py                # Web UI for ingestion job management
+|   |-- ingestion/                   # Court records ingestion pipeline
+|   |   |-- loaders/                 # pdf, docx, html, txt + dispatcher
+|   |   |-- chunking/                # splitter (512 tok) + metadata enrichment
+|   |   |-- embedding/               # Ollama batch embedder
+|   |   |-- graph/                   # LLM entity extractor + schema
+|   |   |-- indexing/                # Qdrant indexer + Neo4j indexer
+|   |   |-- templates/               # HTMX server-side HTML templates
+|   |   |-- static/                  # CSS + htmx.min.js for job management UI
+|   |   |-- main.py                  # CLI orchestrator
+|   |   |-- server.py                # HTMX web UI for ingestion job management
+|   |   `-- create_qdrant_collection.py  # One-time collection setup utility
+|   `-- jobs/
+|       |-- s3_event_handler.py      # S3/MinIO event-triggered ingestion
+|       `-- ray_job.yaml             # Ray job spec (optional GPU cluster)
 |-- data_scrapper/                   # Standalone Kenya Law Reports web scraper
 |   |-- scraper/
-|   |   |-- crawlers/                # KenyaLawCrawler
+|   |   |-- config/                  # settings.py + sites.yaml
+|   |   |-- crawlers/                # base crawler + legal_sites (KenyaLawCrawler)
+|   |   |-- db/                      # registry.py — tracks scraped document URLs
 |   |   |-- parsers/                 # Document metadata extractor
 |   |   |-- storage/                 # MinIO upload client
 |   |   `-- utils/                   # Rate limiter, validators
@@ -567,13 +614,16 @@ sheria_platform_mvp/
 |-- libs/
 |   |-- observability/               # Prometheus metrics + OpenTelemetry tracing
 |   |-- retry/                       # Exponential backoff decorator
-|   |-- schemas/                     # Shared Pydantic models
+|   |-- schemas/                     # Shared Pydantic models (chat.py)
 |   `-- utils/                       # Session ID, file ID, trace ID generators
 |-- tests/
 |   |-- conftest.py                  # Pytest fixtures (mock clients)
-|   `-- unit/                        # planner, retriever, responder, cache, db pool
+|   |-- unit/                        # planner, retriever, responder, cache, db pool,
+|   |                                #   verify_document, legal_research_graph
+|   `-- integration/                 # auth flow, verify route end-to-end
 |-- docs/
-|   |-- review/                      # Architecture, API, Security, BPMN, Data Model
+|   |-- review/                      # Architecture, API, Security, BPMN, Data Model,
+|   |                                #   Agent Design, Deployment Guide, Implementation Plan
 |   `-- proposal_docs/               # Judicial system proposals and whitepapers
 |-- deploy/
 |   `-- local_dev/                   # Nginx config + local docker-compose override
@@ -612,8 +662,9 @@ pre-commit run --all-files
 ```
 
 Tests live in `tests/unit/` and cover the planner node, retriever node, responder node,
-semantic cache, and PostgreSQL connection pool. All external clients are mocked via fixtures
-in `tests/conftest.py`.
+semantic cache, PostgreSQL connection pool, verify document tool, and legal research graph.
+Integration tests in `tests/integration/` cover the auth flow and verify route end-to-end.
+All external clients are mocked via fixtures in `tests/conftest.py`.
 
 ---
 

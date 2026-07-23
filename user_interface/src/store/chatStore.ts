@@ -25,8 +25,15 @@ interface ChatStore {
   // Streaming state
   setStreaming: (value: boolean, messageId?: string) => void;
 
+  // Remove the last N messages from a session (used to undo orphaned messages)
+  removeLastMessages: (sessionId: string, count: number) => void;
+
   // Auth
   setUser: (user: AuthUser | null) => void;
+
+  // Web search toggle
+  webSearchEnabled: boolean;
+  toggleWebSearch: () => void;
 }
 
 export const useChatStore = create<ChatStore>()(
@@ -37,6 +44,7 @@ export const useChatStore = create<ChatStore>()(
       isStreaming: false,
       streamingMessageId: null,
       user: null,
+      webSearchEnabled: false,
 
       createSession: () => {
         const id = generateId();
@@ -165,10 +173,27 @@ export const useChatStore = create<ChatStore>()(
           ),
         })),
 
+      removeLastMessages: (sessionId, count) =>
+        set((s) => ({
+          sessions: s.sessions.map((sess) =>
+            sess.id === sessionId
+              ? {
+                  ...sess,
+                  messages:
+                    count >= sess.messages.length
+                      ? []
+                      : sess.messages.slice(0, -count),
+                }
+              : sess
+          ),
+        })),
+
       setStreaming: (value, messageId) =>
         set({ isStreaming: value, streamingMessageId: messageId ?? null }),
 
       setUser: (user) => set({ user }),
+
+      toggleWebSearch: () => set((s) => ({ webSearchEnabled: !s.webSearchEnabled })),
     }),
     {
       name: "sheria-chat",
@@ -177,7 +202,19 @@ export const useChatStore = create<ChatStore>()(
         sessions: state.sessions,
         activeSessionId: state.activeSessionId,
         user: state.user,
+        webSearchEnabled: state.webSearchEnabled,
       }),
+      onRehydrateStorage: () => (state) => {
+        if (!state) return;
+        // Clear any isStreaming flags persisted mid-stream so reloaded sessions
+        // never show a stuck streaming indicator.
+        state.sessions = state.sessions.map((sess) => ({
+          ...sess,
+          messages: sess.messages.map((msg) =>
+            msg.isStreaming ? { ...msg, isStreaming: false } : msg
+          ),
+        }));
+      },
     }
   )
 );

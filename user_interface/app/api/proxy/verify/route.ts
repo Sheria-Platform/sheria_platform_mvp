@@ -16,7 +16,13 @@ export async function POST(req: NextRequest) {
       headers: { Authorization: `Bearer ${token}` },
       body: formData,
     });
-    const data = await res.json();
+    const text = await res.text();
+    let data: unknown;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = { detail: text || `HTTP ${res.status}` };
+    }
     return NextResponse.json(data, { status: res.status });
   } catch {
     return NextResponse.json({ error: "API unavailable" }, { status: 503 });

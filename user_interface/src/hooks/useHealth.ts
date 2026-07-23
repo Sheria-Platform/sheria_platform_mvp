@@ -3,6 +3,11 @@
 import { useState, useEffect } from "react";
 import { HealthResponse, ServiceHealth } from "@/types/api";
 
+// NOTE: This hook calls FastAPI directly (bypassing the Next.js BFF proxy)
+// because /health/readiness is a public endpoint that requires no authentication.
+// In production, ensure CORS is configured on FastAPI to allow requests from the
+// UI origin for this endpoint. If CORS restrictions become a problem, create
+// app/api/proxy/health/route.ts and update the fetch URL below to "/api/proxy/health/readiness".
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 type ReadinessRaw = Record<string, "up" | "down">;

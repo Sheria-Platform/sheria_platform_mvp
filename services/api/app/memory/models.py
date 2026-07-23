@@ -136,7 +136,7 @@ class Feedback(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     session_id = Column(String, nullable=False)
     user_id = Column(String, nullable=False)
-    message_id = Column(Integer, nullable=False)
+    message_id = Column(String, nullable=False)
     score = Column(Integer, nullable=False)
     comment = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)

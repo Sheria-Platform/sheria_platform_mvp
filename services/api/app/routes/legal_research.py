@@ -130,11 +130,20 @@ async def legal_research(
         )
         return StreamingResponse(_stream_cache(), media_type="application/x-ndjson")
 
+    # Load conversation history so the responder has multi-turn context.
+    # Mirrors the pattern in chat.py lines 105–110.
+    history_objs = await memory.get_history(session_id, limit=6)
+    history_dicts: list[dict[str, str]] = [
+        {"role": msg.role, "content": msg.content}  # type: ignore[dict-item]
+        for msg in history_objs
+    ]
+    history_dicts.append({"role": "user", "content": req.query})
+
     # Build initial agent state — action is not set here; this graph skips the
     # planner so action is irrelevant, but jurisdiction_filter is consumed by
     # the retriever node.
     initial_state = AgentState(
-        messages=[{"role": "user", "content": req.query}],
+        messages=history_dicts,
         current_query=req.query,
         documents=[],
         plan=[],
@@ -192,9 +201,9 @@ async def legal_research(
                         "citation_count": len(final_citations),
                     },
                 )
-                await memory.add_message(session_id, "user", req.query, user_id)
-                await memory.add_message(session_id, "assistant", final_answer, user_id)
-                await cache.set_cached_response(req.query, final_answer)
+                background_tasks.add_task(memory.add_message, session_id, "user", req.query, user_id)
+                background_tasks.add_task(memory.add_message, session_id, "assistant", final_answer, user_id)
+                background_tasks.add_task(cache.set_cached_response, req.query, final_answer)
 
             yield json.dumps({"event": "done", "session_id": session_id}) + "\n"
 

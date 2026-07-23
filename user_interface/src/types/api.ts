@@ -33,10 +33,19 @@ export interface ChatRequest {
   session_id: string;
 }
 
+export interface Citation {
+  case_name: string;
+  citation: string;
+  court?: string;
+  year?: string;
+  relevance?: string;
+}
+
 export interface StreamEvent {
   event: "status" | "answer" | "error" | "done";
   step?: PipelineStep;
   content?: string;
+  citations?: Citation[];
   session_id?: string;
   message_id?: string;
 }
@@ -193,4 +202,46 @@ export interface ActiveUser {
   bio?: string;
   phone?: string;
   avatar_url?: string;
+}
+
+export interface AnalyticsOverview {
+  total_users: number;
+  active_users: number;
+  pending_users: number;
+  suspended_users: number;
+  total_chat_sessions: number;
+  total_verifications: number;
+  total_predictions: number;
+  total_ingestion_jobs: number;
+}
+
+export interface AuditEntry {
+  id: number;
+  action: string;
+  admin: string;
+  detail: Record<string, unknown> | null;
+  ip_address: string | null;
+  created_at: string;
+}
+
+export interface AnalyticsPayload {
+  overview: AnalyticsOverview;
+  users_by_role: Record<string, number>;
+  top_court_stations: { court_station: string; count: number }[];
+  recent_registrations_7d: number;
+  verifications: {
+    total: number;
+    authentic_count: number;
+    fraudulent_count: number;
+    authenticity_rate: number;
+    avg_confidence: number;
+    by_document_type: Record<string, number>;
+  };
+  predictions: {
+    total: number;
+    avg_estimated_months: number;
+    by_risk_level: Record<string, number>;
+    top_courts: { court: string; count: number }[];
+  };
+  audit_log: AuditEntry[];
 }

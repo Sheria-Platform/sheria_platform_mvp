@@ -30,6 +30,10 @@ class ChatRequest(BaseModel):
     session_id: str | None = Field(
         default=None, description="UUID for the conversation thread"
     )
+    web_search: bool = Field(
+        default=False,
+        description="When True, the agent may query https://new.kenyalaw.org for live results",
+    )
 
 
 # --- Routes ---
@@ -117,6 +121,7 @@ async def chat_stream(
         query_vector=query_vector or [],  # reuse embedding from cache check
         jurisdiction_filter=[],  # not used by generic chat -- legal-research route only
         citations=[],
+        web_search_enabled=req.web_search,
     )
 
     # 5. Define Generator for Streaming Response
@@ -155,9 +160,9 @@ async def chat_stream(
                     "Chat request completed",
                     extra={"duration_ms": total_ms, "answer_length": len(final_answer)},
                 )
-                await memory.add_message(session_id, "user", req.message, user_id)
-                await memory.add_message(session_id, "assistant", final_answer, user_id)
-                await cache.set_cached_response(req.message, final_answer)
+                background_tasks.add_task(memory.add_message, session_id, "user", req.message, user_id)
+                background_tasks.add_task(memory.add_message, session_id, "assistant", final_answer, user_id)
+                background_tasks.add_task(cache.set_cached_response, req.message, final_answer)
 
             yield json.dumps({"event": "done", "session_id": session_id}) + "\n"
 

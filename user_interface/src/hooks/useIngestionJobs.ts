@@ -33,7 +33,7 @@ export function useIngestionJobs(jobIds: string[]) {
       await Promise.all(
         active.map(async (id) => {
           try {
-            const data = await apiFetch<JobState>(`/api/v1/upload/jobs/${id}`);
+            const data = await apiFetch<JobState>(`/api/proxy/upload/jobs/${id}`);
             setJobs((prev) => ({ ...prev, [id]: data }));
           } catch {
             // ignore transient errors
@@ -61,7 +61,7 @@ export function useAllJobs(pollInterval = 4000) {
 
   const fetchAll = useCallback(async () => {
     try {
-      const data = await apiFetch<JobState[]>("/api/v1/upload/jobs");
+      const data = await apiFetch<JobState[]>("/api/proxy/upload/jobs");
       setJobs(data);
     } catch {
       // ignore transient errors

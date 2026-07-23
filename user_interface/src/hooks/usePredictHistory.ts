@@ -11,7 +11,7 @@ export function usePredictHistory() {
 
   const refresh = useCallback(() => {
     setLoading(true);
-    apiFetch<PredictionActivity[]>("/api/v1/predict/history")
+    apiFetch<PredictionActivity[]>("/api/proxy/predict/history")
       .then((data) => {
         setActivities(data);
         setError(null);
