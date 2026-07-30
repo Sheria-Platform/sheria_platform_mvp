@@ -97,15 +97,15 @@ The `docker-compose.yml` defines a complete local development environment with 7
 - **Judicial Use**: Store original PDFs (judgments, pleadings, exhibits)
 - **Buckets**: `court-records-dev`, `kenya-law-reports`, `case-files`
 
-### 6. Ollama (Port 11433)
+### 6. Ollama (Port 11434)
 - **Purpose**: Local LLM for development/testing
 - **Judicial Use**: Fine-tune on Kenya Law Reports, test legal reasoning locally
 - **Models**: Pull legal-specialized models or fine-tune Llama-3 on case law
 
-### 7. Open WebUI (Port 3000)
+### 7. Open WebUI (Port 3030)
 - **Purpose**: Web interface for testing legal research queries
 - **Judicial Use**: Prototype judge interface, test conversational legal research
-- **URL**: http://localhost:3000
+- **URL**: http://localhost:3030
 - **Configuration**: RAG enabled, can integrate with Qdrant for case law search
 - **Purpose**: Chat history and metadata storage
 - **Image**: `postgres:15-alpine`
@@ -136,16 +136,16 @@ The `docker-compose.yml` defines a complete local development environment with 7
 - **API**: http://localhost:9000
 - **Note**: Caching enabled, excludes *.pdf from cache
 
-### 6. Ollama (Port 11433)
+### 6. Ollama (Port 11434)
 - **Purpose**: Local LLM inference server with GPU support
 - **Image**: `ollama/ollama`
 - **GPU**: Requires NVIDIA GPU with nvidia-container-toolkit
 - **Usage**: Pull models with `docker exec -it ollama ollama pull llama3`
 
-### 7. Open WebUI (Port 3000)
+### 7. Open WebUI (Port 3030)
 - **Purpose**: Web interface for interacting with Ollama models
 - **Image**: `ghcr.io/open-webui/open-webui:main`
-- **URL**: http://localhost:3000
+- **URL**: http://localhost:3030
 - **Features**: RAG support, web search (optional), multi-user auth
 - **Integration**: Can optionally use project's Postgres, Redis, and Qdrant
 

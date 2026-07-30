@@ -168,7 +168,7 @@ mc mb local/case-files-dev
 OLLAMA_HOST=http://localhost:11434
 OLLAMA_PORT=11434
 OLLAMA_EMBED_MODEL=nomic-embed-text
-OLLAMA_LLM_MODEL=llama3
+OLLAMA_LLM_MODEL=qwen3:8b
 COMPOSE_PROFILES=cpu     # "cpu" (default, no GPU) or "gpu" (requires nvidia-container-toolkit)
 OLLAMA_NUM_GPU=all       # only used when COMPOSE_PROFILES=gpu — GPU device count
 ```
@@ -188,8 +188,8 @@ OLLAMA_NUM_GPU=all       # only used when COMPOSE_PROFILES=gpu — GPU device co
 # Embedding model (required for ingestion)
 ollama pull nomic-embed-text
 
-# LLM for graph extraction (required for ingestion)
-ollama pull llama3
+# LLM for graph extraction (required for ingestion; shared with services/api)
+ollama pull qwen3:8b
 
 # Optional: Better embeddings
 ollama pull mxbai-embed-large
@@ -205,7 +205,7 @@ ollama pull llama3.1
 **Purpose:** Web interface for testing legal research, prototype judge interface
 
 ```bash
-OPEN_WEBUI_PORT=3000
+OPEN_WEBUI_PORT=3030
 WEBUI_SECRET_KEY=...      # Generate with: openssl rand -base64 32
 ENABLE_SIGNUP=true
 DEFAULT_USER_ROLE=user
@@ -219,7 +219,7 @@ WEBUI_AUTH=true
 
 **Access:**
 - **Docker service**: `open-webui`
-- **Web UI**: http://localhost:3000
+- **Web UI**: http://localhost:3030
 - **First login**: Create admin account on first visit
 
 ---
