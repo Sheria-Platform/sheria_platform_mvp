@@ -10,8 +10,10 @@ x-ollama-base: &ollama-base
   volumes:
     - ollama:/root/.ollama
   restart: unless-stopped
+  # ollama/ollama ships no curl/wget — bash's /dev/tcp is the only HTTP-probe
+  # tool actually present, hence the raw TCP check below.
   healthcheck:
-    test: ["CMD-SHELL", "curl -f http://localhost:11434/api/tags || exit 1"]
+    test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/localhost/11434' || exit 1"]
     interval: 30s
     timeout: 10s
     retries: 3
@@ -73,8 +75,10 @@ services:
     volumes:
       - qdrant_data:/qdrant/storage
     restart: unless-stopped
+    # The qdrant/qdrant image ships no curl/wget — bash's /dev/tcp is the
+    # only HTTP-probe tool actually present, hence the raw TCP check below.
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:6333/healthz || exit 1"]
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/localhost/6333' || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -164,11 +168,15 @@ services:
   # (profiles: [gpu]/[cpu] above) and this service is not — Compose errors if a
   # profile-agnostic service depends_on a service outside the active profile.
   # nginx reaches Ollama via the "ollama" DNS alias at runtime instead.
-  # ALSO: ./nginx.conf does not exist at repo root today (pre-existing,
-  # out of scope here) — this service is already non-functional as configured.
+  # Gated behind the "proxy" profile (opt-in only): ./nginx.conf does not
+  # exist at repo root, so this service fails to create if left ungated —
+  # it's for the separate deploy/local_dev/ multi-node cluster, not this
+  # single-node stack. Supply your own nginx.conf and run
+  # `docker compose --profile proxy up -d` if you need it here.
   ollama-proxy:
     image: nginx:alpine
     container_name: sheria-ollama-proxy
+    profiles: [proxy]
     restart: unless-stopped
     ports:
       - "11435:11435"  # LLM endpoint
@@ -184,68 +192,73 @@ services:
       retries: 3
 
   # 8. Sheria API (FastAPI Agentic RAG Service)
-  # sheria-api:
-  #   # build:
-  #   #   context: .
-  #   #   dockerfile: services/api/Dockerfile
-  #   # container_name: sheria-api
-  #   ports:
-  #     - "${API_PORT:-8000}:8000"
-  #   environment:
-  #     # App
-  #     ENV: ${ENV:-prod}
-  #     LOG_LEVEL: ${LOG_LEVEL:-INFO}
-  #     # Postgres
-  #     DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-ragadmin}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-rag_db}
-  #     # Redis
-  #     REDIS_URL: redis://redis:6379/0
-  #     # Qdrant
-  #     QDRANT_HOST: qdrant
-  #     QDRANT_PORT: 6333
-  #     QDRANT_COLLECTION: ${QDRANT_COLLECTION:-kenya_law_reports}
-  #     # Neo4j
-  #     NEO4J_URI: bolt://neo4j:7687
-  #     NEO4J_USER: ${NEO4J_USER:-neo4j}
-  #     NEO4J_PASSWORD: ${NEO4J_PASSWORD:-password}
-  #     # Ollama (replaces Ray Serve endpoints)
-  #     OLLAMA_BASE_URL: http://ollama:11434
-  #     OLLAMA_LLM_MODEL: ${OLLAMA_LLM_MODEL:-llama3.3}
-  #     OLLAMA_EMBEDDING_MODEL: ${OLLAMA_EMBEDDING_MODEL:-nomic-embed-text}
-  #     OLLAMA_TIMEOUT: ${OLLAMA_TIMEOUT:-60}
-  #     # Security
-  #     JWT_SECRET_KEY: ${JWT_SECRET_KEY}
-  #     JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
-  #     ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
-  #     # Observability
-  #     OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
-  #     # SMTP — routes activation emails to MailHog in dev
-  #     SMTP_HOST: ${SMTP_HOST:-mailhog}
-  #     SMTP_PORT: ${SMTP_PORT:-1025}
-  #     SMTP_USER: ${SMTP_USER:-}
-  #     SMTP_PASSWORD: ${SMTP_PASSWORD:-}
-  #     SMTP_FROM: ${SMTP_FROM:-noreply@judiciary.go.ke}
-  #     APP_BASE_URL: ${APP_BASE_URL:-http://localhost:3000}
-  #   depends_on:
-  #     postgres:
-  #       condition: service_healthy
-  #     redis:
-  #       condition: service_healthy
-  #     qdrant:
-  #       condition: service_healthy
-  #     # TODO: "ollama" is profile-gated (profiles: [gpu]/[cpu]) — depends_on
-  #     # here will error if this block is ever uncommented. Remove this
-  #     # dependency and rely on the "ollama" DNS alias instead (see the
-  #     # ollama-proxy/open-webui comments above).
-  #     ollama:
-  #       condition: service_healthy
-  #     mailhog:
-  #       condition: service_started
-  #   restart: unless-stopped
-  #   healthcheck:
-  #     test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
-  #     interval: 15s
-  #     timeout: 5s
-  #     retries: 5
+  sheria-api:
+    build:
+      context: .
+      dockerfile: services/api/Dockerfile
+    container_name: sheria-api
+    ports:
+      - "${API_PORT:-8000}:8000"
+    environment:
+      # App
+      ENV: ${ENV:-prod}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      # Postgres
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-ragadmin}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-rag_db}
+      # Redis
+      REDIS_URL: redis://redis:6379/0
+      # Qdrant
+      QDRANT_HOST: qdrant
+      QDRANT_PORT: 6333
+      QDRANT_COLLECTION: ${QDRANT_COLLECTION:-kenya_law_reports}
+      # Neo4j
+      NEO4J_URI: bolt://neo4j:7687
+      NEO4J_USER: ${NEO4J_USER:-neo4j}
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD:-password}
+      # Ollama (replaces Ray Serve endpoints)
+      OLLAMA_BASE_URL: http://ollama:11434
+      OLLAMA_LLM_MODEL: ${OLLAMA_LLM_MODEL:-qwen3:8b}
+      OLLAMA_EMBEDDING_MODEL: ${OLLAMA_EMBEDDING_MODEL:-nomic-embed-text}
+      OLLAMA_TIMEOUT: ${OLLAMA_TIMEOUT:-60}
+      # MinIO (routes/profile.py avatar upload; readiness probe)
+      MINIO_SERVER_URL: http://minio:9000
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      S3_BUCKET_NAME: ${S3_BUCKET_NAME:-case-files-dev}
+      # Security
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
+      # Observability
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      # SMTP — routes activation emails to MailHog in dev
+      SMTP_HOST: ${SMTP_HOST:-mailhog}
+      SMTP_PORT: ${SMTP_PORT:-1025}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-noreply@judiciary.go.ke}
+      APP_BASE_URL: ${APP_BASE_URL:-http://localhost:3000}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      mailhog:
+        condition: service_started
+    # "ollama" is profile-gated (profiles: [gpu]/[cpu]); a non-profiled
+    # service can't depends_on it directly, so it's intentionally omitted
+    # here (matches the ollama-proxy/open-webui services below) — the API
+    # still reaches it via the "ollama" DNS alias at runtime.
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health/liveness || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
 
   # 9. Open WebUI (Web Interface for Ollama - Development)
   # NOTE: depends_on "ollama" intentionally omitted — see the "ollama-proxy"
@@ -275,7 +288,10 @@ services:
       RAG_EMBEDDING_MODEL: ${RAG_EMBEDDING_MODEL:-nomic-embed-text}
       # Vector DB
       VECTOR_DB: qdrant
-      QDRANT_URL: http://qdrant:6333
+      # Renamed from QDRANT_URL: the open-webui `main` image now reads
+      # QDRANT_URI (confirmed via its qdrant_multitenancy client raising
+      # "QDRANT_URI is not set" at startup with the old name).
+      QDRANT_URI: http://qdrant:6333
       # Web Search
       ENABLE_WEB_SEARCH: ${ENABLE_WEB_SEARCH:-false}
       # UI Customization
@@ -298,6 +314,33 @@ services:
     ports:
       - "1025:1025"   # SMTP — point SMTP_HOST=mailhog, SMTP_PORT=1025
       - "8025:8025"   # Web UI — http://localhost:8025 to inspect emails
+    restart: unless-stopped
+
+  # 11. Sheria UI (Next.js Frontend — dev mode with hot reload)
+  # NEXT_PUBLIC_API_URL is read by *browser*-side code (baked into the JS
+  # bundle) so it must be a host-reachable URL, not the "sheria-api" Docker
+  # DNS name — the browser runs on the host, outside this network. API_URL
+  # (no NEXT_PUBLIC_ prefix) is read by the Next.js server's own route
+  # handlers (app/api/proxy/*, app/api/auth/*), which run inside the
+  # container and do need the Docker DNS name.
+  sheria-ui:
+    build:
+      context: ./user_interface
+      dockerfile: Dockerfile
+    container_name: sheria-ui
+    ports:
+      - "${UI_PORT:-3000}:3000"
+    environment:
+      NODE_ENV: development
+      API_URL: http://sheria-api:8000
+      NEXT_PUBLIC_API_URL: http://localhost:${API_PORT:-8000}
+    volumes:
+      - ./user_interface:/app
+      - /app/node_modules
+      - /app/.next
+    depends_on:
+      sheria-api:
+        condition: service_healthy
     restart: unless-stopped
 
 
