@@ -1,4 +1,4 @@
-![Sheria Platform Logo](user_interface/public/sheria-logo.svg)
+<img src="user_interface/public/sheria-logo.svg" alt="sheriaLogo" width="300" height="200" >
 
 # Sheria Platform
 
@@ -72,7 +72,7 @@ optimization (endpoints wired; ML model integration in progress).
 | API Framework       | FastAPI                                      | 0.111     |
 | Agent Orchestration | LangGraph                                    | Latest    |
 | LLM Inference       | Ollama + llama3.3                            | Latest    |
-| Embedding Model     | nomic-embed-text (2560-dim)                  | Latest    |
+| Embedding Model     | nomic-embed-text (768-dim)                   | Latest    |
 | Vector DB           | Qdrant                                       | v1.7.3    |
 | Graph DB            | Neo4j Community                              | 5.16.0    |
 | Relational DB       | PostgreSQL + asyncpg + SQLAlchemy            | 15        |
@@ -116,7 +116,7 @@ optimization (endpoints wired; ML model integration in progress).
 |   |                       |                                     |   |
 |   |          +------------v-----------+                         |   |
 |   |          |  Semantic Cache        |--- HIT -------------+   |   |
-|   |          |  (Qdrant + Redis)      |                     |   |   |
+|   |          |  (Qdrant-only)         |                     |   |   |
 |   |          +------------+-----------+                     |   |   |
 |   |                       | MISS                            |   |   |
 |   |          +------------v-----------+                     |   |   |
@@ -246,7 +246,7 @@ docker ps
 ### Step 4 — Pull Ollama models
 
 ```bash
-docker exec sheria-ollama ollama pull llama3.3
+docker exec sheria-ollama ollama pull qwen3:8b
 docker exec sheria-ollama ollama pull nomic-embed-text
 
 # Alternatively, use the helper script
@@ -326,7 +326,7 @@ All services start with `docker compose up -d`.
 | sheria-api     | 8000          | FastAPI orchestrator                       |
 | Frontend       | 3000          | Next.js interface (npm run dev)            |
 | PostgreSQL     | 5432          | User accounts, chat history, ingestion jobs|
-| Redis          | 6379          | Semantic cache backing store               |
+| Redis          | 6379          | JWT blacklist (logout/revocation) + health checks |
 | Qdrant         | 6333 / 6334   | Vector search (REST / gRPC)                |
 | Neo4j Browser  | 7474          | Graph database UI                          |
 | Neo4j Bolt     | 7687          | Graph database driver connection           |
@@ -437,8 +437,8 @@ Qdrant (vector search) and Neo4j (citation graph).
 
 | Collection          | Dimensions | Distance | Purpose                           |
 |---------------------|------------|----------|-----------------------------------|
-| `kenya_law_reports` | 2560       | Cosine   | Kenya Law Reports semantic search |
-| `semantic_cache`    | 2560       | Cosine   | Q&A pair cache (30-day TTL)       |
+| `kenya_law_reports` | 768        | Cosine   | Kenya Law Reports semantic search |
+| `semantic_cache`    | 768        | Cosine   | Q&A pair cache (30-day max age)   |
 
 ### Neo4j Graph Schema
 
@@ -502,7 +502,7 @@ Prometheus metrics exposed at `GET /metrics`:
 |---------------------------------------|-----------|-----------------------------------------|
 | `sheria_api_requests_total`           | Counter   | HTTP requests by method / path / status |
 | `sheria_api_request_duration_seconds` | Histogram | HTTP request latency                    |
-| `sheria_cache_hits_total`             | Counter   | Semantic cache hits                     |
+| `rag_semantic_cache_total{result}`    | Counter   | Semantic cache hit/miss counts (`result="hit"\|"miss"`) |
 | `sheria_agent_node_duration_seconds`  | Histogram | Per-node agent execution time           |
 | `sheria_retrieval_docs_count`         | Histogram | Retrieved documents per query           |
 
@@ -525,7 +525,7 @@ sheria_platform_mvp/
 |   |   |   |   |-- state.py         # AgentState TypedDict
 |   |   |   |   `-- decorators.py    # @node_timer context manager
 |   |   |   |-- auth/                # JWT utilities, RBAC, token blacklist
-|   |   |   |-- cache/               # Semantic cache (Qdrant + Redis)
+|   |   |   |-- cache/               # Semantic cache (Qdrant-only) + Redis client (JWT blacklist)
 |   |   |   |-- clients/             # Ollama LLM/embed, Qdrant gRPC, Neo4j, async Postgres
 |   |   |   |-- enhancers/           # Query rewriter for improved retrieval
 |   |   |   |-- memory/              # SQLAlchemy ORM models + repositories

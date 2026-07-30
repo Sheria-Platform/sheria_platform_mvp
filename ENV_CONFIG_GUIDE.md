@@ -169,11 +169,17 @@ OLLAMA_HOST=http://localhost:11434
 OLLAMA_PORT=11434
 OLLAMA_EMBED_MODEL=nomic-embed-text
 OLLAMA_LLM_MODEL=llama3
-OLLAMA_NUM_GPU=1          # 0 = CPU only, 1 = use GPU
+COMPOSE_PROFILES=cpu     # "cpu" (default, no GPU) or "gpu" (requires nvidia-container-toolkit)
+OLLAMA_NUM_GPU=all       # only used when COMPOSE_PROFILES=gpu — GPU device count
 ```
 
+**GPU vs CPU:**
+- Default is CPU-only (`COMPOSE_PROFILES=cpu`) — works on any machine, no NVIDIA drivers required.
+- To use a GPU: set `COMPOSE_PROFILES=gpu` in `.env`, ensure `nvidia-container-toolkit` is installed on the Docker host, then run `make up` as usual — Compose reads `COMPOSE_PROFILES` from `.env` automatically, no `--profile` flag needed.
+- Do not rely on `OLLAMA_NUM_GPU=0` to "disable" GPU use — the old approach (setting the device `count` to 0 while still declaring `driver: nvidia` unconditionally) still required Docker to resolve the nvidia driver at container-creation time, and fails with `could not select device driver "" with capabilities: [[gpu]]` on machines without the NVIDIA Container Toolkit. `COMPOSE_PROFILES=cpu` avoids the device reservation being declared at all.
+
 **Access:**
-- **Docker service**: `ollama`
+- **Docker service**: `ollama` (DNS alias shared by both the `ollama`/gpu and `ollama-cpu`/cpu variants)
 - **API**: `curl http://localhost:11434/api/tags`
 - **Pull models**: `ollama pull nomic-embed-text`
 

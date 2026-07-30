@@ -1,6 +1,33 @@
 # docker-compose.yml
 version: '3.8'
 
+# GPU/CPU Ollama variants share these blocks via YAML anchors (see deploy/local_dev
+# for the multi-node version of this same pattern).
+x-ollama-base: &ollama-base
+  image: ollama/ollama:latest
+  ports:
+    - "${OLLAMA_PORT:-11434}:11434"
+  volumes:
+    - ollama:/root/.ollama
+  restart: unless-stopped
+  healthcheck:
+    test: ["CMD-SHELL", "curl -f http://localhost:11434/api/tags || exit 1"]
+    interval: 30s
+    timeout: 10s
+    retries: 3
+
+# GPU device reservation — merged only into the gpu-profile service.
+# capabilities MUST be [gpu] (previous [cpu] was a copy-paste bug that made
+# the nvidia device reservation meaningless).
+x-gpu-resources: &gpu-resources
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - driver: nvidia
+            count: ${OLLAMA_NUM_GPU:-all}
+            capabilities: [gpu]
+
 services:
   # 1. Postgres (Case Metadata & Judicial Decisions)
   postgres:
@@ -107,29 +134,38 @@ services:
       retries: 3
 
   # 6. Ollama (Local LLM for Embeddings, Graph Extraction & API Inference)
+  # Profile-gated: exactly one of these two runs, selected by COMPOSE_PROFILES
+  # (cpu|gpu) in .env. Both share container_name + the "ollama" DNS alias so
+  # dependents can always reach it at http://ollama:11434 regardless of which
+  # profile is active. The gpu variant is the ONLY place the nvidia driver is
+  # referenced — with COMPOSE_PROFILES=cpu (the default) the nvidia driver is
+  # never resolved, so this works on machines without nvidia-container-toolkit.
   ollama:
-    image: ollama/ollama:latest
+    <<:
+      - *ollama-base
+      - *gpu-resources
     container_name: sheria-ollama
-    ports:
-      - "${OLLAMA_PORT:-11434}:11434"
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: ${OLLAMA_NUM_GPU:-1}
-              capabilities: [gpu]
-    volumes:
-      - ollama:/root/.ollama
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:11434/api/tags || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+    profiles: [gpu]
+    networks:
+      default:
+        aliases: [ollama]
+
+  ollama-cpu:
+    <<: *ollama-base
+    container_name: sheria-ollama
+    profiles: [cpu]
+    networks:
+      default:
+        aliases: [ollama]
 
   # 7. Ollama Nginx Proxy (Load Balancer for Remote Ollama Cluster)
   # Used by pipelines/ingestion/ which targets separate remote endpoints
+  # NOTE: depends_on "ollama" intentionally omitted. "ollama" is profile-gated
+  # (profiles: [gpu]/[cpu] above) and this service is not — Compose errors if a
+  # profile-agnostic service depends_on a service outside the active profile.
+  # nginx reaches Ollama via the "ollama" DNS alias at runtime instead.
+  # ALSO: ./nginx.conf does not exist at repo root today (pre-existing,
+  # out of scope here) — this service is already non-functional as configured.
   ollama-proxy:
     image: nginx:alpine
     container_name: sheria-ollama-proxy
@@ -141,8 +177,6 @@ services:
       - "8081:8080"    # Status/health endpoint (changed to 8081 to avoid conflict)
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
-    depends_on:
-      - ollama
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8080/health || exit 1"]
       interval: 30s
@@ -150,66 +184,73 @@ services:
       retries: 3
 
   # 8. Sheria API (FastAPI Agentic RAG Service)
-  sheria-api:
-    build:
-      context: .
-      dockerfile: services/api/Dockerfile
-    container_name: sheria-api
-    ports:
-      - "${API_PORT:-8000}:8000"
-    environment:
-      # App
-      ENV: ${ENV:-prod}
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      # Postgres
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-ragadmin}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-rag_db}
-      # Redis
-      REDIS_URL: redis://redis:6379/0
-      # Qdrant
-      QDRANT_HOST: qdrant
-      QDRANT_PORT: 6333
-      QDRANT_COLLECTION: ${QDRANT_COLLECTION:-kenya_law_reports}
-      # Neo4j
-      NEO4J_URI: bolt://neo4j:7687
-      NEO4J_USER: ${NEO4J_USER:-neo4j}
-      NEO4J_PASSWORD: ${NEO4J_PASSWORD:-password}
-      # Ollama (replaces Ray Serve endpoints)
-      OLLAMA_BASE_URL: http://ollama:11434
-      OLLAMA_LLM_MODEL: ${OLLAMA_LLM_MODEL:-llama3.3}
-      OLLAMA_EMBEDDING_MODEL: ${OLLAMA_EMBEDDING_MODEL:-nomic-embed-text}
-      OLLAMA_TIMEOUT: ${OLLAMA_TIMEOUT:-60}
-      # Security
-      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
-      JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
-      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
-      # Observability
-      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
-      # SMTP — routes activation emails to MailHog in dev
-      SMTP_HOST: ${SMTP_HOST:-mailhog}
-      SMTP_PORT: ${SMTP_PORT:-1025}
-      SMTP_USER: ${SMTP_USER:-}
-      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
-      SMTP_FROM: ${SMTP_FROM:-noreply@judiciary.go.ke}
-      APP_BASE_URL: ${APP_BASE_URL:-http://localhost:3000}
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      qdrant:
-        condition: service_healthy
-      ollama:
-        condition: service_healthy
-      mailhog:
-        condition: service_started
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
-      interval: 15s
-      timeout: 5s
-      retries: 5
+  # sheria-api:
+  #   # build:
+  #   #   context: .
+  #   #   dockerfile: services/api/Dockerfile
+  #   # container_name: sheria-api
+  #   ports:
+  #     - "${API_PORT:-8000}:8000"
+  #   environment:
+  #     # App
+  #     ENV: ${ENV:-prod}
+  #     LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  #     # Postgres
+  #     DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-ragadmin}:${POSTGRES_PASSWORD:-changeme}@postgres:5432/${POSTGRES_DB:-rag_db}
+  #     # Redis
+  #     REDIS_URL: redis://redis:6379/0
+  #     # Qdrant
+  #     QDRANT_HOST: qdrant
+  #     QDRANT_PORT: 6333
+  #     QDRANT_COLLECTION: ${QDRANT_COLLECTION:-kenya_law_reports}
+  #     # Neo4j
+  #     NEO4J_URI: bolt://neo4j:7687
+  #     NEO4J_USER: ${NEO4J_USER:-neo4j}
+  #     NEO4J_PASSWORD: ${NEO4J_PASSWORD:-password}
+  #     # Ollama (replaces Ray Serve endpoints)
+  #     OLLAMA_BASE_URL: http://ollama:11434
+  #     OLLAMA_LLM_MODEL: ${OLLAMA_LLM_MODEL:-llama3.3}
+  #     OLLAMA_EMBEDDING_MODEL: ${OLLAMA_EMBEDDING_MODEL:-nomic-embed-text}
+  #     OLLAMA_TIMEOUT: ${OLLAMA_TIMEOUT:-60}
+  #     # Security
+  #     JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+  #     JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
+  #     ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
+  #     # Observability
+  #     OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+  #     # SMTP — routes activation emails to MailHog in dev
+  #     SMTP_HOST: ${SMTP_HOST:-mailhog}
+  #     SMTP_PORT: ${SMTP_PORT:-1025}
+  #     SMTP_USER: ${SMTP_USER:-}
+  #     SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+  #     SMTP_FROM: ${SMTP_FROM:-noreply@judiciary.go.ke}
+  #     APP_BASE_URL: ${APP_BASE_URL:-http://localhost:3000}
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #     redis:
+  #       condition: service_healthy
+  #     qdrant:
+  #       condition: service_healthy
+  #     # TODO: "ollama" is profile-gated (profiles: [gpu]/[cpu]) — depends_on
+  #     # here will error if this block is ever uncommented. Remove this
+  #     # dependency and rely on the "ollama" DNS alias instead (see the
+  #     # ollama-proxy/open-webui comments above).
+  #     ollama:
+  #       condition: service_healthy
+  #     mailhog:
+  #       condition: service_started
+  #   restart: unless-stopped
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+  #     interval: 15s
+  #     timeout: 5s
+  #     retries: 5
 
   # 9. Open WebUI (Web Interface for Ollama - Development)
+  # NOTE: depends_on "ollama" intentionally omitted — see the "ollama-proxy"
+  # comment above. OLLAMA_BASE_URL below still resolves via the "ollama"
+  # DNS alias at runtime regardless of which profile is active.
   open-webui:
     image: ghcr.io/open-webui/open-webui:main
     container_name: sheria-open-webui
@@ -244,7 +285,6 @@ services:
     volumes:
       - open-webui:/app/backend/data
     depends_on:
-      - ollama
       - postgres
       - qdrant
     extra_hosts:
@@ -260,80 +300,6 @@ services:
       - "8025:8025"   # Web UI — http://localhost:8025 to inspect emails
     restart: unless-stopped
 
-  # 6. Ollama (Local LLMs) server GPU support
-  ollama:
-    image: ollama/ollama
-    container_name: ollama
-    ports:
-      - "11433:11434"
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-    volumes:
-      - ollama:/root/.ollama
-      - ./entrypoint.sh:/entrypoint.sh:ro   # mount your script read-only
-    entrypoint: ["/bin/bash", "/entrypoint.sh"]
-    #TODO: Configure health checks
-    # override to run our script
-    # healthcheck:
-    #   test: ["CMD-SHELL", "timeout 5 bash -c 'echo > /dev/tcp/127.0.0.1/11434' || exit 1"]
-    #   interval: 10s
-    #   timeout: 5s
-    #   retries: 6
-    #   start_period: 30s
-
-  # 7. Open WebUI (Web interface for Ollama)
-  open-webui:
-    image: ghcr.io/open-webui/open-webui:main
-    container_name: open-webui
-    ports:
-      - "3000:8080"
-    environment:
-      # Ollama connection
-      OLLAMA_BASE_URL: http://ollama:11434
-
-      # Security
-      WEBUI_SECRET_KEY: ${WEBUI_SECRET_KEY:-change-me-to-random-string}
-
-      # Database (optional - uses SQLite by default, can use your Postgres)
-      # DATABASE_URL: postgresql://ragadmin:changeme@postgres:5432/rag_db
-
-      # Redis cache (optional - can leverage your existing Redis)
-      # REDIS_URL: redis://redis:6379/1
-
-      # Authentication
-      ENABLE_SIGNUP: ${ENABLE_SIGNUP:-true}
-      DEFAULT_USER_ROLE: ${DEFAULT_USER_ROLE:-user}
-
-      # RAG Configuration
-      ENABLE_RAG: ${ENABLE_RAG:-true}
-      RAG_EMBEDDING_ENGINE: ollama
-      RAG_EMBEDDING_MODEL: ${RAG_EMBEDDING_MODEL:-nomic-embed-text}
-
-      # Vector DB - Can integrate with your Qdrant if needed
-      # VECTOR_DB: qdrant
-      # QDRANT_URL: http://qdrant:6333
-
-      # Web Search (optional)
-      ENABLE_WEB_SEARCH: ${ENABLE_WEB_SEARCH:-false}
-
-      # UI Customization
-      WEBUI_NAME: ${WEBUI_NAME:-Sheria Platform Chat}
-
-      # CORS (for local dev)
-      CORS_ALLOW_ORIGIN: "*"
-
-    volumes:
-      - open-webui:/app/backend/data
-    depends_on:
-      - ollama
-    extra_hosts:
-      - host.docker.internal:host-gateway
-    restart: unless-stopped
 
 volumes:
   pg_data:
