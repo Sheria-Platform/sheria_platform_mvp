@@ -33,9 +33,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copy installed packages from builder stage
 COPY --from=builder /install /usr/local
 
-# Copy application source
-COPY services/ /app/services/
-COPY libs/ /app/libs/
+# Copy application source (owned by the non-root runtime user below —
+# otherwise `USER sheria` can't even read its own package files)
+COPY --chown=sheria:sheria services/ /app/services/
+COPY --chown=sheria:sheria libs/ /app/libs/
 
 # Ensure Python can find packages in /app
 ENV PYTHONPATH=/app
@@ -49,7 +50,7 @@ EXPOSE 8000
 
 # Health check matches docker-compose service healthcheck
 HEALTHCHECK --interval=15s --timeout=5s --retries=5 \
-    CMD curl -f http://localhost:8000/health || exit 1
+    CMD curl -f http://localhost:8000/health/liveness || exit 1
 
 # Production: Uvicorn with multiple workers
 CMD ["uvicorn", "services.api.main:app", \
