@@ -84,7 +84,7 @@ docker-compose ps
 The API needs two models: one for chat completions and one for embeddings.
 
 ```bash
-docker exec -it sheria-ollama ollama pull llama3.3
+docker exec -it sheria-ollama ollama pull qwen3:8b
 docker exec -it sheria-ollama ollama pull nomic-embed-text
 ```
 

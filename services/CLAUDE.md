@@ -125,4 +125,4 @@ State is defined in `agents/state.py` as `AgentState` (TypedDict). `messages` us
 
 ## Recent Architectural Change
 
-Ollama replaced Ray Serve for LLM inference and embeddings. If you see references to `ray_llm`, `ray_embed`, or `RayLLMClient`, they are outdated — the current implementations are `OllamaClient` and `OllamaEmbeddingsClient`. The Ollama service runs on port `11433` in Docker Compose (non-standard, to avoid conflicts).
+Ollama replaced Ray Serve for LLM inference and embeddings. If you see references to `ray_llm`, `ray_embed`, or `RayLLMClient`, they are outdated — the current implementations are `OllamaClient` and `OllamaEmbeddingsClient`. The Ollama service runs on the standard port `11434` in Docker Compose.
