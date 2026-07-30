@@ -168,11 +168,11 @@ services:
   # (profiles: [gpu]/[cpu] above) and this service is not — Compose errors if a
   # profile-agnostic service depends_on a service outside the active profile.
   # nginx reaches Ollama via the "ollama" DNS alias at runtime instead.
-  # Gated behind the "proxy" profile (opt-in only): ./nginx.conf does not
-  # exist at repo root, so this service fails to create if left ungated —
-  # it's for the separate deploy/local_dev/ multi-node cluster, not this
-  # single-node stack. Supply your own nginx.conf and run
-  # `docker compose --profile proxy up -d` if you need it here.
+  # Gated behind the "proxy" profile (opt-in only): ./nginx.conf proxies
+  # ports 11435-11437 to this stack's single `ollama` node (see the file's
+  # own header) — it's a thinner shim than deploy/local_dev/'s 3-node
+  # cluster balancer, for local testing against ingestion's remote-cluster
+  # port scheme. Run `docker compose --profile proxy up -d` to use it.
   ollama-proxy:
     image: nginx:alpine
     container_name: sheria-ollama-proxy
