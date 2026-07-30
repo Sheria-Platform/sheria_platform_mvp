@@ -168,12 +168,18 @@ mc mb local/case-files-dev
 OLLAMA_HOST=http://localhost:11434
 OLLAMA_PORT=11434
 OLLAMA_EMBED_MODEL=nomic-embed-text
-OLLAMA_LLM_MODEL=llama3
-OLLAMA_NUM_GPU=1          # 0 = CPU only, 1 = use GPU
+OLLAMA_LLM_MODEL=qwen3:8b
+COMPOSE_PROFILES=cpu     # "cpu" (default, no GPU) or "gpu" (requires nvidia-container-toolkit)
+OLLAMA_NUM_GPU=all       # only used when COMPOSE_PROFILES=gpu — GPU device count
 ```
 
+**GPU vs CPU:**
+- Default is CPU-only (`COMPOSE_PROFILES=cpu`) — works on any machine, no NVIDIA drivers required.
+- To use a GPU: set `COMPOSE_PROFILES=gpu` in `.env`, ensure `nvidia-container-toolkit` is installed on the Docker host, then run `make up` as usual — Compose reads `COMPOSE_PROFILES` from `.env` automatically, no `--profile` flag needed.
+- Do not rely on `OLLAMA_NUM_GPU=0` to "disable" GPU use — the old approach (setting the device `count` to 0 while still declaring `driver: nvidia` unconditionally) still required Docker to resolve the nvidia driver at container-creation time, and fails with `could not select device driver "" with capabilities: [[gpu]]` on machines without the NVIDIA Container Toolkit. `COMPOSE_PROFILES=cpu` avoids the device reservation being declared at all.
+
 **Access:**
-- **Docker service**: `ollama`
+- **Docker service**: `ollama` (DNS alias shared by both the `ollama`/gpu and `ollama-cpu`/cpu variants)
 - **API**: `curl http://localhost:11434/api/tags`
 - **Pull models**: `ollama pull nomic-embed-text`
 
@@ -182,8 +188,8 @@ OLLAMA_NUM_GPU=1          # 0 = CPU only, 1 = use GPU
 # Embedding model (required for ingestion)
 ollama pull nomic-embed-text
 
-# LLM for graph extraction (required for ingestion)
-ollama pull llama3
+# LLM for graph extraction (required for ingestion; shared with services/api)
+ollama pull qwen3:8b
 
 # Optional: Better embeddings
 ollama pull mxbai-embed-large
@@ -199,7 +205,7 @@ ollama pull llama3.1
 **Purpose:** Web interface for testing legal research, prototype judge interface
 
 ```bash
-OPEN_WEBUI_PORT=3000
+OPEN_WEBUI_PORT=3030
 WEBUI_SECRET_KEY=...      # Generate with: openssl rand -base64 32
 ENABLE_SIGNUP=true
 DEFAULT_USER_ROLE=user
@@ -213,7 +219,7 @@ WEBUI_AUTH=true
 
 **Access:**
 - **Docker service**: `open-webui`
-- **Web UI**: http://localhost:3000
+- **Web UI**: http://localhost:3030
 - **First login**: Create admin account on first visit
 
 ---

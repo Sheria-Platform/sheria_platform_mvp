@@ -1,6 +1,35 @@
 # docker-compose.yml
 version: '3.8'
 
+# GPU/CPU Ollama variants share these blocks via YAML anchors (see deploy/local_dev
+# for the multi-node version of this same pattern).
+x-ollama-base: &ollama-base
+  image: ollama/ollama:latest
+  ports:
+    - "${OLLAMA_PORT:-11434}:11434"
+  volumes:
+    - ollama:/root/.ollama
+  restart: unless-stopped
+  # ollama/ollama ships no curl/wget — bash's /dev/tcp is the only HTTP-probe
+  # tool actually present, hence the raw TCP check below.
+  healthcheck:
+    test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/localhost/11434' || exit 1"]
+    interval: 30s
+    timeout: 10s
+    retries: 3
+
+# GPU device reservation — merged only into the gpu-profile service.
+# capabilities MUST be [gpu] (previous [cpu] was a copy-paste bug that made
+# the nvidia device reservation meaningless).
+x-gpu-resources: &gpu-resources
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - driver: nvidia
+            count: ${OLLAMA_NUM_GPU:-all}
+            capabilities: [gpu]
+
 services:
   # 1. Postgres (Case Metadata & Judicial Decisions)
   postgres:
@@ -46,8 +75,10 @@ services:
     volumes:
       - qdrant_data:/qdrant/storage
     restart: unless-stopped
+    # The qdrant/qdrant image ships no curl/wget — bash's /dev/tcp is the
+    # only HTTP-probe tool actually present, hence the raw TCP check below.
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:6333/healthz || exit 1"]
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/localhost/6333' || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -107,32 +138,45 @@ services:
       retries: 3
 
   # 6. Ollama (Local LLM for Embeddings, Graph Extraction & API Inference)
+  # Profile-gated: exactly one of these two runs, selected by COMPOSE_PROFILES
+  # (cpu|gpu) in .env. Both share container_name + the "ollama" DNS alias so
+  # dependents can always reach it at http://ollama:11434 regardless of which
+  # profile is active. The gpu variant is the ONLY place the nvidia driver is
+  # referenced — with COMPOSE_PROFILES=cpu (the default) the nvidia driver is
+  # never resolved, so this works on machines without nvidia-container-toolkit.
   ollama:
-    image: ollama/ollama:latest
+    <<:
+      - *ollama-base
+      - *gpu-resources
     container_name: sheria-ollama
-    ports:
-      - "${OLLAMA_PORT:-11434}:11434"
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: ${OLLAMA_NUM_GPU:-1}
-              capabilities: [gpu]
-    volumes:
-      - ollama:/root/.ollama
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:11434/api/tags || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+    profiles: [gpu]
+    networks:
+      default:
+        aliases: [ollama]
+
+  ollama-cpu:
+    <<: *ollama-base
+    container_name: sheria-ollama
+    profiles: [cpu]
+    networks:
+      default:
+        aliases: [ollama]
 
   # 7. Ollama Nginx Proxy (Load Balancer for Remote Ollama Cluster)
   # Used by pipelines/ingestion/ which targets separate remote endpoints
+  # NOTE: depends_on "ollama" intentionally omitted. "ollama" is profile-gated
+  # (profiles: [gpu]/[cpu] above) and this service is not — Compose errors if a
+  # profile-agnostic service depends_on a service outside the active profile.
+  # nginx reaches Ollama via the "ollama" DNS alias at runtime instead.
+  # Gated behind the "proxy" profile (opt-in only): ./nginx.conf proxies
+  # ports 11435-11437 to this stack's single `ollama` node (see the file's
+  # own header) — it's a thinner shim than deploy/local_dev/'s 3-node
+  # cluster balancer, for local testing against ingestion's remote-cluster
+  # port scheme. Run `docker compose --profile proxy up -d` to use it.
   ollama-proxy:
     image: nginx:alpine
     container_name: sheria-ollama-proxy
+    profiles: [proxy]
     restart: unless-stopped
     ports:
       - "11435:11435"  # LLM endpoint
@@ -141,8 +185,6 @@ services:
       - "8081:8080"    # Status/health endpoint (changed to 8081 to avoid conflict)
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
-    depends_on:
-      - ollama
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8080/health || exit 1"]
       interval: 30s
@@ -175,9 +217,14 @@ services:
       NEO4J_PASSWORD: ${NEO4J_PASSWORD:-password}
       # Ollama (replaces Ray Serve endpoints)
       OLLAMA_BASE_URL: http://ollama:11434
-      OLLAMA_LLM_MODEL: ${OLLAMA_LLM_MODEL:-llama3.3}
+      OLLAMA_LLM_MODEL: ${OLLAMA_LLM_MODEL:-qwen3:8b}
       OLLAMA_EMBEDDING_MODEL: ${OLLAMA_EMBEDDING_MODEL:-nomic-embed-text}
       OLLAMA_TIMEOUT: ${OLLAMA_TIMEOUT:-60}
+      # MinIO (routes/profile.py avatar upload; readiness probe)
+      MINIO_SERVER_URL: http://minio:9000
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      S3_BUCKET_NAME: ${S3_BUCKET_NAME:-case-files-dev}
       # Security
       JWT_SECRET_KEY: ${JWT_SECRET_KEY}
       JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
@@ -198,18 +245,25 @@ services:
         condition: service_healthy
       qdrant:
         condition: service_healthy
-      ollama:
+      minio:
         condition: service_healthy
       mailhog:
         condition: service_started
+    # "ollama" is profile-gated (profiles: [gpu]/[cpu]); a non-profiled
+    # service can't depends_on it directly, so it's intentionally omitted
+    # here (matches the ollama-proxy/open-webui services below) — the API
+    # still reaches it via the "ollama" DNS alias at runtime.
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health/liveness || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 5
 
   # 9. Open WebUI (Web Interface for Ollama - Development)
+  # NOTE: depends_on "ollama" intentionally omitted — see the "ollama-proxy"
+  # comment above. OLLAMA_BASE_URL below still resolves via the "ollama"
+  # DNS alias at runtime regardless of which profile is active.
   open-webui:
     image: ghcr.io/open-webui/open-webui:main
     container_name: sheria-open-webui
@@ -234,7 +288,10 @@ services:
       RAG_EMBEDDING_MODEL: ${RAG_EMBEDDING_MODEL:-nomic-embed-text}
       # Vector DB
       VECTOR_DB: qdrant
-      QDRANT_URL: http://qdrant:6333
+      # Renamed from QDRANT_URL: the open-webui `main` image now reads
+      # QDRANT_URI (confirmed via its qdrant_multitenancy client raising
+      # "QDRANT_URI is not set" at startup with the old name).
+      QDRANT_URI: http://qdrant:6333
       # Web Search
       ENABLE_WEB_SEARCH: ${ENABLE_WEB_SEARCH:-false}
       # UI Customization
@@ -244,7 +301,6 @@ services:
     volumes:
       - open-webui:/app/backend/data
     depends_on:
-      - ollama
       - postgres
       - qdrant
     extra_hosts:
@@ -260,80 +316,33 @@ services:
       - "8025:8025"   # Web UI — http://localhost:8025 to inspect emails
     restart: unless-stopped
 
-  # 6. Ollama (Local LLMs) server GPU support
-  ollama:
-    image: ollama/ollama
-    container_name: ollama
+  # 11. Sheria UI (Next.js Frontend — dev mode with hot reload)
+  # NEXT_PUBLIC_API_URL is read by *browser*-side code (baked into the JS
+  # bundle) so it must be a host-reachable URL, not the "sheria-api" Docker
+  # DNS name — the browser runs on the host, outside this network. API_URL
+  # (no NEXT_PUBLIC_ prefix) is read by the Next.js server's own route
+  # handlers (app/api/proxy/*, app/api/auth/*), which run inside the
+  # container and do need the Docker DNS name.
+  sheria-ui:
+    build:
+      context: ./user_interface
+      dockerfile: Dockerfile
+    container_name: sheria-ui
     ports:
-      - "11433:11434"
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-    volumes:
-      - ollama:/root/.ollama
-      - ./entrypoint.sh:/entrypoint.sh:ro   # mount your script read-only
-    entrypoint: ["/bin/bash", "/entrypoint.sh"]
-    #TODO: Configure health checks
-    # override to run our script
-    # healthcheck:
-    #   test: ["CMD-SHELL", "timeout 5 bash -c 'echo > /dev/tcp/127.0.0.1/11434' || exit 1"]
-    #   interval: 10s
-    #   timeout: 5s
-    #   retries: 6
-    #   start_period: 30s
-
-  # 7. Open WebUI (Web interface for Ollama)
-  open-webui:
-    image: ghcr.io/open-webui/open-webui:main
-    container_name: open-webui
-    ports:
-      - "3000:8080"
+      - "${UI_PORT:-3000}:3000"
     environment:
-      # Ollama connection
-      OLLAMA_BASE_URL: http://ollama:11434
-
-      # Security
-      WEBUI_SECRET_KEY: ${WEBUI_SECRET_KEY:-change-me-to-random-string}
-
-      # Database (optional - uses SQLite by default, can use your Postgres)
-      # DATABASE_URL: postgresql://ragadmin:changeme@postgres:5432/rag_db
-
-      # Redis cache (optional - can leverage your existing Redis)
-      # REDIS_URL: redis://redis:6379/1
-
-      # Authentication
-      ENABLE_SIGNUP: ${ENABLE_SIGNUP:-true}
-      DEFAULT_USER_ROLE: ${DEFAULT_USER_ROLE:-user}
-
-      # RAG Configuration
-      ENABLE_RAG: ${ENABLE_RAG:-true}
-      RAG_EMBEDDING_ENGINE: ollama
-      RAG_EMBEDDING_MODEL: ${RAG_EMBEDDING_MODEL:-nomic-embed-text}
-
-      # Vector DB - Can integrate with your Qdrant if needed
-      # VECTOR_DB: qdrant
-      # QDRANT_URL: http://qdrant:6333
-
-      # Web Search (optional)
-      ENABLE_WEB_SEARCH: ${ENABLE_WEB_SEARCH:-false}
-
-      # UI Customization
-      WEBUI_NAME: ${WEBUI_NAME:-Sheria Platform Chat}
-
-      # CORS (for local dev)
-      CORS_ALLOW_ORIGIN: "*"
-
+      NODE_ENV: development
+      API_URL: http://sheria-api:8000
+      NEXT_PUBLIC_API_URL: http://localhost:${API_PORT:-8000}
     volumes:
-      - open-webui:/app/backend/data
+      - ./user_interface:/app
+      - /app/node_modules
+      - /app/.next
     depends_on:
-      - ollama
-    extra_hosts:
-      - host.docker.internal:host-gateway
+      sheria-api:
+        condition: service_healthy
     restart: unless-stopped
+
 
 volumes:
   pg_data:

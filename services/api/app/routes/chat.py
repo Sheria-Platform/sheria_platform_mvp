@@ -162,7 +162,9 @@ async def chat_stream(
                 )
                 background_tasks.add_task(memory.add_message, session_id, "user", req.message, user_id)
                 background_tasks.add_task(memory.add_message, session_id, "assistant", final_answer, user_id)
-                background_tasks.add_task(cache.set_cached_response, req.message, final_answer)
+                background_tasks.add_task(
+                    cache.set_cached_response, req.message, final_answer, vector=query_vector
+                )
 
             yield json.dumps({"event": "done", "session_id": session_id}) + "\n"
 

@@ -78,9 +78,9 @@ The `docker-compose.yml` defines a complete local development environment with 7
 - **Database**: `rag_db` → Consider renaming to `sheria_judicial_db`
 
 ### 2. Redis (Port 6379)
-- **Purpose**: Semantic cache for legal research queries
-- **Judicial Use**: Cache frequently searched case law, reduce API costs
-- **Example**: "adverse possession test Kenya" cached for 24 hours
+- **Purpose**: JWT blacklist for immediate token revocation on logout; used by the `/health` readiness probe
+- **Judicial Use**: Invalidate a judge/registrar session immediately on logout, independent of JWT expiry
+- **Note**: The semantic cache for legal research queries is backed by Qdrant only (`semantic_cache` collection, 30-day max age), not Redis
 
 ### 3. Qdrant (Ports 6333, 6334)
 - **Purpose**: Vector database for case law embeddings
@@ -97,15 +97,15 @@ The `docker-compose.yml` defines a complete local development environment with 7
 - **Judicial Use**: Store original PDFs (judgments, pleadings, exhibits)
 - **Buckets**: `court-records-dev`, `kenya-law-reports`, `case-files`
 
-### 6. Ollama (Port 11433)
+### 6. Ollama (Port 11434)
 - **Purpose**: Local LLM for development/testing
 - **Judicial Use**: Fine-tune on Kenya Law Reports, test legal reasoning locally
 - **Models**: Pull legal-specialized models or fine-tune Llama-3 on case law
 
-### 7. Open WebUI (Port 3000)
+### 7. Open WebUI (Port 3030)
 - **Purpose**: Web interface for testing legal research queries
 - **Judicial Use**: Prototype judge interface, test conversational legal research
-- **URL**: http://localhost:3000
+- **URL**: http://localhost:3030
 - **Configuration**: RAG enabled, can integrate with Qdrant for case law search
 - **Purpose**: Chat history and metadata storage
 - **Image**: `postgres:15-alpine`
@@ -113,9 +113,9 @@ The `docker-compose.yml` defines a complete local development environment with 7
 - **Database**: `rag_db`
 
 ### 2. Redis (Port 6379)
-- **Purpose**: Caching frequently accessed data and semantic cache
+- **Purpose**: JWT blacklist and readiness health checks (the semantic cache itself is Qdrant-only)
 - **Image**: `redis:7-alpine`
-- **Used by**: API service for semantic query caching
+- **Used by**: `app/auth/blacklist.py` (token revocation) and `app/routes/health.py` (readiness probe)
 
 ### 3. Qdrant (Ports 6333, 6334)
 - **Purpose**: Vector database for embeddings (semantic search)
@@ -136,16 +136,16 @@ The `docker-compose.yml` defines a complete local development environment with 7
 - **API**: http://localhost:9000
 - **Note**: Caching enabled, excludes *.pdf from cache
 
-### 6. Ollama (Port 11433)
+### 6. Ollama (Port 11434)
 - **Purpose**: Local LLM inference server with GPU support
 - **Image**: `ollama/ollama`
 - **GPU**: Requires NVIDIA GPU with nvidia-container-toolkit
 - **Usage**: Pull models with `docker exec -it ollama ollama pull llama3`
 
-### 7. Open WebUI (Port 3000)
+### 7. Open WebUI (Port 3030)
 - **Purpose**: Web interface for interacting with Ollama models
 - **Image**: `ghcr.io/open-webui/open-webui:main`
-- **URL**: http://localhost:3000
+- **URL**: http://localhost:3030
 - **Features**: RAG support, web search (optional), multi-user auth
 - **Integration**: Can optionally use project's Postgres, Redis, and Qdrant
 
@@ -347,7 +347,7 @@ All database/service clients are initialized in `services/api/main.py` lifespan 
 - Ray Embedding client (`clients/ray_embed.py`) - Legal text embeddings
 - Qdrant client (`clients/qdrant.py`) - Kenya Law Reports vector search
 - Neo4j client (`clients/neo4j.py`) - Citation graph queries
-- Redis client (`cache/redis.py`) - Semantic cache for legal queries
+- Redis client (`cache/redis.py`) - JWT blacklist and health checks (semantic cache is Qdrant-only)
 
 ### API Routes (Judicial-Specific)
 
@@ -387,7 +387,7 @@ All database/service clients are initialized in `services/api/main.py` lifespan 
 - Ray Embedding client (`clients/ray_embed.py`)
 - Qdrant client (`clients/qdrant.py`)
 - Neo4j client (`clients/neo4j.py`)
-- Redis client (`cache/redis.py`)
+- Redis client (`cache/redis.py`) - JWT blacklist and health checks (semantic cache is Qdrant-only)
 
 ### API Routes
 
@@ -413,7 +413,7 @@ Copy `.env.example` to `.env` and configure:
 ### Core Settings
 - **JWT_SECRET_KEY**: Used for JWT token authentication (judges, court staff)
 - **DATABASE_URL**: PostgreSQL connection for case metadata
-- **REDIS_URL**: Redis cache for semantic legal queries
+- **REDIS_URL**: Redis connection for JWT blacklist and health checks (the semantic cache runs on Qdrant only)
 
 ### Vector & Graph Databases
 - **QDRANT_HOST/PORT/COLLECTION**: Kenya Law Reports vector DB
@@ -496,7 +496,7 @@ Utility scripts in `scripts/`:
 - `bulk_upload_judgments.py` - Bulk upload Kenya Law Reports to MinIO
 - `migrate_db.py` - Run database migrations for judicial schema
 - `load_test_legal_research.py` - Performance load testing for legal queries
-- `warmup_cache.py` - Pre-populate semantic cache with common legal queries
+- `warmup_cache.py` - **Removed** (deleted during the Ray→Ollama migration); no FAQ cache-warmup script currently exists in `scripts/`
 - `cleanup.sh` - Clean up resources
 
 Example/Test scripts:
@@ -506,7 +506,7 @@ Example/Test scripts:
 - `bulk_upload_s3.py` - Bulk upload documents to S3/MinIO
 - `migrate_db.py` - Run database migrations
 - `load_test.py` - Performance load testing
-- `warmup_cache.py` - Pre-populate semantic cache
+- `warmup_cache.py` - **Removed** (deleted during the Ray→Ollama migration); no FAQ cache-warmup script currently exists in `scripts/`
 - `cleanup.sh` - Clean up resources
 
 Example/Test scripts:
@@ -612,7 +612,7 @@ curl http://localhost:8000/health
 Terraform configurations in `infra/terraform/` for AWS resources:
 - EKS cluster (Kubernetes for Sheria services)
 - Aurora Postgres (case metadata, judicial decisions)
-- ElastiCache Redis (semantic cache)
+- ElastiCache Redis (JWT blacklist, health checks — not the semantic cache, which is Qdrant-only)
 - S3 buckets (`sheria-court-records`, `kenya-law-reports`)
 - VPC with Judiciary-approved security groups
 - IAM roles with least-privilege access

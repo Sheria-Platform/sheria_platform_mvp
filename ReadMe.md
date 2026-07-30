@@ -1,4 +1,4 @@
-![Sheria Platform Logo](user_interface/public/sheria-logo.svg)
+<img src="user_interface/public/sheria-logo.svg" alt="sheriaLogo" width="300" height="200" >
 
 # Sheria Platform
 
@@ -6,7 +6,7 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.111-009688.svg)](https://fastapi.tiangolo.com/)
 [![LangGraph](https://img.shields.io/badge/LangGraph-agentic--RAG-orange.svg)](https://langchain-ai.github.io/langgraph/)
 [![Next.js](https://img.shields.io/badge/Next.js-16-black.svg)](https://nextjs.org/)
-[![Ollama](https://img.shields.io/badge/Ollama-llama3.3-black.svg)](https://ollama.ai/)
+[![Ollama](https://img.shields.io/badge/Ollama-qwen3%3A8b-black.svg)](https://ollama.ai/)
 [![Docker](https://img.shields.io/badge/Docker-Compose-2496ED.svg)](https://www.docker.com/)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
@@ -42,7 +42,7 @@ predictive analytics for judges, magistrates, registrars, and court staff.
 ## About
 
 Sheria Platform combines vector semantic search (Qdrant), citation graph traversal (Neo4j), and
-large language model reasoning (Ollama / llama3.3) inside a LangGraph agentic pipeline
+large language model reasoning (Ollama / qwen3:8b) inside a LangGraph agentic pipeline
 orchestrated by FastAPI. A Next.js frontend delivers a streaming chat interface for legal research
 alongside document upload, conversation history, ingestion job monitoring, and an admin panel.
 
@@ -71,8 +71,8 @@ optimization (endpoints wired; ML model integration in progress).
 |---------------------|----------------------------------------------|-----------|
 | API Framework       | FastAPI                                      | 0.111     |
 | Agent Orchestration | LangGraph                                    | Latest    |
-| LLM Inference       | Ollama + llama3.3                            | Latest    |
-| Embedding Model     | nomic-embed-text (2560-dim)                  | Latest    |
+| LLM Inference       | Ollama + qwen3:8b                            | Latest    |
+| Embedding Model     | nomic-embed-text (768-dim)                   | Latest    |
 | Vector DB           | Qdrant                                       | v1.7.3    |
 | Graph DB            | Neo4j Community                              | 5.16.0    |
 | Relational DB       | PostgreSQL + asyncpg + SQLAlchemy            | 15        |
@@ -116,7 +116,7 @@ optimization (endpoints wired; ML model integration in progress).
 |   |                       |                                     |   |
 |   |          +------------v-----------+                         |   |
 |   |          |  Semantic Cache        |--- HIT -------------+   |   |
-|   |          |  (Qdrant + Redis)      |                     |   |   |
+|   |          |  (Qdrant-only)         |                     |   |   |
 |   |          +------------+-----------+                     |   |   |
 |   |                       | MISS                            |   |   |
 |   |          +------------v-----------+                     |   |   |
@@ -133,8 +133,8 @@ optimization (endpoints wired; ML model integration in progress).
 |  DATA STORES    |  |  AI ENGINE   |  |  STORAGE / CACHE |
 |                 |  |              |  |                  |
 |  PostgreSQL     |  |  Ollama      |  |  MinIO  (9000)   |
-|  (5432)         |  |  (11433)     |  |  Redis  (6379)   |
-|  Qdrant         |  |  llama3.3    |  +------------------+
+|  (5432)         |  |  (11434)     |  |  Redis  (6379)   |
+|  Qdrant         |  |  qwen3:8b    |  +------------------+
 |  (6333/6334)    |  |  nomic-embed |
 |  Neo4j          |  +--------------+
 |  (7474/7687)    |
@@ -170,7 +170,7 @@ Semantic Cache Check  (Qdrant cosine > 0.95, TTL 30 days)
           +-- "tool_use"      --> Tool Node --> Responder Node
                                        |
                                        v
-                                 Responder Node  (llama3.3, temperature=0.3)
+                                 Responder Node  (qwen3:8b, temperature=0.3)
                                  IRAC prompt -> stream NDJSON tokens
                                        |
                                        v
@@ -229,7 +229,7 @@ JWT_SECRET_KEY=<generated-value>
 DATABASE_URL=postgresql://postgres:postgres@localhost:5432/sheria_judicial_db
 REDIS_URL=redis://localhost:6379/0
 QDRANT_HOST=localhost
-OLLAMA_BASE_URL=http://localhost:11433
+OLLAMA_BASE_URL=http://localhost:11434
 ```
 
 See [ENV_CONFIG_GUIDE.md](ENV_CONFIG_GUIDE.md) for the full variable reference.
@@ -246,14 +246,18 @@ docker ps
 ### Step 4 — Pull Ollama models
 
 ```bash
-docker exec sheria-ollama ollama pull llama3.3
+docker exec sheria-ollama ollama pull qwen3:8b
 docker exec sheria-ollama ollama pull nomic-embed-text
 
 # Alternatively, use the helper script
 bash scripts/setup_ollama_models.sh
 ```
 
-### Step 5 — Start the frontend
+### Step 5 — Frontend
+
+`sheria-ui` is one of the containers Step 3 already started (source is bind-mounted for
+hot reload, so edits on the host apply without rebuilding) — open http://localhost:3000.
+To run it outside Docker instead (e.g. `docker compose stop sheria-ui` first, to free the port):
 
 ```bash
 cd user_interface
@@ -324,15 +328,15 @@ All services start with `docker compose up -d`.
 | Service        | Port(s)       | Purpose                                    |
 |----------------|---------------|--------------------------------------------|
 | sheria-api     | 8000          | FastAPI orchestrator                       |
-| Frontend       | 3000          | Next.js interface (npm run dev)            |
+| sheria-ui      | 3000          | Next.js interface (hot reload via bind mount) |
 | PostgreSQL     | 5432          | User accounts, chat history, ingestion jobs|
-| Redis          | 6379          | Semantic cache backing store               |
+| Redis          | 6379          | JWT blacklist (logout/revocation) + health checks |
 | Qdrant         | 6333 / 6334   | Vector search (REST / gRPC)                |
 | Neo4j Browser  | 7474          | Graph database UI                          |
 | Neo4j Bolt     | 7687          | Graph database driver connection           |
 | MinIO API      | 9000          | Object storage API                         |
 | MinIO Console  | 9001          | Storage management UI                      |
-| Ollama         | 11433         | LLM and embedding inference                |
+| Ollama         | 11434         | LLM and embedding inference                |
 | Ollama Proxy   | 11435 / 11436 | Nginx load balancer for Ollama cluster     |
 | Open WebUI     | 3030          | Ollama web interface (dev/testing)         |
 | MailHog SMTP   | 1025          | SMTP server for activation emails          |
@@ -437,8 +441,8 @@ Qdrant (vector search) and Neo4j (citation graph).
 
 | Collection          | Dimensions | Distance | Purpose                           |
 |---------------------|------------|----------|-----------------------------------|
-| `kenya_law_reports` | 2560       | Cosine   | Kenya Law Reports semantic search |
-| `semantic_cache`    | 2560       | Cosine   | Q&A pair cache (30-day TTL)       |
+| `kenya_law_reports` | 768        | Cosine   | Kenya Law Reports semantic search |
+| `semantic_cache`    | 768        | Cosine   | Q&A pair cache (30-day max age)   |
 
 ### Neo4j Graph Schema
 
@@ -481,8 +485,8 @@ error         TEXT
 | `NEO4J_URI`          | `bolt://localhost:7687`    | Neo4j Bolt URI                            |
 | `NEO4J_USER`         | `neo4j`                    | Neo4j username                            |
 | `NEO4J_PASSWORD`     | —                          | Neo4j password                            |
-| `OLLAMA_BASE_URL`    | `http://localhost:11433`   | Ollama API base URL                       |
-| `OLLAMA_LLM_MODEL`   | `llama3.3`                 | LLM model name                            |
+| `OLLAMA_BASE_URL`    | `http://localhost:11434`   | Ollama API base URL                       |
+| `OLLAMA_LLM_MODEL`   | `qwen3:8b`                 | LLM model name                            |
 | `OLLAMA_EMBED_MODEL` | `nomic-embed-text`         | Embedding model name                      |
 | `SMTP_HOST`          | `localhost`                | SMTP server (MailHog in dev)              |
 | `SMTP_PORT`          | `1025`                     | SMTP port                                 |
@@ -502,7 +506,7 @@ Prometheus metrics exposed at `GET /metrics`:
 |---------------------------------------|-----------|-----------------------------------------|
 | `sheria_api_requests_total`           | Counter   | HTTP requests by method / path / status |
 | `sheria_api_request_duration_seconds` | Histogram | HTTP request latency                    |
-| `sheria_cache_hits_total`             | Counter   | Semantic cache hits                     |
+| `rag_semantic_cache_total{result}`    | Counter   | Semantic cache hit/miss counts (`result="hit"\|"miss"`) |
 | `sheria_agent_node_duration_seconds`  | Histogram | Per-node agent execution time           |
 | `sheria_retrieval_docs_count`         | Histogram | Retrieved documents per query           |
 
@@ -525,7 +529,7 @@ sheria_platform_mvp/
 |   |   |   |   |-- state.py         # AgentState TypedDict
 |   |   |   |   `-- decorators.py    # @node_timer context manager
 |   |   |   |-- auth/                # JWT utilities, RBAC, token blacklist
-|   |   |   |-- cache/               # Semantic cache (Qdrant + Redis)
+|   |   |   |-- cache/               # Semantic cache (Qdrant-only) + Redis client (JWT blacklist)
 |   |   |   |-- clients/             # Ollama LLM/embed, Qdrant gRPC, Neo4j, async Postgres
 |   |   |   |-- enhancers/           # Query rewriter for improved retrieval
 |   |   |   |-- memory/              # SQLAlchemy ORM models + repositories
