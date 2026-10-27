@@ -12,8 +12,10 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
-      <body>{children}</body>
+    // Browser extensions (dark mode, translate, etc.) inject attributes onto
+    // <html>/<body> before hydration; suppress only those attribute mismatches.
+    <html lang="en" suppressHydrationWarning>
+      <body suppressHydrationWarning>{children}</body>
     </html>
   );
 }
