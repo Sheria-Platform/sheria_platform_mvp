@@ -9,6 +9,12 @@ const ACCEPTED = {
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document": [".docx"],
   "text/html": [".html"],
   "text/plain": [".txt"],
+  // Images are OCR'd with Tesseract on the ingestion side
+  "image/png": [".png"],
+  "image/jpeg": [".jpg", ".jpeg"],
+  "image/tiff": [".tif", ".tiff"],
+  "image/bmp": [".bmp"],
+  "image/webp": [".webp"],
 };
 
 interface DropZoneProps {
@@ -41,7 +47,7 @@ export function DropZone({ onDrop, disabled }: DropZoneProps) {
         {isDragActive ? "Drop files here" : "Drag & drop court documents here"}
       </p>
       <p className="text-xs text-gray-400 mt-1">
-        PDF, DOCX, HTML, TXT — up to 50 MB each
+        PDF, DOCX, HTML, TXT, scanned images (PNG, JPG, TIFF) — up to 50 MB each
       </p>
     </div>
   );

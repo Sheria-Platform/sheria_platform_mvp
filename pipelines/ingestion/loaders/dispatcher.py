@@ -12,13 +12,29 @@ from collections.abc import Callable
 
 from pipelines.ingestion.loaders.docx_loader import parse_docx_bytes
 from pipelines.ingestion.loaders.html_loader import parse_html_bytes
+from pipelines.ingestion.loaders.image_loader import parse_image_bytes
 from pipelines.ingestion.loaders.pdf_loader import parse_pdf_bytes
 from pipelines.ingestion.loaders.txt_loader import parse_txt_bytes
 
 logger = logging.getLogger(__name__)
 
 # All file extensions the pipeline will accept from MinIO
-SUPPORTED_EXTENSIONS = frozenset([".pdf", ".docx", ".html", ".htm", ".txt"])
+SUPPORTED_EXTENSIONS = frozenset(
+    [
+        ".pdf",
+        ".docx",
+        ".html",
+        ".htm",
+        ".txt",
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".tif",
+        ".tiff",
+        ".bmp",
+        ".webp",
+    ]
+)
 
 _LOADER_MAP: dict[str, Callable] = {
     ".pdf": parse_pdf_bytes,
@@ -26,6 +42,14 @@ _LOADER_MAP: dict[str, Callable] = {
     ".html": parse_html_bytes,
     ".htm": parse_html_bytes,  # alias — same parser
     ".txt": parse_txt_bytes,
+    # Images go through Tesseract OCR; every extension shares one parser
+    ".png": parse_image_bytes,
+    ".jpg": parse_image_bytes,
+    ".jpeg": parse_image_bytes,
+    ".tif": parse_image_bytes,
+    ".tiff": parse_image_bytes,
+    ".bmp": parse_image_bytes,
+    ".webp": parse_image_bytes,
 }
 
 
